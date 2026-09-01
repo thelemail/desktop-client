@@ -86,13 +86,14 @@ pub async fn keystore_attachment_bytes(
             .ok()
             .flatten();
         if let Some(bytes) = cached
-            && let Ok((header, payload)) = attframe::parse(&bytes) {
-                return Ok(AttachmentBytesResponse::Ok {
-                    ok: true,
-                    header,
-                    payload,
-                });
-            }
+            && let Ok((header, payload)) = attframe::parse(&bytes)
+        {
+            return Ok(AttachmentBytesResponse::Ok {
+                ok: true,
+                header,
+                payload,
+            });
+        }
     }
 
     let plain = match fetch_and_decrypt(&net, &ks, &args.account_id, &args.url).await {

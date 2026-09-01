@@ -425,13 +425,8 @@ pub struct OpaqueCompleteRecoveryUnlockArgs {
 #[derive(Debug, Serialize)]
 #[serde(untagged)]
 pub enum PlainOkResponse {
-    Ok {
-        ok: bool,
-    },
-    Err {
-        ok: bool,
-        code: &'static str,
-    },
+    Ok { ok: bool },
+    Err { ok: bool, code: &'static str },
 }
 
 impl PlainOkResponse {

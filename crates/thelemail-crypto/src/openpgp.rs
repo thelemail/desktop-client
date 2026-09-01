@@ -326,7 +326,8 @@ fn read_packet_header(buf: &[u8], at: usize) -> Result<PacketHeader, PgpError> {
 }
 
 pub fn public_key_fingerprint_hex(armored: &str) -> Result<String, PgpError> {
-    let (key, _) = SignedPublicKey::from_string(armored).map_err(|_| PgpError::InvalidRecipientKey)?;
+    let (key, _) =
+        SignedPublicKey::from_string(armored).map_err(|_| PgpError::InvalidRecipientKey)?;
     Ok(hex_encode(key.fingerprint().as_bytes()))
 }
 

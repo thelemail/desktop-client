@@ -2,6 +2,8 @@ use std::collections::HashMap;
 use std::sync::Mutex;
 
 use base64::Engine as _;
+use rand::RngCore;
+use rand::rngs::OsRng;
 use thelemail_crypto::amk::{
     Amk, derive_master_key_id, derive_pgp_passphrase, unwrap_master_key, wrap_master_key,
 };
@@ -9,8 +11,6 @@ use thelemail_crypto::opaque::{
     LoginState, RegistrationState, finish_login, finish_registration, start_login,
     start_registration,
 };
-use rand::RngCore;
-use rand::rngs::OsRng;
 use thelemail_crypto::openpgp::{
     UnlockedKey, generate_account_key, generate_alias_key, public_key_fingerprint_hex,
 };
@@ -684,7 +684,11 @@ impl Keystore {
         RewrapResponse::Ok {
             ok: true,
             opaque_record: b64_std().encode(&finished.record),
-            wrapped_master_key: b64_std().encode(wrap_master_key(&finished.export_key, &amk, false)),
+            wrapped_master_key: b64_std().encode(wrap_master_key(
+                &finished.export_key,
+                &amk,
+                false,
+            )),
             master_key_id: b64_std().encode(derive_master_key_id(&amk)),
             opaque_params_version: 1,
         }
@@ -780,7 +784,8 @@ impl Keystore {
             return RewrapResponse::err("no_pending_operation");
         };
 
-        let wrapped_master_key = b64_std().encode(wrap_master_key(&finished.export_key, &amk, false));
+        let wrapped_master_key =
+            b64_std().encode(wrap_master_key(&finished.export_key, &amk, false));
         let master_key_id = b64_std().encode(derive_master_key_id(&amk));
 
         self.pending_reg

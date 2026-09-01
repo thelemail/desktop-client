@@ -252,10 +252,7 @@ fn the_inbox_listing_separates_sent_copies_from_received_ones() {
     let key = generate_db_key();
     let conn = open_account_db(&path, &key, ACCOUNT).expect("open");
 
-    for (id, direction, subject) in [
-        ("m1", "received", "From Alice"),
-        ("m2", "sent", "To Alice"),
-    ] {
+    for (id, direction, subject) in [("m1", "received", "From Alice"), ("m2", "sent", "To Alice")] {
         conn.execute(
             "INSERT INTO messages (id, direction, mailbox_state, stored_at, subject, \
              sender_display, sender_address, snippet, synced_at) \
@@ -266,7 +263,11 @@ fn the_inbox_listing_separates_sent_copies_from_received_ones() {
     }
 
     let received = list_mailbox(&conn, "inbox", Some("received"), 50).expect("list");
-    assert_eq!(received.len(), 1, "a sent copy must not show up in the inbox");
+    assert_eq!(
+        received.len(),
+        1,
+        "a sent copy must not show up in the inbox"
+    );
     assert_eq!(received[0].subject, "From Alice");
 
     let sent = list_mailbox(&conn, "inbox", Some("sent"), 50).expect("list");
