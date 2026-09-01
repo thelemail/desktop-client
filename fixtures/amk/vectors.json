@@ -1,0 +1,101 @@
+{
+	"source": "web-client/src/lib/keystore/opaque-params.ts",
+	"vectors": [
+		{
+			"exportKey": "000d1a2734414e5b6875828f9ca9b6c3d0ddeaf704111e2b3845525f6c798693",
+			"amk": "00070e151c232a31383f464d545b626970777e858c939aa1a8afb6bdc4cbd2d9",
+			"recovery": false,
+			"wrapped": "0104f87b7842147038dd2a5f2fc3565153fa25b59c8510ff3753cf93115f61f730192872fcd39a95e71fbc914add3900acb6e5c9c5a62f3e00a4de29b1",
+			"masterKeyId": "c57b53f9610c271e3add1692e09cd33d",
+			"pgpPassphrase": "6IFZT3CfcwGlQBeoIH4EkJ42jcxCOtftrX165ScTYvY="
+		},
+		{
+			"exportKey": "000d1a2734414e5b6875828f9ca9b6c3d0ddeaf704111e2b3845525f6c798693",
+			"amk": "00070e151c232a31383f464d545b626970777e858c939aa1a8afb6bdc4cbd2d9",
+			"recovery": true,
+			"wrapped": "0141f7fca91ac53cd79edf6528a9f5b7f0ca2bd5188d644e4a234e660fd76e8c8ed22673960225cc30644c24d21e7e53099fe320d49d50b8a76d50d40f",
+			"masterKeyId": "c57b53f9610c271e3add1692e09cd33d",
+			"pgpPassphrase": "6IFZT3CfcwGlQBeoIH4EkJ42jcxCOtftrX165ScTYvY="
+		},
+		{
+			"exportKey": "293643505d6a7784919eabb8c5d2dfecf90613202d3a4754616e7b8895a2afbc",
+			"amk": "1f262d343b424950575e656c737a81888f969da4abb2b9c0c7ced5dce3eaf1f8",
+			"recovery": false,
+			"wrapped": "012f5c0893b01337304372323c0fefcee04dd3238c1fa5d3f5cb74472d0056464daf82c160356ab58f1fcfe6aee7373322c3b6c8c9a8b2dc5e0cb600f6",
+			"masterKeyId": "e1380f60021c3dad7714d30c1fb2b8bb",
+			"pgpPassphrase": "61FV56wPkPWsaBMFVIw6LhBfwx3EP7uwTyERU0pKp+M="
+		},
+		{
+			"exportKey": "293643505d6a7784919eabb8c5d2dfecf90613202d3a4754616e7b8895a2afbc",
+			"amk": "1f262d343b424950575e656c737a81888f969da4abb2b9c0c7ced5dce3eaf1f8",
+			"recovery": true,
+			"wrapped": "0135a9f09c7945b44f65cfc4d371cdcb7c33bfb015b65d8326bd26d91553df4ba31926a286ccc4005bc7b451b2a7bd36cd978c46ae7d078625dd5f6a5f",
+			"masterKeyId": "e1380f60021c3dad7714d30c1fb2b8bb",
+			"pgpPassphrase": "61FV56wPkPWsaBMFVIw6LhBfwx3EP7uwTyERU0pKp+M="
+		},
+		{
+			"exportKey": "525f6c798693a0adbac7d4e1eefb0815222f3c495663707d8a97a4b1becbd8e5",
+			"amk": "3e454c535a61686f767d848b9299a0a7aeb5bcc3cad1d8dfe6edf4fb02091017",
+			"recovery": false,
+			"wrapped": "0142ff101b36dfd40c24d33b30c813ce8ce986038aa686124fe45787ee9b460806796e224138f1f1217430d16d94ad33ffcf2ffea71172831f7c2c81d1",
+			"masterKeyId": "299100ce87a8722876ca26a481efd3f1",
+			"pgpPassphrase": "9oF9aJA2Ef+UXctp0zcdmhxMf0A7HJA8rGM7my4WF68="
+		},
+		{
+			"exportKey": "525f6c798693a0adbac7d4e1eefb0815222f3c495663707d8a97a4b1becbd8e5",
+			"amk": "3e454c535a61686f767d848b9299a0a7aeb5bcc3cad1d8dfe6edf4fb02091017",
+			"recovery": true,
+			"wrapped": "015f612c0c2d5aee95ffecbad70660107d422a5a78cdc8fa86f7bb138dc46af3aafd3b4417838d6459bb4b01d8e20261e3479a3c4540ae22d52a5fbd25",
+			"masterKeyId": "299100ce87a8722876ca26a481efd3f1",
+			"pgpPassphrase": "9oF9aJA2Ef+UXctp0zcdmhxMf0A7HJA8rGM7my4WF68="
+		},
+		{
+			"exportKey": "7b8895a2afbcc9d6e3f0fd0a1724313e4b5865727f8c99a6b3c0cddae7f4010e",
+			"amk": "5d646b727980878e959ca3aab1b8bfc6cdd4dbe2e9f0f7fe050c131a21282f36",
+			"recovery": false,
+			"wrapped": "01ad626ccd7f449d2aa7706a1f6b525366e635502f0d9a7e9fe628d383d1ae1d84dccf4ae540e740f4a1e5c233706fb84f1744ac6b81fbaa65d6ab65d2",
+			"masterKeyId": "f14687a974e16500750e3d5303704b3b",
+			"pgpPassphrase": "7RJsIbfkdwIkQhbBYXIn+F226AhK8Rgs/rTlH4tfhhU="
+		},
+		{
+			"exportKey": "7b8895a2afbcc9d6e3f0fd0a1724313e4b5865727f8c99a6b3c0cddae7f4010e",
+			"amk": "5d646b727980878e959ca3aab1b8bfc6cdd4dbe2e9f0f7fe050c131a21282f36",
+			"recovery": true,
+			"wrapped": "0184b4ad22833512fd635e881103903165db973b45c615239ea633c08ae07546ec526f449587187457f8f17e448fef736e68a8f672ff28909437da0f36",
+			"masterKeyId": "f14687a974e16500750e3d5303704b3b",
+			"pgpPassphrase": "7RJsIbfkdwIkQhbBYXIn+F226AhK8Rgs/rTlH4tfhhU="
+		},
+		{
+			"exportKey": "a4b1becbd8e5f2ff0c192633404d5a6774818e9ba8b5c2cfdce9f603101d2a37",
+			"amk": "7c838a91989fa6adb4bbc2c9d0d7dee5ecf3fa01080f161d242b323940474e55",
+			"recovery": false,
+			"wrapped": "015c3e312691850128a3e85220a9c2d5ced84c38833a149fd41755e8a653950d41d6c12d5daefbb859a876ecbe7e76bf88418b4bf34da6f6bb86f9aa8d",
+			"masterKeyId": "f4bd8013fef21a6fee7463b624f74d82",
+			"pgpPassphrase": "BkBrcyiOXQvVXdHHahwKfY26I0TVmBSnP73NEF41SuA="
+		},
+		{
+			"exportKey": "a4b1becbd8e5f2ff0c192633404d5a6774818e9ba8b5c2cfdce9f603101d2a37",
+			"amk": "7c838a91989fa6adb4bbc2c9d0d7dee5ecf3fa01080f161d242b323940474e55",
+			"recovery": true,
+			"wrapped": "0172493cb692e7110e2179c089bc4cf1da13b1acb4390249d0d1b2e961a16f466039e57e1bb8ab1d2acca61ecd0cd389f4342dbd79822f0fce6af117b0",
+			"masterKeyId": "f4bd8013fef21a6fee7463b624f74d82",
+			"pgpPassphrase": "BkBrcyiOXQvVXdHHahwKfY26I0TVmBSnP73NEF41SuA="
+		},
+		{
+			"exportKey": "cddae7f4010e1b2835424f5c697683909daab7c4d1deebf805121f2c39465360",
+			"amk": "9ba2a9b0b7bec5ccd3dae1e8eff6fd040b121920272e353c434a51585f666d74",
+			"recovery": false,
+			"wrapped": "0139077fe3e5974ab77cb040aacf1bb1e698329c35db2d24c0e378b300cbceae30957a929a6627531a4481438c28d7586edde346839d42de6ff25ab632",
+			"masterKeyId": "e12be6a9f0034df0ed9e14812c9643e7",
+			"pgpPassphrase": "+144ZE4lK+uM2cW+JynHf0IUWVO7rczWJtECyQveGA0="
+		},
+		{
+			"exportKey": "cddae7f4010e1b2835424f5c697683909daab7c4d1deebf805121f2c39465360",
+			"amk": "9ba2a9b0b7bec5ccd3dae1e8eff6fd040b121920272e353c434a51585f666d74",
+			"recovery": true,
+			"wrapped": "01b22dbb80a187a836ba307e77d53ce2c4c2ef846e478b78999bd27217a778784164597bc313f9b7bb1bb4f9ff7d34d08d2bf51ec297a32a94c773f952",
+			"masterKeyId": "e12be6a9f0034df0ed9e14812c9643e7",
+			"pgpPassphrase": "+144ZE4lK+uM2cW+JynHf0IUWVO7rczWJtECyQveGA0="
+		}
+	]
+}

@@ -1,0 +1,7 @@
+Content-Type: multipart/alternative; boundary="m"
+
+--m
+Content-Type: text/plain
+
+hello
+--m--

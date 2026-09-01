@@ -1,0 +1,13 @@
+{
+  "name": "thelemail-desktop",
+  "private": true,
+  "version": "0.8.0",
+  "type": "module",
+  "scripts": {
+    "frontend:build": "node scripts/build-frontend.mjs",
+    "tauri": "cargo tauri"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "^2.11.0"
+  }
+}

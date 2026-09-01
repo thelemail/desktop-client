@@ -1,0 +1,4 @@
+[submodule "web-client"]
+	path = web-client
+	url = https://github.com/thelemail/web-client.git
+	branch = main

@@ -1,0 +1,14 @@
+Content-Type: multipart/encrypted; protocol="application/pgp-encrypted"; boundary="b1"
+
+--b1
+Content-Type: application/pgp-encrypted
+
+Version: 1
+--b1
+Content-Type: application/octet-stream
+
+-----BEGIN PGP MESSAGE-----
+hQEMA1234
+=abcd
+-----END PGP MESSAGE-----
+--b1--

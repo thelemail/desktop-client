@@ -1,0 +1,38 @@
+[workspace]
+resolver = "3"
+members = ["crates/*", "src-tauri"]
+
+[workspace.package]
+version = "0.8.0"
+edition = "2024"
+rust-version = "1.90"
+license = "AGPL-3.0-only"
+
+[workspace.dependencies]
+aes-gcm = "0.10"
+anyhow = "1"
+argon2 = "0.5"
+base64 = "0.22"
+generic-array = "=0.14.7"
+hex = "0.4"
+hkdf = "0.12"
+mail-parser = "0.11"
+opaque-ke = { version = "4.0.0", features = ["argon2"] }
+pgp = "0.20"
+rand = "0.8"
+rusqlite = "0.37"
+security-framework = { version = "3", features = ["OSX_10_15"] }
+tauri-plugin-dialog = "2"
+tauri-plugin-notification = "2"
+tauri-plugin-opener = "2"
+tauri-plugin-updater = "2"
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json", "stream", "cookies"] }
+reqwest_cookie_store = "0.9"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "time"] }
+url = "2"
+uuid = { version = "1", features = ["v4", "serde"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+thiserror = "2"
+zeroize = { version = "1.8", features = ["derive"] }

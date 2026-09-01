@@ -1,0 +1,18 @@
+{
+  "identifier": "main",
+  "description": "Event delivery and window control. Every privileged action goes through a first-party command, so no plugin capability is granted to the webview.",
+  "windows": [
+    "main"
+  ],
+  "remote": {
+    "urls": []
+  },
+  "permissions": [
+    "core:event:allow-listen",
+    "core:event:allow-unlisten",
+    "core:window:allow-show",
+    "core:window:allow-set-focus",
+    "core:app:allow-version",
+    "core:app:allow-name"
+  ]
+}

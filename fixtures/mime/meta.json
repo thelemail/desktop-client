@@ -1,0 +1,34 @@
+{
+	"plain-mime": {
+		"isPgpEncrypted": false,
+		"armor": null
+	},
+	"pgp-simple": {
+		"isPgpEncrypted": true,
+		"armor": "-----BEGIN PGP MESSAGE-----\nhQEMA1234\n=abcd\n-----END PGP MESSAGE-----"
+	},
+	"pgp-base64": {
+		"isPgpEncrypted": true,
+		"armor": "-----BEGIN PGP MESSAGE-----\nhQEMA1234\n=abcd\n-----END PGP MESSAGE-----"
+	},
+	"pgp-no-protocol": {
+		"isPgpEncrypted": true,
+		"armor": "-----BEGIN PGP MESSAGE-----\nhQEMA1234\n=abcd\n-----END PGP MESSAGE-----"
+	},
+	"pgp-folded-header": {
+		"isPgpEncrypted": true,
+		"armor": "-----BEGIN PGP MESSAGE-----\nhQEMA1234\n=abcd\n-----END PGP MESSAGE-----"
+	},
+	"pgp-missing-boundary": {
+		"isPgpEncrypted": true,
+		"armor": null
+	},
+	"pgp-no-armor": {
+		"isPgpEncrypted": true,
+		"armor": null
+	},
+	"multipart-not-encrypted": {
+		"isPgpEncrypted": false,
+		"armor": null
+	}
+}

@@ -1,0 +1,14 @@
+[package]
+name = "thelemail-mime"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+base64.workspace = true
+mail-parser = { workspace = true, features = ["full_encoding"] }
+serde.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true

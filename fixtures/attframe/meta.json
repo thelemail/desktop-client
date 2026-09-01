@@ -1,0 +1,30 @@
+[
+	{
+		"name": "minimal",
+		"header": {
+			"filename": "report.pdf",
+			"contentType": "application/pdf",
+			"disposition": "attachment"
+		},
+		"payloadLen": 5
+	},
+	{
+		"name": "inline-cid",
+		"header": {
+			"filename": "logo.png",
+			"contentType": "image/png",
+			"disposition": "inline",
+			"contentId": "logo@thelemail"
+		},
+		"payloadLen": 1024
+	},
+	{
+		"name": "unicode-name",
+		"header": {
+			"filename": "rapport été 😀.txt",
+			"contentType": "text/plain; charset=utf-8",
+			"disposition": "attachment"
+		},
+		"payloadLen": 7
+	}
+]

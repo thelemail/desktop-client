@@ -1,0 +1,7 @@
+Content-Type: multipart/encrypted; boundary="na"
+
+--na
+Content-Type: application/octet-stream
+
+not armored at all
+--na--

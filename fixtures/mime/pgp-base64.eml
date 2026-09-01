@@ -1,0 +1,13 @@
+Content-Type: multipart/encrypted; protocol="application/pgp-encrypted"; boundary="xyz"
+
+--xyz
+Content-Type: application/pgp-encrypted
+
+Version: 1
+--xyz
+Content-Type: application/octet-stream
+Content-Transfer-Encoding: base64
+
+LS0tLS1CRUdJTiBQR1AgTUVTU0FHRS0tLS0tCmhRRU1BMTIzNAo9YWJjZAotLS0t
+LUVORCBQR1AgTUVTU0FHRS0tLS0t
+--xyz--

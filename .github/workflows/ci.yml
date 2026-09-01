@@ -1,0 +1,52 @@
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_call:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          submodules: true
+          persist-credentials: false
+
+      - name: Fetch the pinned web client tags
+        run: git -C web-client fetch --tags --force origin
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: web-client/.nvmrc
+
+      - run: corepack enable
+
+      - uses: Swatinem/rust-cache@98c8021b550208e191a6a3145459bfc9fb29c4c0 # v2.8.0
+        with:
+          workspaces: src-tauri -> target
+
+      - name: Confirm the pinned web client matches web-client.version
+        run: |
+          set -euo pipefail
+          pinned="$(cat web-client.version)"
+          actual="$(git -C web-client describe --tags --exact-match)"
+          test "$pinned" = "$actual"
+
+      - name: Build the frontend from the pin
+        run: THELEMAIL_RELEASE=1 node scripts/build-frontend.mjs
+
+      - run: cargo fmt --all --check
+
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - run: cargo test --workspace

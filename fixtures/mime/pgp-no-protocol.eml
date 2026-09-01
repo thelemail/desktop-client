@@ -1,0 +1,10 @@
+Content-Type: multipart/encrypted; boundary="nb"
+
+--nb
+Content-Type: application/octet-stream
+
+-----BEGIN PGP MESSAGE-----
+hQEMA1234
+=abcd
+-----END PGP MESSAGE-----
+--nb--

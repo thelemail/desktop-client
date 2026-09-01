@@ -1,0 +1,18 @@
+{
+	"passphrase": "YnJlYWQtYW5kLXNhbHQtZml4dHVyZS1wYXNzcGhyYXNlLTAx",
+	"fingerprint": "25c3c86b9e59522deeabd0a2b3953acc5a3eec27",
+	"messages": {
+		"body-plain": {
+			"plaintext": "Subject: fixture\r\n\r\nplain body for interop\r\n",
+			"producer": "openpgp.js"
+		},
+		"body-mime-multipart": {
+			"plaintext": "Content-Type: multipart/alternative; boundary=\"b1\"\r\n\r\n--b1\r\nContent-Type: text/plain\r\n\r\nhello plain\r\n--b1\r\nContent-Type: text/html\r\n\r\n<p>hello html</p>\r\n--b1--\r\n",
+			"producer": "openpgp.js"
+		},
+		"preview": {
+			"plaintext": "{\"v\":1,\"subject\":\"Fixture subject\",\"sender\":{\"display\":\"Fixture\",\"address\":\"fixture@thelemail.local\"},\"recipients\":[{\"display\":\"Rec\",\"address\":\"rec@thelemail.local\",\"kind\":\"to\"}],\"snippet\":\"plain body for interop\",\"display_date\":\"2026-08-31T12:00:00Z\"}",
+			"producer": "openpgp.js"
+		}
+	}
+}

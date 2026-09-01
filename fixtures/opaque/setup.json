@@ -1,0 +1,9 @@
+{
+	"serverSetup": "M3xmRY_HGIIiRXoceX_6h17IQNXaZOiwIysfPoyhs3PxI6baRhdbn6SMXNyvyD9dJIR-JAtjQt0q-fcq17twYGVPlzm5HlD3gYP4hYgC4JK2-F204jgU-aWsubQCMZ4I2DusgYLBxAz1x85lYcTW-UKzDeFwseMDzWotlrPNJ2g",
+	"registrationRecord": "oJPBR32UpbRyP7SFjKUGHowWw844cT3LtbQlhCM5Sxa44506DwvvteYGwfCgSrgfBD0x2wU6VrMQ3uPjMTLKfu51RReWFr8Osg-jp0Wd9WOMQUEZsxyLXDr8zxqX1QVcPlj-e8gxv_fdMxZoJ1ZmaqsWXpdV5WzVLBC0SFPWSKaovHiApgE99ZBCq8OLQswQy9z80sCzODmSjjU42-I1LmJ-_WQpT8K0rxEQU9OyNdwJgdkFBMQ43q_3UxLQ8DTB",
+	"exportKey": "WYwtuTvsjXxZy_rcXgfQstfv7dAZi2h3nc85_LKM2Vat8VgM2PSwnFIHUdW_l-4-hM4IYZ83X0movxtatbpECw",
+	"password": "correct horse battery staple",
+	"clientIdentity": "thelemail/auth/opaque/v1:11111111-2222-3333-4444-555555555555",
+	"serverIdentity": "thelemail.com",
+	"keyStretching": "memory-constrained"
+}
