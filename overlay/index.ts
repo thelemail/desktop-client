@@ -295,6 +295,19 @@ function openEventSource(url: string): EventSourceLike {
 	return shim;
 }
 
+function subscribe<T>(event: string, cb: (payload: T) => void): () => void {
+	let stop = false;
+	let unlisten: (() => void) | null = null;
+	void listen<T>(event, (ev) => cb(ev.payload)).then((fn) => {
+		if (stop) fn();
+		else unlisten = fn;
+	});
+	return () => {
+		stop = true;
+		unlisten?.();
+	};
+}
+
 const mirror = {
 	open: (accountId: string) => invoke<void>('mirror_open', { args: { accountId } }),
 	close: (accountId: string) => invoke<void>('mirror_close', { args: { accountId } }),
@@ -314,20 +327,35 @@ const mirror = {
 		invoke<unknown>('mirror_message', { args: { accountId, messageId } }),
 	thread: (accountId: string, messageId: string) =>
 		invoke<unknown[]>('mirror_thread', { args: { accountId, messageId } }),
-	onChanged: (cb: (accountId: string) => void) => {
-		let stop = false;
-		let unlisten: (() => void) | null = null;
-		void listen<{ accountId: string }>('mirror://changed', (ev) => {
-			cb(ev.payload.accountId);
-		}).then((fn) => {
-			if (stop) fn();
-			else unlisten = fn;
-		});
-		return () => {
-			stop = true;
-			unlisten?.();
-		};
-	}
+	onChanged: (cb: (accountId: string) => void) =>
+		subscribe<{ accountId: string }>('mirror://changed', (ev) => cb(ev.accountId)),
+	onTokenExpired: (cb: (accountId: string) => void) =>
+		subscribe<{ accountId: string }>('mirror://token-expired', (ev) => cb(ev.accountId))
+};
+
+interface NotificationStatus {
+	supported: boolean;
+	bundled: boolean;
+	translocated: boolean;
+	bundlePath: string | null;
+	authorization: string;
+	alerts: boolean;
+	sound: boolean;
+	lastError: string | null;
+}
+
+interface NotificationTarget {
+	accountId: string;
+	messageId: string;
+}
+
+const notifications = {
+	status: () => invoke<NotificationStatus>('notify_status'),
+	takeOpened: () => invoke<NotificationTarget | null>('notify_take_opened'),
+	onStatus: (cb: (status: NotificationStatus) => void) =>
+		subscribe<NotificationStatus>('notify://status', cb),
+	onOpened: (cb: (target: NotificationTarget) => void) =>
+		subscribe<NotificationTarget>('notification://opened', cb)
 };
 
 const session = {
@@ -353,6 +381,7 @@ export const platform = {
 	keystoreChannel,
 	transport: nativeRequest,
 	openEventSource,
+	notifications,
 	blobFetch: nativeBlobFetch,
 	blobPut: nativeBlobPut,
 	returnOrigin: () => env.PUBLIC_APP_URL || 'https://app.thelemail.com',
