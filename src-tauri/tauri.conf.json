@@ -31,8 +31,7 @@
     "shortDescription": "Zero-access encrypted email.",
     "macOS": {
       "minimumSystemVersion": "13.0",
-      "hardenedRuntime": true,
-      "entitlements": "entitlements.plist"
+      "hardenedRuntime": true
     },
     "icon": [
       "icons/32x32.png",

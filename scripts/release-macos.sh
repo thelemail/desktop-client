@@ -17,29 +17,27 @@ require APPLE_API_KEY_PATH
 require APPLE_API_KEY_ID
 require APPLE_API_ISSUER
 
-profile="src-tauri/embedded.provisionprofile"
-entitlements="src-tauri/entitlements.plist"
 app="target/release/bundle/macos/Thelemail.app"
 version="$(python3 -c "import json;print(json.load(open('src-tauri/tauri.conf.json'))['version'])")"
 dmg="target/release/Thelemail_${version}_aarch64.dmg"
 
-[[ -f "$profile" ]] || { echo "release-macos: $profile is missing" >&2; exit 1; }
 [[ -f "$APPLE_API_KEY_PATH" ]] || { echo "release-macos: no key at $APPLE_API_KEY_PATH" >&2; exit 1; }
 
 THELEMAIL_RELEASE=1 node scripts/build-frontend.mjs
 npx --yes "@tauri-apps/cli@${TAURI_CLI_VERSION:-2.11.4}" build
 
-cp "$profile" "$app/Contents/embedded.provisionprofile"
-
 codesign --force --options runtime --timestamp \
-	--entitlements "$entitlements" \
 	--sign "$APPLE_SIGNING_IDENTITY" \
 	"$app"
 
 codesign --verify --strict --verbose=2 "$app"
 
+staging="$(mktemp -d)"
+cp -R "$app" "$staging/"
+ln -s /Applications "$staging/Applications"
 rm -f "$dmg"
-hdiutil create -volname Thelemail -srcfolder "$app" -ov -format UDZO "$dmg"
+hdiutil create -volname Thelemail -srcfolder "$staging" -ov -format UDZO "$dmg"
+rm -rf "$staging"
 
 codesign --force --timestamp --sign "$APPLE_SIGNING_IDENTITY" "$dmg"
 
