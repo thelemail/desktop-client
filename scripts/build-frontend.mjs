@@ -92,6 +92,8 @@ for (const dir of [root, source]) {
 	}
 }
 
+rmSync(resolve(source, '.svelte-kit'), { recursive: true, force: true });
+
 execFileSync('pnpm', ['build'], {
 	cwd: source,
 	stdio: 'inherit',

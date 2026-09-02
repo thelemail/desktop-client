@@ -12,7 +12,8 @@ use thelemail_crypto::opaque::{
     start_registration,
 };
 use thelemail_crypto::openpgp::{
-    UnlockedKey, generate_account_key, generate_alias_key, public_key_fingerprint_hex,
+    SignatureCheck, SignatureState, UnlockedKey, generate_account_key, generate_alias_key,
+    public_key_fingerprint_hex,
 };
 use tokio::sync::{Semaphore, broadcast};
 use uuid::Uuid;
@@ -69,13 +70,19 @@ struct PendingOp {
     new_password: Option<Zeroizing<String>>,
 }
 
+struct AliasKey {
+    key: UnlockedKey,
+    alias_id: String,
+    key_version: i64,
+}
+
 struct Vault {
     account_id: String,
     email: String,
     auth_scheme: AuthScheme,
     key: UnlockedKey,
     public_key_armored: String,
-    alias_keys: HashMap<String, UnlockedKey>,
+    alias_keys: HashMap<String, AliasKey>,
     amk: Amk,
 }
 
@@ -882,7 +889,7 @@ impl Keystore {
             let wrapped = vault.key.encrypt_to_armored(
                 std::slice::from_ref(&recipient.public_key_armored),
                 generated.encrypted_private_key_armored.as_bytes(),
-                true,
+                Some(&vault.key),
             );
             let Ok(wrapped) = wrapped else {
                 return CreateAliasKeyResponse::err("invalid_recipient_key");
@@ -990,23 +997,29 @@ impl Keystore {
             (None, None) => return DecryptResponse::err("invalid_ciphertext"),
         };
 
-        let plain = vault.key.decrypt(&ciphertext).or_else(|first| {
-            vault
-                .alias_keys
-                .values()
-                .find_map(|k| k.decrypt(&ciphertext).ok())
-                .ok_or(first)
-        });
+        let verification_keys = args.verification_keys_armored.unwrap_or_default();
+        let plain = vault
+            .key
+            .decrypt_verified(&ciphertext, &verification_keys)
+            .or_else(|first| {
+                vault
+                    .alias_keys
+                    .values()
+                    .find_map(|k| k.key.decrypt_verified(&ciphertext, &verification_keys).ok())
+                    .ok_or(first)
+            });
 
         match plain {
-            Ok(plain) if args.binary => DecryptResponse::Binary {
+            Ok((plain, check)) if args.binary => DecryptResponse::Binary {
                 ok: true,
                 plaintext_binary: plain,
+                signature: check.map(verdict),
             },
-            Ok(plain) => match String::from_utf8(plain) {
+            Ok((plain, check)) => match String::from_utf8(plain) {
                 Ok(text) => DecryptResponse::Text {
                     ok: true,
                     plaintext: text,
+                    signature: check.map(verdict),
                 },
                 Err(_) => DecryptResponse::err("invalid_ciphertext"),
             },
@@ -1042,7 +1055,14 @@ impl Keystore {
 
             match unwrapped {
                 Some(key) if key.fingerprint_hex() == want => {
-                    vault.alias_keys.insert(want.clone(), key);
+                    vault.alias_keys.insert(
+                        want.clone(),
+                        AliasKey {
+                            key,
+                            alias_id: grant.alias_id,
+                            key_version: grant.key_version,
+                        },
+                    );
                     loaded.push(want);
                 }
                 _ => failed.push(FailedGrant {
@@ -1083,11 +1103,38 @@ impl Keystore {
             vault
                 .alias_keys
                 .values()
-                .find_map(|k| k.decrypt(ciphertext).ok())
+                .find_map(|k| k.key.decrypt(ciphertext).ok())
                 .ok_or("invalid_ciphertext")
         })
     }
+}
 
+fn verdict(check: SignatureCheck) -> SignatureVerdict {
+    SignatureVerdict {
+        state: match check.state {
+            SignatureState::Valid => "valid",
+            SignatureState::Invalid => "invalid",
+            SignatureState::None => "none",
+            SignatureState::UnknownKey => "unknown_key",
+        },
+        key_fingerprint_hex: check.key_fingerprint_hex,
+        signed_at_millis: check.signed_at_millis,
+    }
+}
+
+fn signing_key<'a>(vault: &'a Vault, alias_id: Option<&str>) -> Option<&'a UnlockedKey> {
+    let Some(alias_id) = alias_id else {
+        return Some(&vault.key);
+    };
+    vault
+        .alias_keys
+        .values()
+        .filter(|entry| entry.alias_id == alias_id)
+        .max_by_key(|entry| entry.key_version)
+        .map(|entry| &entry.key)
+}
+
+impl Keystore {
     pub fn encrypt(&self, args: EncryptArgs) -> EncryptResponse {
         let vaults = self.vaults.lock().expect("keystore vaults");
         let Some(vault) = vaults.get(&args.account_id) else {
@@ -1096,10 +1143,24 @@ impl Keystore {
                 code: "locked",
             };
         };
+        let signer = if args.sign_with_vault_key {
+            match signing_key(vault, args.alias_id.as_deref()) {
+                Some(key) => Some(key),
+                None => {
+                    return EncryptResponse::Err {
+                        ok: false,
+                        code: "locked",
+                    };
+                }
+            }
+        } else {
+            None
+        };
+
         match vault.key.encrypt_to(
             std::slice::from_ref(&args.recipient_public_key_armored),
             &args.plaintext,
-            args.sign_with_vault_key,
+            signer,
         ) {
             Ok(ciphertext) => EncryptResponse::Ok {
                 ok: true,
@@ -1126,10 +1187,24 @@ impl Keystore {
                 code: "no_recipients",
             };
         }
+        let signer = if args.sign_with_vault_key {
+            match signing_key(vault, args.alias_id.as_deref()) {
+                Some(key) => Some(key),
+                None => {
+                    return EncryptToKeysResponse::Err {
+                        ok: false,
+                        code: "locked",
+                    };
+                }
+            }
+        } else {
+            None
+        };
+
         match vault.key.encrypt_to_armored(
             &args.recipient_public_keys_armored,
             &args.plaintext,
-            args.sign_with_vault_key,
+            signer,
         ) {
             Ok(armored) => EncryptToKeysResponse::Ok { ok: true, armored },
             Err(_) => EncryptToKeysResponse::Err {

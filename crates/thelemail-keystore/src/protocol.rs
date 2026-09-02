@@ -122,6 +122,20 @@ pub struct DecryptArgs {
     pub ciphertext_binary: Option<Vec<u8>>,
     #[serde(default)]
     pub binary: bool,
+    #[serde(default)]
+    pub verification_keys_armored: Option<Vec<String>>,
+    #[serde(default)]
+    pub key_fingerprint_hex: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SignatureVerdict {
+    pub state: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub key_fingerprint_hex: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub signed_at_millis: Option<i64>,
 }
 
 #[derive(Debug, Serialize)]
@@ -130,11 +144,15 @@ pub enum DecryptResponse {
     Text {
         ok: bool,
         plaintext: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        signature: Option<SignatureVerdict>,
     },
     Binary {
         ok: bool,
         #[serde(rename = "plaintextBinary")]
         plaintext_binary: Vec<u8>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        signature: Option<SignatureVerdict>,
     },
     Err {
         ok: bool,
@@ -286,14 +304,20 @@ pub struct EnrollPersistentArgs {
     pub server_half: Option<String>,
 }
 
+fn sign_by_default() -> bool {
+    true
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct EncryptArgs {
     pub account_id: String,
     pub recipient_public_key_armored: String,
     pub plaintext: Vec<u8>,
-    #[serde(default)]
+    #[serde(default = "sign_by_default")]
     pub sign_with_vault_key: bool,
+    #[serde(default)]
+    pub alias_id: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -309,8 +333,10 @@ pub struct EncryptToKeysArgs {
     pub account_id: String,
     pub recipient_public_keys_armored: Vec<String>,
     pub plaintext: Vec<u8>,
-    #[serde(default)]
+    #[serde(default = "sign_by_default")]
     pub sign_with_vault_key: bool,
+    #[serde(default)]
+    pub alias_id: Option<String>,
 }
 
 #[derive(Debug, Serialize)]

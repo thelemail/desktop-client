@@ -75,7 +75,7 @@ impl UnlockedKey {
         &self,
         recipients_armored: &[String],
         plaintext: &[u8],
-        sign: bool,
+        signer: Option<&UnlockedKey>,
     ) -> Result<Vec<u8>, PgpError> {
         use pgp::composed::MessageBuilder;
         use pgp::types::Password;
@@ -107,9 +107,9 @@ impl UnlockedKey {
                 .map_err(|_| PgpError::InvalidRecipientKey)?;
         }
 
-        if sign {
+        if let Some(signer) = signer {
             builder.sign(
-                &self.key.primary_key,
+                &signer.key.primary_key,
                 Password::empty(),
                 HashAlgorithm::Sha256,
             );
@@ -122,7 +122,7 @@ impl UnlockedKey {
         &self,
         recipients_armored: &[String],
         plaintext: &[u8],
-        sign: bool,
+        signer: Option<&UnlockedKey>,
     ) -> Result<String, PgpError> {
         use pgp::composed::MessageBuilder;
         use pgp::types::Password;
@@ -154,9 +154,9 @@ impl UnlockedKey {
                 .map_err(|_| PgpError::InvalidRecipientKey)?;
         }
 
-        if sign {
+        if let Some(signer) = signer {
             builder.sign(
-                &self.key.primary_key,
+                &signer.key.primary_key,
                 Password::empty(),
                 HashAlgorithm::Sha256,
             );
@@ -171,21 +171,60 @@ impl UnlockedKey {
         let (key, _) = SignedSecretKey::from_string(armored).map_err(|_| PgpError::InvalidKey)?;
         Ok(Self { key })
     }
+}
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SignatureState {
+    Valid,
+    Invalid,
+    None,
+    UnknownKey,
+}
+
+#[derive(Debug, Clone)]
+pub struct SignatureCheck {
+    pub state: SignatureState,
+    pub key_fingerprint_hex: Option<String>,
+    pub signed_at_millis: Option<i64>,
+}
+
+impl UnlockedKey {
     pub fn decrypt(&self, ciphertext: &[u8]) -> Result<Vec<u8>, PgpError> {
-        if ciphertext.starts_with(ARMOR_PREFIX) {
-            let (message, _) = Message::from_armor(std::io::Cursor::new(ciphertext))
-                .map_err(|_| PgpError::InvalidCiphertext)?;
-            let mut decrypted = message
-                .decrypt(&Password::empty(), &self.key)
-                .map_err(|_| PgpError::DecryptFailed)?;
-            return decrypted.as_data_vec().map_err(|_| PgpError::DecryptFailed);
-        }
-        let message = Message::from_bytes(ciphertext).map_err(|_| PgpError::InvalidCiphertext)?;
+        Ok(self.decrypt_verified(ciphertext, &[])?.0)
+    }
+
+    pub fn decrypt_verified(
+        &self,
+        ciphertext: &[u8],
+        verification_keys_armored: &[String],
+    ) -> Result<(Vec<u8>, Option<SignatureCheck>), PgpError> {
+        let message = if ciphertext.starts_with(ARMOR_PREFIX) {
+            Message::from_armor(std::io::Cursor::new(ciphertext))
+                .map_err(|_| PgpError::InvalidCiphertext)?
+                .0
+        } else {
+            Message::from_bytes(ciphertext).map_err(|_| PgpError::InvalidCiphertext)?
+        };
+
         let mut decrypted = message
             .decrypt(&Password::empty(), &self.key)
             .map_err(|_| PgpError::DecryptFailed)?;
-        decrypted.as_data_vec().map_err(|_| PgpError::DecryptFailed)
+        let plaintext = decrypted
+            .as_data_vec()
+            .map_err(|_| PgpError::DecryptFailed)?;
+
+        if verification_keys_armored.is_empty() {
+            return Ok((plaintext, None));
+        }
+
+        let mut keys = Vec::with_capacity(verification_keys_armored.len());
+        for armored in verification_keys_armored {
+            if let Ok((key, _)) = SignedPublicKey::from_string(armored) {
+                keys.push(key);
+            }
+        }
+
+        Ok((plaintext, Some(verdict_for(&decrypted, &keys))))
     }
 }
 
@@ -408,4 +447,30 @@ fn generate_key(
         encrypted_private_key_armored,
         fingerprint_hex,
     })
+}
+
+fn verdict_for(message: &Message<'_>, keys: &[SignedPublicKey]) -> SignatureCheck {
+    if !matches!(message, Message::Signed { .. }) {
+        return SignatureCheck {
+            state: SignatureState::None,
+            key_fingerprint_hex: None,
+            signed_at_millis: None,
+        };
+    }
+
+    for key in keys {
+        if let Ok(signature) = message.verify(key) {
+            return SignatureCheck {
+                state: SignatureState::Valid,
+                key_fingerprint_hex: Some(hex_encode(key.fingerprint().as_bytes())),
+                signed_at_millis: signature.created().map(|c| i64::from(c.as_secs()) * 1000),
+            };
+        }
+    }
+
+    SignatureCheck {
+        state: SignatureState::UnknownKey,
+        key_fingerprint_hex: None,
+        signed_at_millis: None,
+    }
 }
