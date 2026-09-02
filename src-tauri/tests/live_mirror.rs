@@ -143,6 +143,7 @@ fn backfills_a_real_mailbox_and_searches_it_offline() {
         "inbox",
         &page.items,
         &page.next_cursor,
+        i64::MAX,
     )
     .expect("apply page");
 
