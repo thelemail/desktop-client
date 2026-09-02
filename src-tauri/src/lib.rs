@@ -150,6 +150,7 @@ pub fn run() {
             });
 
             build_tray(app.handle())?;
+            notify::prepare(app.handle());
 
             #[cfg(all(debug_assertions, feature = "devtools"))]
             devbridge::spawn(app.handle());

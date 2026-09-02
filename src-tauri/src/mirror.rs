@@ -1190,6 +1190,8 @@ async fn poll_changes(
                 continue;
             }
             arrivals.push(crate::notify::NewMail {
+                account_id: account_id.to_owned(),
+                message_id: change.id.clone(),
                 sender: if preview.sender.display.is_empty() {
                     preview.sender.address.clone()
                 } else {
