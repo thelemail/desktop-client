@@ -92,3 +92,40 @@ fn rejects_tampered_and_malformed_blobs() {
 
     assert!(unwrap_master_key(&export_key, &wrapped[..wrapped.len() - 1], v.recovery).is_err());
 }
+
+#[test]
+fn a_device_wrap_needs_both_halves() {
+    use thelemail_crypto::amk::{device_unwrap, device_wrap};
+
+    let local = [7u8; 32];
+    let server = [9u8; 32];
+    let secret = b"the vault payload";
+
+    let wrapped = device_wrap(&local, &server, secret);
+    assert_ne!(
+        &wrapped[1..],
+        &secret[..],
+        "the payload must not be stored in the clear"
+    );
+    assert_eq!(
+        device_unwrap(&local, &server, &wrapped).expect("unwrap"),
+        secret
+    );
+
+    assert!(
+        device_unwrap(&[8u8; 32], &server, &wrapped).is_err(),
+        "the keychain half alone must not open it"
+    );
+    assert!(
+        device_unwrap(&local, &[1u8; 32], &wrapped).is_err(),
+        "a disk copy without the server half must not open it"
+    );
+
+    let mut tampered = wrapped.clone();
+    let last = tampered.len() - 1;
+    tampered[last] ^= 0xff;
+    assert!(
+        device_unwrap(&local, &server, &tampered).is_err(),
+        "tampering must be detected"
+    );
+}

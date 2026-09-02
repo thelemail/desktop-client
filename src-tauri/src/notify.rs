@@ -33,7 +33,7 @@ mod platform {
     use objc2::rc::Retained;
     use objc2::runtime::ProtocolObject;
     use objc2::{AnyThread, DefinedClass, define_class, msg_send};
-    use objc2_foundation::{NSDictionary, NSObject, NSObjectProtocol, NSString};
+    use objc2_foundation::{NSBundle, NSDictionary, NSObject, NSObjectProtocol, NSString};
     use objc2_user_notifications::{
         UNAuthorizationOptions, UNMutableNotificationContent, UNNotification,
         UNNotificationPresentationOptions, UNNotificationRequest, UNNotificationResponse,
@@ -103,11 +103,19 @@ mod platform {
         }
     );
 
+    fn bundled() -> bool {
+        NSBundle::mainBundle().bundleIdentifier().is_some()
+    }
+
     fn center() -> Retained<UNUserNotificationCenter> {
         UNUserNotificationCenter::currentNotificationCenter()
     }
 
     pub fn bind(app: &AppHandle) {
+        if !bundled() {
+            eprintln!("notifications: not running from an app bundle, notifications are disabled");
+            return;
+        }
         let _ = DELEGATE.get_or_init(|| {
             let this = TapDelegate::alloc().set_ivars(DelegateState { app: app.clone() });
             let delegate: Retained<TapDelegate> = unsafe { msg_send![super(this), init] };
@@ -118,6 +126,9 @@ mod platform {
     }
 
     pub fn request_authorization() {
+        if !bundled() {
+            return;
+        }
         AUTHORIZED.get_or_init(|| {
             let options = UNAuthorizationOptions::Alert
                 | UNAuthorizationOptions::Sound
@@ -134,6 +145,9 @@ mod platform {
     }
 
     pub fn post(mail: &NewMail) {
+        if !bundled() {
+            return;
+        }
         request_authorization();
         unsafe {
             let content = UNMutableNotificationContent::new();

@@ -163,3 +163,64 @@ pub fn derive_pgp_passphrase(amk: &Amk) -> B64Std {
     out.zeroize();
     B64Std(encoded)
 }
+
+pub const INFO_DEVICE_WRAP: &[u8] = b"thelemail/desktop/device-wrap/v1";
+
+fn device_key(local_half: &[u8], server_half: &[u8]) -> [u8; 32] {
+    let mut ikm = Vec::with_capacity(local_half.len() + server_half.len());
+    ikm.extend_from_slice(local_half);
+    ikm.extend_from_slice(server_half);
+    let mut key = [0u8; 32];
+    hkdf(&ikm, INFO_DEVICE_WRAP, &mut key);
+    ikm.zeroize();
+    key
+}
+
+pub fn device_wrap(local_half: &[u8], server_half: &[u8], plaintext: &[u8]) -> Vec<u8> {
+    let mut key = device_key(local_half, server_half);
+    let cipher = Aes256Gcm::new_from_slice(&key).expect("aes-256 key length");
+    key.zeroize();
+
+    let mut nonce_bytes = [0u8; NONCE_LEN];
+    rand::thread_rng().fill_bytes(&mut nonce_bytes);
+    let nonce = Nonce::from_slice(&nonce_bytes);
+    let ciphertext = cipher
+        .encrypt(
+            nonce,
+            Payload {
+                msg: plaintext,
+                aad: INFO_DEVICE_WRAP,
+            },
+        )
+        .expect("aes-gcm encryption");
+
+    let mut out = Vec::with_capacity(1 + NONCE_LEN + ciphertext.len());
+    out.push(WRAP_VERSION);
+    out.extend_from_slice(&nonce_bytes);
+    out.extend_from_slice(&ciphertext);
+    out
+}
+
+pub fn device_unwrap(
+    local_half: &[u8],
+    server_half: &[u8],
+    wrapped: &[u8],
+) -> Result<Vec<u8>, AmkError> {
+    if wrapped.len() < 1 + NONCE_LEN + 16 || wrapped[0] != WRAP_VERSION {
+        return Err(AmkError::InvalidWrapped);
+    }
+    let mut key = device_key(local_half, server_half);
+    let cipher = Aes256Gcm::new_from_slice(&key).expect("aes-256 key length");
+    key.zeroize();
+
+    let nonce = Nonce::from_slice(&wrapped[1..1 + NONCE_LEN]);
+    cipher
+        .decrypt(
+            nonce,
+            Payload {
+                msg: &wrapped[1 + NONCE_LEN..],
+                aad: INFO_DEVICE_WRAP,
+            },
+        )
+        .map_err(|_| AmkError::UnwrapFailed)
+}

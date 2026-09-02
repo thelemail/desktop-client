@@ -7,6 +7,7 @@ use security_framework::passwords_options::PasswordOptions;
 
 const DB_KEY_SERVICE: &str = "com.thelemail.desktop.dbkey";
 const REFRESH_SERVICE: &str = "com.thelemail.desktop.refresh";
+const LOCAL_HALF_SERVICE: &str = "com.thelemail.desktop.localhalf";
 
 #[derive(Debug)]
 pub enum Read {
@@ -152,6 +153,18 @@ pub fn put_refresh_cookie(account_id: &str, value: &str) -> Result<(), String> {
 
 pub fn forget_refresh_cookie(account_id: &str) -> Result<(), String> {
     remove(REFRESH_SERVICE, account_id)
+}
+
+pub fn local_half(account_id: &str) -> Read {
+    read(LOCAL_HALF_SERVICE, account_id)
+}
+
+pub fn put_local_half(account_id: &str, value: &str) -> Result<(), String> {
+    write(LOCAL_HALF_SERVICE, account_id, value)
+}
+
+pub fn forget_local_half(account_id: &str) -> Result<(), String> {
+    remove(LOCAL_HALF_SERVICE, account_id)
 }
 
 pub fn ensure_db_key(account_id: &str) -> Result<String, String> {

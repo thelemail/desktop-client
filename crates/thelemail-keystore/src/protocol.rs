@@ -226,6 +226,17 @@ pub struct RestoreResponse {
     pub reason: Option<&'static str>,
 }
 
+impl RestoreResponse {
+    pub fn failed(reason: &'static str) -> Self {
+        Self {
+            ok: false,
+            account_id: None,
+            email: None,
+            reason: Some(reason),
+        }
+    }
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct OpaqueStartRegistrationArgs {
@@ -590,4 +601,13 @@ impl CreateAliasKeyResponse {
 pub struct CommitReformattedKeyArgs {
     pub account_id: String,
     pub encrypted_private_key: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PersistedVault {
+    pub email: String,
+    pub auth_scheme: AuthScheme,
+    pub secret_key_armored: String,
+    pub amk: String,
 }

@@ -55,6 +55,12 @@ impl UnlockedKey {
         self.key.public_key().fingerprint().as_bytes().to_vec()
     }
 
+    pub fn secret_key_armored(&self) -> Result<String, PgpError> {
+        self.key
+            .to_armored_string(Default::default())
+            .map_err(|_| PgpError::InvalidKey)
+    }
+
     pub fn public_key_armored(&self) -> Result<String, PgpError> {
         let subkeys = self
             .key

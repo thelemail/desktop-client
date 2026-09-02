@@ -1,8 +1,16 @@
+use base64::Engine as _;
+use rand::RngCore;
 use serde::{Deserialize, Serialize};
 use tauri::State;
 use thelemail_api::Net;
+use thelemail_crypto::amk::{device_unwrap, device_wrap};
 use thelemail_crypto::attframe::{self, DecryptedAttachmentHeader};
 use thelemail_keystore::*;
+use zeroize::Zeroize;
+
+fn b64() -> base64::engine::GeneralPurpose {
+    base64::engine::general_purpose::STANDARD
+}
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -124,7 +132,24 @@ pub async fn keystore_attachment_bytes(
 
 #[tauri::command]
 pub fn keystore_status(ks: State<'_, Keystore>) -> StatusResponse {
-    ks.status()
+    let mut status = ks.status();
+    for (account_id, email) in persisted_accounts() {
+        match status
+            .accounts
+            .iter_mut()
+            .find(|a| a.account_id == account_id)
+        {
+            Some(existing) => existing.has_persistent = true,
+            None => status.accounts.push(AccountStatus {
+                account_id,
+                email,
+                unlocked: false,
+                has_persistent: true,
+                auth_scheme: AuthScheme::OpaqueV1,
+            }),
+        }
+    }
+    status
 }
 
 #[tauri::command]
@@ -180,22 +205,158 @@ pub fn keystore_opaque_finalize_register(
     ks.opaque_finalize_register(args)
 }
 
-#[tauri::command]
-pub fn keystore_enroll_persistent(_ks: State<'_, Keystore>, _args: EnrollPersistentArgs) {}
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct VaultFile {
+    email: String,
+    wrapped: String,
+}
+
+fn accounts_root() -> std::path::PathBuf {
+    crate::mirror::Mirror::root().join("accounts")
+}
+
+fn persisted_accounts() -> Vec<(String, String)> {
+    let Ok(entries) = std::fs::read_dir(accounts_root()) else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    for entry in entries.flatten() {
+        let Some(account_id) = entry.file_name().to_str().map(str::to_owned) else {
+            continue;
+        };
+        if crate::ids::account_id(&account_id).is_err() {
+            continue;
+        }
+        let Ok(raw) = std::fs::read(entry.path().join("vault.bin")) else {
+            continue;
+        };
+        if let Ok(file) = serde_json::from_slice::<VaultFile>(&raw) {
+            out.push((account_id, file.email));
+        }
+    }
+    out
+}
+
+fn vault_path(account_id: &str) -> Result<std::path::PathBuf, String> {
+    crate::ids::account_id(account_id)?;
+    let dir = crate::mirror::Mirror::root()
+        .join("accounts")
+        .join(account_id);
+    if !dir.starts_with(crate::mirror::Mirror::root().join("accounts")) {
+        return Err("invalid account".to_owned());
+    }
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    Ok(dir.join("vault.bin"))
+}
+
+fn forget_persisted(account_id: &str) {
+    if let Ok(path) = vault_path(account_id) {
+        let _ = std::fs::remove_file(path);
+    }
+    let _ = crate::keychain::forget_local_half(account_id);
+}
 
 #[tauri::command]
-pub fn keystore_invalidate_persisted_vault(_ks: State<'_, Keystore>, _args: AccountScopedArgs) {}
+pub fn keystore_enroll_persistent(ks: State<'_, Keystore>, args: EnrollPersistentArgs) {
+    let Some(server_half) = args.server_half else {
+        return;
+    };
+    let Some(persisted) = ks.persistable(&args.account_id) else {
+        return;
+    };
+    let Ok(server_half) = b64().decode(&server_half) else {
+        return;
+    };
+    let email = persisted.email.clone();
+    let Ok(payload) = serde_json::to_vec(&persisted) else {
+        return;
+    };
+
+    let mut local_half = [0u8; 32];
+    rand::rngs::OsRng.fill_bytes(&mut local_half);
+    let wrapped = device_wrap(&local_half, &server_half, &payload);
+
+    let Ok(path) = vault_path(&args.account_id) else {
+        return;
+    };
+    let file = VaultFile {
+        email,
+        wrapped: b64().encode(&wrapped),
+    };
+    let Ok(encoded) = serde_json::to_vec(&file) else {
+        return;
+    };
+    if std::fs::write(&path, encoded).is_err() {
+        return;
+    }
+    if crate::keychain::put_local_half(&args.account_id, &b64().encode(local_half)).is_err() {
+        let _ = std::fs::remove_file(path);
+    }
+    local_half.zeroize();
+}
+
+#[tauri::command]
+pub fn keystore_invalidate_persisted_vault(_ks: State<'_, Keystore>, args: AccountScopedArgs) {
+    forget_persisted(&args.account_id);
+}
 
 #[tauri::command]
 pub fn keystore_try_restore_from_persistent(
     ks: State<'_, Keystore>,
     args: TryRestoreArgs,
 ) -> RestoreResponse {
-    ks.try_restore_from_persistent(&args.account_id)
+    let restored = ks.try_restore_from_persistent(&args.account_id);
+    if restored.ok {
+        return restored;
+    }
+
+    let Some(server_half) = args.server_half.as_deref() else {
+        return RestoreResponse::failed("server_half_unavailable");
+    };
+    let (Ok(server_half), crate::keychain::Read::Found(local_half)) = (
+        b64().decode(server_half),
+        crate::keychain::local_half(&args.account_id),
+    ) else {
+        return RestoreResponse::failed("no_persistent");
+    };
+    let (Ok(local_half), Ok(path)) = (b64().decode(&local_half), vault_path(&args.account_id))
+    else {
+        return RestoreResponse::failed("no_persistent");
+    };
+    let Ok(raw) = std::fs::read(&path) else {
+        return RestoreResponse::failed("no_persistent");
+    };
+    let (Ok(file), _) = (serde_json::from_slice::<VaultFile>(&raw), ()) else {
+        return RestoreResponse::failed("no_persistent");
+    };
+    let Ok(wrapped) = b64().decode(&file.wrapped) else {
+        return RestoreResponse::failed("no_persistent");
+    };
+    let Ok(payload) = device_unwrap(&local_half, &server_half, &wrapped) else {
+        return RestoreResponse::failed("unwrap_failed");
+    };
+    let Ok(persisted) = serde_json::from_slice::<PersistedVault>(&payload) else {
+        return RestoreResponse::failed("unwrap_failed");
+    };
+
+    let email = persisted.email.clone();
+    if ks.adopt_persisted(&args.account_id, persisted) {
+        RestoreResponse {
+            ok: true,
+            account_id: Some(args.account_id),
+            email: Some(email),
+            reason: None,
+        }
+    } else {
+        RestoreResponse::failed("unwrap_failed")
+    }
 }
 
 #[tauri::command]
-pub fn keystore_disable_persistent(_ks: State<'_, Keystore>, _args: AccountScopedArgs) {}
+pub fn keystore_disable_persistent(_ks: State<'_, Keystore>, args: AccountScopedArgs) {
+    forget_persisted(&args.account_id);
+}
 
 #[tauri::command]
 pub fn keystore_clear(ks: State<'_, Keystore>, args: AccountScopedArgs) {

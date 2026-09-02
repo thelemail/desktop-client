@@ -296,6 +296,50 @@ impl Keystore {
         }
     }
 
+    pub fn persistable(&self, account_id: &str) -> Option<PersistedVault> {
+        let vaults = self.vaults.lock().expect("keystore vaults");
+        let vault = vaults.get(account_id)?;
+        Some(PersistedVault {
+            email: vault.email.clone(),
+            auth_scheme: vault.auth_scheme,
+            secret_key_armored: vault.key.secret_key_armored().ok()?,
+            amk: b64_std().encode(vault.amk.expose()),
+        })
+    }
+
+    pub fn adopt_persisted(&self, account_id: &str, persisted: PersistedVault) -> bool {
+        let Ok(amk_bytes) = b64_std().decode(&persisted.amk) else {
+            return false;
+        };
+        let Ok(amk_bytes): Result<[u8; 32], _> = amk_bytes.try_into() else {
+            return false;
+        };
+        let Ok(key) = UnlockedKey::open_unlocked(&persisted.secret_key_armored) else {
+            return false;
+        };
+        let Ok(public_key_armored) = key.public_key_armored() else {
+            return false;
+        };
+
+        self.vaults.lock().expect("keystore vaults").insert(
+            account_id.to_owned(),
+            Vault {
+                account_id: account_id.to_owned(),
+                email: persisted.email.clone(),
+                auth_scheme: persisted.auth_scheme,
+                key,
+                public_key_armored,
+                alias_keys: HashMap::new(),
+                amk: Amk::from_bytes(amk_bytes),
+            },
+        );
+        self.emit(Broadcast::VaultChanged {
+            account_id: account_id.to_owned(),
+            email: persisted.email,
+        });
+        true
+    }
+
     pub fn clear(&self, account_id: &str) {
         self.vaults
             .lock()
