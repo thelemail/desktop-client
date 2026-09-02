@@ -52,9 +52,11 @@ pub fn session_forget(
 ) -> Result<(), String> {
     crate::ids::account_id(&args.account_id)?;
     net.forget_cookie(&refresh_cookie_name(&args.account_id));
-    mirror.purge(&args.account_id)?;
-    keychain::forget_refresh_cookie(&args.account_id)?;
-    keychain::forget_db_key(&args.account_id)
+    crate::keystore::forget_persisted(&args.account_id);
+    let purged = mirror.purge(&args.account_id);
+    let cookie = keychain::forget_refresh_cookie(&args.account_id);
+    let db_key = keychain::forget_db_key(&args.account_id);
+    purged.and(cookie).and(db_key)
 }
 
 #[cfg(test)]

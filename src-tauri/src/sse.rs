@@ -23,6 +23,8 @@ pub struct StreamFrame {
 #[serde(rename_all = "camelCase")]
 pub struct OpenStreamArgs {
     pub url: String,
+    #[serde(default)]
+    pub account_id: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -56,6 +58,13 @@ pub async fn realtime_open(
         .await
         .map_err(|e| e.to_string())?;
 
+    let account_id = match args.account_id {
+        Some(account_id) => {
+            crate::ids::account_id(&account_id)?;
+            Some(account_id)
+        }
+        None => None,
+    };
     let handle = app.clone();
     let id = stream_id.clone();
     tauri::async_runtime::spawn(async move {
@@ -85,6 +94,9 @@ pub async fn realtime_open(
                         buffer.drain(..split + frame_sep_len(&buffer, split));
                         if let Some(frame) = parse_frame(&raw, &id) {
                             let _ = handle.emit("realtime", frame);
+                            if let Some(account_id) = &account_id {
+                                crate::mirror::poke(&handle, account_id);
+                            }
                         }
                     }
                 }

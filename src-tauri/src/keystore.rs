@@ -250,7 +250,7 @@ fn vault_path(account_id: &str) -> Result<std::path::PathBuf, String> {
     Ok(dir.join("vault.bin"))
 }
 
-fn forget_persisted(account_id: &str) {
+pub(crate) fn forget_persisted(account_id: &str) {
     if let Ok(path) = vault_path(account_id) {
         let _ = std::fs::remove_file(path);
     }

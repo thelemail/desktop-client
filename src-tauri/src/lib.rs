@@ -61,7 +61,6 @@ pub fn run() {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
-        .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_opener::init())
         .manage(net)
         .manage(Keystore::new())
@@ -74,6 +73,8 @@ pub fn run() {
             net::blob_put,
             net::ui_diagnostic,
             net::app_build_info,
+            notify::notify_status,
+            notify::notify_take_opened,
             keystore::keystore_status,
             keystore::keystore_opaque_start_auth,
             keystore::keystore_opaque_finish_auth,

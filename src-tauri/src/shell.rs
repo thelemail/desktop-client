@@ -3,9 +3,18 @@ use tauri_plugin_dialog::DialogExt;
 use tauri_plugin_opener::OpenerExt;
 use url::Url;
 
+pub const NOTIFICATION_SETTINGS_URL: &str =
+    "x-apple.systempreferences:com.apple.Notifications-Settings.extension";
+
 #[tauri::command]
 pub fn open_external(app: AppHandle, url: String) -> Result<(), String> {
     let parsed = Url::parse(&url).map_err(|_| "not a url".to_owned())?;
+    if parsed.as_str() == NOTIFICATION_SETTINGS_URL {
+        return app
+            .opener()
+            .open_url(parsed.as_str(), None::<&str>)
+            .map_err(|e| e.to_string());
+    }
     match parsed.scheme() {
         "https" | "http" | "mailto" => app
             .opener()
