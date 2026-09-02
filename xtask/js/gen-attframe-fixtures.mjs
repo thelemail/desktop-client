@@ -1,5 +1,5 @@
 import { writeFileSync } from 'node:fs';
-import { build } from '../../../web-client/src/lib/mail/attframe.ts';
+import { build } from '../../web-client/src/lib/mail/attframe.ts';
 
 const dir = new URL('../../fixtures/attframe/', import.meta.url);
 const cases = [

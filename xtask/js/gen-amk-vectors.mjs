@@ -4,7 +4,7 @@ import {
 	unwrapMasterKey,
 	deriveMasterKeyId,
 	derivePgpPassphrase
-} from '../../../web-client/src/lib/keystore/opaque-params.ts';
+} from '../../web-client/src/lib/keystore/opaque-params.ts';
 
 const hex = (b) => Buffer.from(b).toString('hex');
 const vectors = [];

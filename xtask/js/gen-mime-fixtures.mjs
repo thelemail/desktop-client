@@ -1,5 +1,5 @@
 import { mkdirSync, writeFileSync } from 'node:fs';
-import { isPgpEncryptedMime, extractPgpArmor } from '../../../web-client/src/lib/mail/pgpMime.ts';
+import { isPgpEncryptedMime, extractPgpArmor } from '../../web-client/src/lib/mail/pgpMime.ts';
 
 const dir = new URL('../../fixtures/mime/', import.meta.url);
 mkdirSync(dir, { recursive: true });

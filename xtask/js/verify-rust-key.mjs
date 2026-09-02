@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 
 const openpgp = await import(
-	new URL('../../../web-client/node_modules/openpgp/dist/node/openpgp.mjs', import.meta.url).href
+	new URL('../../web-client/node_modules/openpgp/dist/node/openpgp.mjs', import.meta.url).href
 );
 
 const [dir, passphrase, expectedFingerprint] = process.argv.slice(2);

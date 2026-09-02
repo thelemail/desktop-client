@@ -1,6 +1,6 @@
 import { writeFileSync } from 'node:fs';
 const openpgp = await import(
-	new URL('../../../web-client/node_modules/openpgp/dist/node/openpgp.mjs', import.meta.url).href
+	new URL('../../web-client/node_modules/openpgp/dist/node/openpgp.mjs', import.meta.url).href
 );
 
 const dir = new URL('../../fixtures/', import.meta.url);

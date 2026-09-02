@@ -1,7 +1,7 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 
 const opaque = await import(
-	new URL('../../../web-client/node_modules/@serenity-kit/opaque/cjs/index.js', import.meta.url).href
+	new URL('../../web-client/node_modules/@serenity-kit/opaque/cjs/index.js', import.meta.url).href
 );
 await opaque.default.ready;
 const { client, server } = opaque.default;
