@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
@@ -114,6 +114,7 @@ pub struct Mirror {
     running: Mutex<HashMap<String, bool>>,
     tokens: Mutex<HashMap<String, String>>,
     token_wakers: Mutex<HashMap<String, Arc<Notify>>>,
+    pokes: Mutex<HashSet<String>>,
     watching: Mutex<HashMap<String, bool>>,
     notify_armed: Mutex<HashMap<String, bool>>,
     started_at: i64,
@@ -126,6 +127,7 @@ impl Default for Mirror {
             running: Mutex::default(),
             tokens: Mutex::default(),
             token_wakers: Mutex::default(),
+            pokes: Mutex::default(),
             watching: Mutex::default(),
             notify_armed: Mutex::default(),
             started_at: now_unix(),
@@ -236,6 +238,23 @@ impl Mirror {
             }
         };
         if changed && self.is_watching(account_id) {
+            self.token_waker(account_id).notify_one();
+        }
+    }
+
+    fn begin_poke(&self, account_id: &str) -> bool {
+        self.pokes
+            .lock()
+            .expect("mirror pokes")
+            .insert(account_id.to_owned())
+    }
+
+    fn finish_poke(&self, account_id: &str) {
+        self.pokes
+            .lock()
+            .expect("mirror pokes")
+            .remove(account_id);
+        if self.is_watching(account_id) {
             self.token_waker(account_id).notify_one();
         }
     }
@@ -596,6 +615,20 @@ fn arrival_for(
     })
 }
 
+fn reset_for_resync(conn: &Connection, watermark_cursor: &str) -> Result<(), String> {
+    let tx = conn.unchecked_transaction().map_err(|e| e.to_string())?;
+    for table in ["search_docs", "bodies", "messages", "sync_state"] {
+        tx.execute(&format!("DELETE FROM {table}"), [])
+            .map_err(|e| e.to_string())?;
+    }
+    tx.execute(
+        "INSERT INTO sync_state (scope, delta_token) VALUES (?1, ?2)",
+        params![DELTA_SCOPE, watermark_cursor],
+    )
+    .map_err(|e| e.to_string())?;
+    tx.commit().map_err(|e| e.to_string())
+}
+
 fn has_delta_token(mirror: &Mirror, account_id: &str) -> bool {
     mirror
         .with_conn(account_id, |conn| {
@@ -616,7 +649,12 @@ fn announce(app: &AppHandle, account_id: &str, fresh: &[crate::notify::NewMail])
     if fresh.is_empty() {
         return;
     }
-    if app.state::<Mirror>().notifications_armed(account_id) {
+    let armed = app.state::<Mirror>().notifications_armed(account_id);
+    eprintln!(
+        "mirror: {} fresh arrival(s) for {account_id}, notifications armed={armed}",
+        fresh.len()
+    );
+    if armed {
         for mail in fresh {
             crate::notify::new_mail(app, mail);
         }
@@ -727,6 +765,20 @@ fn urlencode(value: &str) -> String {
 }
 
 const SESSION_EXPIRED: &str = "session expired";
+const HINT_LAG: std::time::Duration = std::time::Duration::from_secs(6);
+
+pub fn poke(app: &AppHandle, account_id: &str) {
+    let mirror = app.state::<Mirror>();
+    if !mirror.is_watching(account_id) || !mirror.begin_poke(account_id) {
+        return;
+    }
+    let app = app.clone();
+    let account_id = account_id.to_owned();
+    tauri::async_runtime::spawn(async move {
+        tokio::time::sleep(HINT_LAG).await;
+        app.state::<Mirror>().finish_poke(&account_id);
+    });
+}
 const POLL_INTERVAL: std::time::Duration = std::time::Duration::from_secs(30);
 const MAX_BACKOFF: std::time::Duration = std::time::Duration::from_secs(15 * 60);
 
@@ -767,10 +819,15 @@ pub async fn watch_inbox(app: AppHandle, account_id: String) {
             match poll_changes(&app, &account_id, &token).await {
                 Ok(arrivals) => {
                     failures = 0;
+                    eprintln!(
+                        "mirror: poll for {account_id} saw {} arrival(s)",
+                        arrivals.len()
+                    );
                     announce(&app, &account_id, &arrivals);
                 }
                 Err(err) => {
                     failures = failures.saturating_add(1);
+                    eprintln!("mirror: poll for {account_id} failed ({failures}): {err}");
                     if err == SESSION_EXPIRED {
                         let _ = app.emit(
                             "mirror://token-expired",
@@ -837,6 +894,23 @@ mod tests {
 
         mirror.set_token(account, "second");
         assert!(wait().await.is_ok());
+    }
+
+    #[tokio::test]
+    async fn a_hint_wakes_the_watcher_once_and_only_while_it_runs() {
+        let mirror = Mirror::default();
+        let account = "acct";
+        assert!(mirror.claim_watch(account));
+        let waker = mirror.token_waker(account);
+        assert!(mirror.begin_poke(account));
+        assert!(!mirror.begin_poke(account), "a pending poke must coalesce");
+        mirror.finish_poke(account);
+        assert!(
+            tokio::time::timeout(std::time::Duration::from_millis(20), waker.notified())
+                .await
+                .is_ok()
+        );
+        assert!(mirror.begin_poke(account), "a finished poke must allow the next one");
     }
 
     #[test]
@@ -1367,13 +1441,15 @@ async fn poll_changes(
 
         if page.resync_required {
             mirror.with_conn(account_id, |conn| {
-                conn.execute("DELETE FROM messages", [])
-                    .map_err(|e| e.to_string())?;
-                conn.execute("DELETE FROM sync_state", [])
-                    .map_err(|e| e.to_string())?;
-                Ok(())
+                reset_for_resync(conn, &page.next_cursor)
             })?;
-            return Err("mirror is out of date and will be rebuilt".to_owned());
+            eprintln!("mirror: {account_id} is past the change horizon, rebuilding from the watermark");
+            tauri::async_runtime::spawn(backfill(
+                app.clone(),
+                account_id.to_owned(),
+                access_token.to_owned(),
+            ));
+            return Ok(arrivals);
         }
 
         let empty = page.changes.is_empty();

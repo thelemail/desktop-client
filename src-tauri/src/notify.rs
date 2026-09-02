@@ -334,10 +334,14 @@ mod platform {
                 None,
             );
             let app = app.clone();
+            let message_id = mail.message_id.clone();
             let handler = block2::RcBlock::new(move |err: *mut NSError| {
-                if let Some(error) = describe_error(err) {
-                    eprintln!("notifications: the request was rejected: {error}");
-                    refresh_status(&app, Some(error));
+                match describe_error(err) {
+                    Some(error) => {
+                        eprintln!("notifications: the request was rejected: {error}");
+                        refresh_status(&app, Some(error));
+                    }
+                    None => eprintln!("notifications: posted {message_id}"),
                 }
             });
             center().addNotificationRequest_withCompletionHandler(&request, Some(&handler));
@@ -355,6 +359,11 @@ mod platform {
         let mail = mail.clone();
         with_settings(move |settings| {
             let status = settings.authorizationStatus();
+            eprintln!(
+                "notifications: posting {} with authorization={}",
+                mail.message_id,
+                authorization_name(status)
+            );
             if allowed(status) {
                 deliver(&app, &mail);
             } else if status == UNAuthorizationStatus::NotDetermined {
