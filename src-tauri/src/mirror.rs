@@ -143,6 +143,14 @@ impl Mirror {
             .lock()
             .expect("mirror tokens")
             .remove(account_id);
+        self.running
+            .lock()
+            .expect("mirror running")
+            .remove(account_id);
+        self.notify_armed
+            .lock()
+            .expect("mirror notify")
+            .remove(account_id);
 
         let dir = Self::root().join("accounts").join(account_id);
         if !dir.starts_with(Self::root().join("accounts")) {
@@ -680,6 +688,17 @@ mod tests {
         );
         mirror.arm_notifications("acct");
         assert!(mirror.notifications_armed("acct"));
+    }
+
+    #[test]
+    fn purging_an_account_forgets_its_sync_bookkeeping() {
+        let mirror = Mirror::default();
+        let account = "0f0f0f0f-0f0f-4f0f-8f0f-0f0f0f0f0f0f";
+        assert!(mirror.claim(account));
+        mirror.arm_notifications(account);
+        mirror.purge(account).expect("purge");
+        assert!(mirror.claim(account), "a purged account must be claimable again");
+        assert!(!mirror.notifications_armed(account));
     }
 
     #[test]
