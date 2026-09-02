@@ -257,7 +257,7 @@ interface EventSourceLike {
 	onmessage: ((ev: MessageEvent) => void) | null;
 }
 
-function openEventSource(url: string): EventSourceLike {
+function openEventSource(url: string, accountId: string): EventSourceLike {
 	const shim: EventSourceLike = {
 		close: () => {},
 		onopen: null,
@@ -283,7 +283,7 @@ function openEventSource(url: string): EventSourceLike {
 			unlisten();
 			return;
 		}
-		streamId = await invoke<string>('realtime_open', { args: { url } });
+		streamId = await invoke<string>('realtime_open', { args: { url, accountId } });
 	})();
 
 	shim.close = () => {
