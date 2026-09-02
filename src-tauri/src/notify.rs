@@ -87,8 +87,8 @@ mod platform {
     use objc2_user_notifications::{
         UNAuthorizationOptions, UNAuthorizationStatus, UNMutableNotificationContent,
         UNNotification, UNNotificationPresentationOptions, UNNotificationRequest,
-        UNNotificationResponse, UNNotificationSetting, UNNotificationSettings,
-        UNNotificationSound, UNUserNotificationCenter, UNUserNotificationCenterDelegate,
+        UNNotificationResponse, UNNotificationSetting, UNNotificationSettings, UNNotificationSound,
+        UNUserNotificationCenter, UNUserNotificationCenterDelegate,
     };
     use tauri::{AppHandle, Emitter, Manager};
 
@@ -284,8 +284,8 @@ mod platform {
         let options = UNAuthorizationOptions::Alert
             | UNAuthorizationOptions::Sound
             | UNAuthorizationOptions::Badge;
-        let handler = block2::RcBlock::new(
-            move |granted: objc2::runtime::Bool, err: *mut NSError| {
+        let handler =
+            block2::RcBlock::new(move |granted: objc2::runtime::Bool, err: *mut NSError| {
                 let error = describe_error(err);
                 if !granted.as_bool() {
                     eprintln!(
@@ -299,8 +299,7 @@ mod platform {
                 {
                     deliver(&app, mail);
                 }
-            },
-        );
+            });
         center().requestAuthorizationWithOptions_completionHandler(options, &handler);
     }
 
@@ -335,15 +334,14 @@ mod platform {
             );
             let app = app.clone();
             let message_id = mail.message_id.clone();
-            let handler = block2::RcBlock::new(move |err: *mut NSError| {
-                match describe_error(err) {
+            let handler =
+                block2::RcBlock::new(move |err: *mut NSError| match describe_error(err) {
                     Some(error) => {
                         eprintln!("notifications: the request was rejected: {error}");
                         refresh_status(&app, Some(error));
                     }
                     None => eprintln!("notifications: posted {message_id}"),
-                }
-            });
+                });
             center().addNotificationRequest_withCompletionHandler(&request, Some(&handler));
         }
     }
@@ -351,7 +349,9 @@ mod platform {
     pub fn post(app: &AppHandle, mail: &NewMail) {
         if !bundled() {
             if !WARNED_UNBUNDLED.swap(true, Ordering::SeqCst) {
-                eprintln!("notifications: not running from an app bundle, notifications are disabled");
+                eprintln!(
+                    "notifications: not running from an app bundle, notifications are disabled"
+                );
             }
             return;
         }

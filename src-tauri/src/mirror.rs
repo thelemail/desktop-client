@@ -250,10 +250,7 @@ impl Mirror {
     }
 
     fn finish_poke(&self, account_id: &str) {
-        self.pokes
-            .lock()
-            .expect("mirror pokes")
-            .remove(account_id);
+        self.pokes.lock().expect("mirror pokes").remove(account_id);
         if self.is_watching(account_id) {
             self.token_waker(account_id).notify_one();
         }
@@ -564,9 +561,7 @@ pub fn apply_page(
         };
         let known = message_known(conn, &item.id);
         upsert_message(conn, item, &preview, decrypted).map_err(|e| e.to_string())?;
-        if !known
-            && let Some(mail) = arrival_for(account_id, item, &preview, decrypted, since)
-        {
+        if !known && let Some(mail) = arrival_for(account_id, item, &preview, decrypted, since) {
             fresh.push(mail);
         }
     }
@@ -580,11 +575,9 @@ pub fn apply_page(
 }
 
 fn message_known(conn: &Connection, id: &str) -> bool {
-    conn.query_row(
-        "SELECT count(*) FROM messages WHERE id = ?1",
-        [id],
-        |r| r.get::<_, i64>(0),
-    )
+    conn.query_row("SELECT count(*) FROM messages WHERE id = ?1", [id], |r| {
+        r.get::<_, i64>(0)
+    })
     .unwrap_or(0)
         > 0
 }
@@ -723,7 +716,15 @@ pub async fn sync_scope(
         }
 
         let arrived = mirror.with_conn(account_id, |conn| {
-            apply_page(conn, ks, account_id, scope, &page.items, &page.next_cursor, since)
+            apply_page(
+                conn,
+                ks,
+                account_id,
+                scope,
+                &page.items,
+                &page.next_cursor,
+                since,
+            )
         })?;
         fresh.extend(arrived);
         previews_done += page.items.len() as u64;
@@ -874,7 +875,10 @@ mod tests {
         assert!(mirror.claim(account));
         mirror.arm_notifications(account);
         mirror.purge(account).expect("purge");
-        assert!(mirror.claim(account), "a purged account must be claimable again");
+        assert!(
+            mirror.claim(account),
+            "a purged account must be claimable again"
+        );
         assert!(!mirror.notifications_armed(account));
     }
 
@@ -890,7 +894,10 @@ mod tests {
         assert!(wait().await.is_ok(), "a new token must wake the watcher");
 
         mirror.set_token(account, "first");
-        assert!(wait().await.is_err(), "pushing the same token again must not wake it");
+        assert!(
+            wait().await.is_err(),
+            "pushing the same token again must not wake it"
+        );
 
         mirror.set_token(account, "second");
         assert!(wait().await.is_ok());
@@ -910,7 +917,10 @@ mod tests {
                 .await
                 .is_ok()
         );
-        assert!(mirror.begin_poke(account), "a finished poke must allow the next one");
+        assert!(
+            mirror.begin_poke(account),
+            "a finished poke must allow the next one"
+        );
     }
 
     #[test]
@@ -928,7 +938,13 @@ mod tests {
         assert!(woke.is_err());
     }
 
-    fn item(id: &str, direction: &str, mailbox: &str, read: bool, stored_at: &str) -> MessageListItem {
+    fn item(
+        id: &str,
+        direction: &str,
+        mailbox: &str,
+        read: bool,
+        stored_at: &str,
+    ) -> MessageListItem {
         MessageListItem {
             id: id.to_owned(),
             direction: direction.to_owned(),
@@ -1366,8 +1382,7 @@ pub fn apply_changes(
             };
             let known = message_known(&tx, &item.id);
             upsert_message(&tx, item, &preview, decrypted).map_err(|e| e.to_string())?;
-            if !known
-                && let Some(mail) = arrival_for(account_id, item, &preview, decrypted, since)
+            if !known && let Some(mail) = arrival_for(account_id, item, &preview, decrypted, since)
             {
                 fresh.push(mail);
             }
@@ -1440,10 +1455,10 @@ async fn poll_changes(
             serde_json::from_slice(&resp.body.unwrap_or_default()).map_err(|e| e.to_string())?;
 
         if page.resync_required {
-            mirror.with_conn(account_id, |conn| {
-                reset_for_resync(conn, &page.next_cursor)
-            })?;
-            eprintln!("mirror: {account_id} is past the change horizon, rebuilding from the watermark");
+            mirror.with_conn(account_id, |conn| reset_for_resync(conn, &page.next_cursor))?;
+            eprintln!(
+                "mirror: {account_id} is past the change horizon, rebuilding from the watermark"
+            );
             tauri::async_runtime::spawn(backfill(
                 app.clone(),
                 account_id.to_owned(),
