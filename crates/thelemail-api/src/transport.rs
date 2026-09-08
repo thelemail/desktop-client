@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicI64, Ordering};
 
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue, ORIGIN};
 use reqwest::{Client, Method};
@@ -59,6 +60,7 @@ pub struct Net {
     blob: Client,
     cookies: Arc<CookieStoreMutex>,
     config: ApiConfig,
+    clock_offset_ms: AtomicI64,
 }
 
 impl Net {
@@ -82,7 +84,38 @@ impl Net {
             blob,
             cookies,
             config,
+            clock_offset_ms: AtomicI64::new(0),
         })
+    }
+
+    pub fn clock_offset_ms(&self) -> i64 {
+        self.clock_offset_ms.load(Ordering::Relaxed)
+    }
+
+    fn record_server_date(&self, header: Option<&HeaderValue>) {
+        let Some(value) = header else { return };
+        let Ok(text) = value.to_str() else { return };
+        let Ok(server) = httpdate::parse_http_date(text) else {
+            return;
+        };
+        let Ok(server_ms) = i64::try_from(
+            server
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_millis(),
+        ) else {
+            return;
+        };
+        let Ok(local_ms) = i64::try_from(
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_millis(),
+        ) else {
+            return;
+        };
+        self.clock_offset_ms
+            .store(server_ms - local_ms, Ordering::Relaxed);
     }
 
     pub fn config(&self) -> &ApiConfig {
@@ -140,6 +173,7 @@ impl Net {
 
         let resp = builder.send().await.map_err(|_| TransportError::Network)?;
         let status = resp.status().as_u16();
+        self.record_server_date(resp.headers().get(reqwest::header::DATE));
 
         let mut out_headers = HashMap::new();
         for (name, value) in resp.headers() {
