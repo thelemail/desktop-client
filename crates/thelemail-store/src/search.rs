@@ -6,14 +6,68 @@ use crate::db::StoreError;
 const MAX_TOKENS: usize = 16;
 const DEFAULT_LIMIT: usize = 100;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Folder {
+    Inbox,
+    Sent,
+    Archive,
+    Spam,
+    Trash,
+    Snoozed,
+    Starred,
+}
+
+impl Folder {
+    fn parse(value: &str) -> Option<Self> {
+        match value {
+            "inbox" => Some(Self::Inbox),
+            "sent" => Some(Self::Sent),
+            "archive" => Some(Self::Archive),
+            "spam" => Some(Self::Spam),
+            "trash" => Some(Self::Trash),
+            "snoozed" => Some(Self::Snoozed),
+            "starred" => Some(Self::Starred),
+            _ => None,
+        }
+    }
+
+    fn predicate(self) -> &'static str {
+        match self {
+            Self::Inbox => " AND m.mailbox_state = 'inbox' AND m.direction = 'received'",
+            Self::Sent => " AND m.mailbox_state = 'inbox' AND m.direction = 'sent'",
+            Self::Archive => " AND m.mailbox_state = 'archive'",
+            Self::Spam => " AND m.mailbox_state = 'spam'",
+            Self::Trash => " AND m.mailbox_state = 'trash'",
+            Self::Snoozed => " AND m.mailbox_state = 'snoozed'",
+            Self::Starred => " AND m.starred = 1",
+        }
+    }
+}
+
 #[derive(Debug, Default, PartialEq, Eq)]
 pub struct ParsedQuery {
     pub fts: Option<String>,
     pub from: Vec<String>,
-    pub mailbox: Option<String>,
+    pub folder: Option<Folder>,
+    pub unknown_folder: bool,
     pub unread: Option<bool>,
     pub starred: Option<bool>,
     pub has_attachment: bool,
+}
+
+impl ParsedQuery {
+    pub fn has_filters(&self) -> bool {
+        !self.from.is_empty()
+            || self.folder.is_some()
+            || self.unknown_folder
+            || self.unread.is_some()
+            || self.starred.is_some()
+            || self.has_attachment
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.fts.is_none() && !self.has_filters()
+    }
 }
 
 pub fn parse_query(input: &str) -> ParsedQuery {
@@ -21,11 +75,24 @@ pub fn parse_query(input: &str) -> ParsedQuery {
     let mut free = String::new();
 
     for token in split_respecting_quotes(input) {
-        match token.split_once(':') {
-            Some(("from", value)) if !value.is_empty() => parsed.from.push(value.to_lowercase()),
-            Some(("in", value)) if !value.is_empty() => {
-                parsed.mailbox = Some(value.to_lowercase());
-            }
+        let split = token
+            .split_once(':')
+            .map(|(key, value)| (key.to_lowercase(), value.to_lowercase()));
+        match split
+            .as_ref()
+            .map(|(key, value)| (key.as_str(), value.as_str()))
+        {
+            Some(("from", value)) if !value.is_empty() => parsed.from.push(value.to_string()),
+            Some(("in", value)) if !value.is_empty() => match Folder::parse(value) {
+                Some(folder) => {
+                    parsed.folder = Some(folder);
+                    parsed.unknown_folder = false;
+                }
+                None => {
+                    parsed.folder = None;
+                    parsed.unknown_folder = true;
+                }
+            },
             Some(("is", "unread")) => parsed.unread = Some(true),
             Some(("is", "read")) => parsed.unread = Some(false),
             Some(("is", "starred")) => parsed.starred = Some(true),
@@ -48,10 +115,7 @@ fn split_respecting_quotes(input: &str) -> Vec<String> {
 
     for ch in input.chars() {
         match ch {
-            '"' => {
-                in_quotes = !in_quotes;
-                current.push(ch);
-            }
+            '"' => in_quotes = !in_quotes,
             c if c.is_whitespace() && !in_quotes => {
                 if !current.is_empty() {
                     out.push(std::mem::take(&mut current));
@@ -101,6 +165,17 @@ fn build_match(free: &str) -> Option<String> {
     }
 }
 
+fn escape_like(value: &str) -> String {
+    let mut out = String::with_capacity(value.len());
+    for ch in value.chars() {
+        if ch == '\\' || ch == '%' || ch == '_' {
+            out.push('\\');
+        }
+        out.push(ch);
+    }
+    out
+}
+
 fn sanitize_tokens(input: &str) -> Vec<String> {
     input
         .split(|c: char| !c.is_alphanumeric())
@@ -120,6 +195,7 @@ pub struct SearchHit {
     pub excerpt: String,
     pub stored_at: String,
     pub mailbox_state: String,
+    pub direction: String,
     pub read: bool,
     pub starred: bool,
     pub attachment_count: i64,
@@ -132,11 +208,15 @@ pub fn search_messages(
     limit: Option<usize>,
 ) -> Result<Vec<SearchHit>, StoreError> {
     let parsed = parse_query(query);
+    if parsed.is_empty() {
+        return Ok(Vec::new());
+    }
     let limit = limit.unwrap_or(DEFAULT_LIMIT) as i64;
 
     let mut sql = String::from(
         "SELECT m.id, m.subject, m.sender_display, m.sender_address, m.snippet, \
-                m.stored_at, m.mailbox_state, m.read, m.starred, m.attachment_count, m.thread_root_id, ",
+                m.stored_at, m.mailbox_state, m.direction, m.read, m.starred, \
+                m.attachment_count, m.thread_root_id, ",
     );
 
     if parsed.fts.is_some() {
@@ -154,9 +234,11 @@ pub fn search_messages(
         params.push(Box::new(fts.clone()));
     }
 
-    if let Some(mailbox) = &parsed.mailbox {
-        params.push(Box::new(mailbox.clone()));
-        sql.push_str(&format!(" AND m.mailbox_state = ?{}", params.len()));
+    if parsed.unknown_folder {
+        sql.push_str(" AND 0");
+    }
+    if let Some(folder) = parsed.folder {
+        sql.push_str(folder.predicate());
     }
     if let Some(unread) = parsed.unread {
         sql.push_str(if unread {
@@ -172,9 +254,10 @@ pub fn search_messages(
         sql.push_str(" AND m.attachment_count > 0");
     }
     for sender in &parsed.from {
-        params.push(Box::new(format!("%{sender}%")));
+        params.push(Box::new(format!("%{}%", escape_like(sender))));
         sql.push_str(&format!(
-            " AND (lower(m.sender_address) LIKE ?{n} OR lower(m.sender_display) LIKE ?{n})",
+            " AND (lower(m.sender_address) LIKE ?{n} ESCAPE '\\' \
+               OR lower(m.sender_display) LIKE ?{n} ESCAPE '\\')",
             n = params.len()
         ));
     }
@@ -199,11 +282,12 @@ pub fn search_messages(
             snippet: row.get(4)?,
             stored_at: row.get(5)?,
             mailbox_state: row.get(6)?,
-            read: row.get::<_, i64>(7)? != 0,
-            starred: row.get::<_, i64>(8)? != 0,
-            attachment_count: row.get(9)?,
-            thread_root_id: row.get(10)?,
-            excerpt: row.get(11)?,
+            direction: row.get(7)?,
+            read: row.get::<_, i64>(8)? != 0,
+            starred: row.get::<_, i64>(9)? != 0,
+            attachment_count: row.get(10)?,
+            thread_root_id: row.get(11)?,
+            excerpt: row.get(12)?,
         })
     })?;
 
