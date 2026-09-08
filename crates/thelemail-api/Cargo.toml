@@ -6,6 +6,7 @@ rust-version.workspace = true
 license.workspace = true
 
 [dependencies]
+httpdate = "1"
 reqwest = { workspace = true }
 reqwest_cookie_store = { workspace = true }
 serde.workspace = true

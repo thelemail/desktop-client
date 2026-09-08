@@ -386,6 +386,7 @@ impl Keystore {
     pub async fn opaque_finish_registration(
         &self,
         args: OpaqueFinishRegistrationArgs,
+        clock_offset_ms: i64,
     ) -> OpaqueFinishRegistrationResponse {
         let op = self
             .pending_reg
@@ -424,7 +425,9 @@ impl Keystore {
         let master_key_id = b64_std().encode(derive_master_key_id(&amk));
         let passphrase = derive_pgp_passphrase(&amk);
 
-        let Ok(generated) = generate_account_key("", &op.email, passphrase.expose()) else {
+        let Ok(generated) =
+            generate_account_key("", &op.email, passphrase.expose(), clock_offset_ms)
+        else {
             return OpaqueFinishRegistrationResponse::Err {
                 ok: false,
                 code: "no_pending_operation",
@@ -912,7 +915,11 @@ impl Keystore {
         }
     }
 
-    pub fn create_alias_key(&self, args: CreateAliasKeyArgs) -> CreateAliasKeyResponse {
+    pub fn create_alias_key(
+        &self,
+        args: CreateAliasKeyArgs,
+        clock_offset_ms: i64,
+    ) -> CreateAliasKeyResponse {
         if args.recipients.is_empty() {
             return CreateAliasKeyResponse::err("no_recipients");
         }
@@ -921,7 +928,8 @@ impl Keystore {
             return CreateAliasKeyResponse::err("locked");
         };
 
-        let Ok(generated) = generate_alias_key(&args.display_name, &args.email) else {
+        let Ok(generated) = generate_alias_key(&args.display_name, &args.email, clock_offset_ms)
+        else {
             return CreateAliasKeyResponse::err("unknown");
         };
 
