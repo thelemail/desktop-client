@@ -42,7 +42,17 @@ fn seed_row(
         "INSERT INTO messages (id, direction, mailbox_state, stored_at, subject, sender_display, \
          sender_address, snippet, read, starred, attachment_count, synced_at) \
          VALUES (?1,?2,?3,?4,?5,?6,?6,'',?7,?8,?9,'2026-08-31T10:00:00Z')",
-        params![id, direction, mailbox, stored_at, subject, sender, read, starred, attachments],
+        params![
+            id,
+            direction,
+            mailbox,
+            stored_at,
+            subject,
+            sender,
+            read,
+            starred,
+            attachments
+        ],
     )
     .expect("insert message");
     let rowid = conn.last_insert_rowid();
@@ -729,13 +739,55 @@ fn search_separates_sent_from_inbox() {
     let key = generate_db_key();
     let conn = open_account_db(&path, &key, ACCOUNT).expect("open");
 
-    seed_row(&conn, "in", "Invoice", "anna@school.pt", "received", "inbox", 1, 0, 0, "2026-01-01T00:00:00Z");
-    seed_row(&conn, "out", "Invoice", "me@thelemail.com", "sent", "inbox", 1, 0, 0, "2026-02-01T00:00:00Z");
-    seed_row(&conn, "filed", "Invoice", "me@thelemail.com", "sent", "archive", 1, 0, 0, "2026-03-01T00:00:00Z");
+    seed_row(
+        &conn,
+        "in",
+        "Invoice",
+        "anna@school.pt",
+        "received",
+        "inbox",
+        1,
+        0,
+        0,
+        "2026-01-01T00:00:00Z",
+    );
+    seed_row(
+        &conn,
+        "out",
+        "Invoice",
+        "me@thelemail.com",
+        "sent",
+        "inbox",
+        1,
+        0,
+        0,
+        "2026-02-01T00:00:00Z",
+    );
+    seed_row(
+        &conn,
+        "filed",
+        "Invoice",
+        "me@thelemail.com",
+        "sent",
+        "archive",
+        1,
+        0,
+        0,
+        "2026-03-01T00:00:00Z",
+    );
 
-    assert_eq!(ids(&search_messages(&conn, "invoice in:sent", None).expect("sent")), ["out"]);
-    assert_eq!(ids(&search_messages(&conn, "invoice in:inbox", None).expect("inbox")), ["in"]);
-    assert_eq!(ids(&search_messages(&conn, "invoice in:archive", None).expect("archive")), ["filed"]);
+    assert_eq!(
+        ids(&search_messages(&conn, "invoice in:sent", None).expect("sent")),
+        ["out"]
+    );
+    assert_eq!(
+        ids(&search_messages(&conn, "invoice in:inbox", None).expect("inbox")),
+        ["in"]
+    );
+    assert_eq!(
+        ids(&search_messages(&conn, "invoice in:archive", None).expect("archive")),
+        ["filed"]
+    );
 }
 
 #[test]
@@ -744,7 +796,18 @@ fn search_reports_the_direction_of_a_hit() {
     let key = generate_db_key();
     let conn = open_account_db(&path, &key, ACCOUNT).expect("open");
 
-    seed_row(&conn, "out", "Invoice", "me@thelemail.com", "sent", "inbox", 1, 0, 0, "2026-02-01T00:00:00Z");
+    seed_row(
+        &conn,
+        "out",
+        "Invoice",
+        "me@thelemail.com",
+        "sent",
+        "inbox",
+        1,
+        0,
+        0,
+        "2026-02-01T00:00:00Z",
+    );
     let hits = search_messages(&conn, "invoice", None).expect("search");
     assert_eq!(hits.len(), 1);
     assert_eq!(hits[0].direction, "sent");
@@ -756,14 +819,51 @@ fn search_narrows_by_read_star_and_attachments() {
     let key = generate_db_key();
     let conn = open_account_db(&path, &key, ACCOUNT).expect("open");
 
-    seed_row(&conn, "plain", "Invoice", "a@x.pt", "received", "inbox", 1, 0, 0, "2026-01-01T00:00:00Z");
-    seed_row(&conn, "fresh", "Invoice", "a@x.pt", "received", "inbox", 0, 1, 2, "2026-02-01T00:00:00Z");
+    seed_row(
+        &conn,
+        "plain",
+        "Invoice",
+        "a@x.pt",
+        "received",
+        "inbox",
+        1,
+        0,
+        0,
+        "2026-01-01T00:00:00Z",
+    );
+    seed_row(
+        &conn,
+        "fresh",
+        "Invoice",
+        "a@x.pt",
+        "received",
+        "inbox",
+        0,
+        1,
+        2,
+        "2026-02-01T00:00:00Z",
+    );
 
-    assert_eq!(ids(&search_messages(&conn, "invoice is:unread", None).expect("u")), ["fresh"]);
-    assert_eq!(ids(&search_messages(&conn, "invoice is:read", None).expect("r")), ["plain"]);
-    assert_eq!(ids(&search_messages(&conn, "invoice is:starred", None).expect("s")), ["fresh"]);
-    assert_eq!(ids(&search_messages(&conn, "invoice has:attachment", None).expect("a")), ["fresh"]);
-    assert_eq!(ids(&search_messages(&conn, "invoice in:starred", None).expect("f")), ["fresh"]);
+    assert_eq!(
+        ids(&search_messages(&conn, "invoice is:unread", None).expect("u")),
+        ["fresh"]
+    );
+    assert_eq!(
+        ids(&search_messages(&conn, "invoice is:read", None).expect("r")),
+        ["plain"]
+    );
+    assert_eq!(
+        ids(&search_messages(&conn, "invoice is:starred", None).expect("s")),
+        ["fresh"]
+    );
+    assert_eq!(
+        ids(&search_messages(&conn, "invoice has:attachment", None).expect("a")),
+        ["fresh"]
+    );
+    assert_eq!(
+        ids(&search_messages(&conn, "invoice in:starred", None).expect("f")),
+        ["fresh"]
+    );
 }
 
 #[test]
@@ -772,11 +872,47 @@ fn a_filter_only_query_answers_newest_first() {
     let key = generate_db_key();
     let conn = open_account_db(&path, &key, ACCOUNT).expect("open");
 
-    seed_row(&conn, "old", "One", "a@x.pt", "received", "inbox", 0, 0, 0, "2026-01-01T00:00:00Z");
-    seed_row(&conn, "new", "Two", "a@x.pt", "received", "inbox", 0, 0, 0, "2026-06-01T00:00:00Z");
-    seed_row(&conn, "seen", "Three", "a@x.pt", "received", "inbox", 1, 0, 0, "2026-07-01T00:00:00Z");
+    seed_row(
+        &conn,
+        "old",
+        "One",
+        "a@x.pt",
+        "received",
+        "inbox",
+        0,
+        0,
+        0,
+        "2026-01-01T00:00:00Z",
+    );
+    seed_row(
+        &conn,
+        "new",
+        "Two",
+        "a@x.pt",
+        "received",
+        "inbox",
+        0,
+        0,
+        0,
+        "2026-06-01T00:00:00Z",
+    );
+    seed_row(
+        &conn,
+        "seen",
+        "Three",
+        "a@x.pt",
+        "received",
+        "inbox",
+        1,
+        0,
+        0,
+        "2026-07-01T00:00:00Z",
+    );
 
-    assert_eq!(ids(&search_messages(&conn, "is:unread", None).expect("filter")), ["new", "old"]);
+    assert_eq!(
+        ids(&search_messages(&conn, "is:unread", None).expect("filter")),
+        ["new", "old"]
+    );
 }
 
 #[test]
@@ -786,7 +922,11 @@ fn an_unrecognised_folder_matches_nothing() {
     let conn = open_account_db(&path, &key, ACCOUNT).expect("open");
     seed(&conn, "m1", "Invoice", "alice@example.com", "notes");
 
-    assert!(search_messages(&conn, "invoice in:nowhere", None).expect("search").is_empty());
+    assert!(
+        search_messages(&conn, "invoice in:nowhere", None)
+            .expect("search")
+            .is_empty()
+    );
 }
 
 #[test]
@@ -795,10 +935,35 @@ fn a_from_value_cannot_smuggle_like_wildcards() {
     let key = generate_db_key();
     let conn = open_account_db(&path, &key, ACCOUNT).expect("open");
 
-    seed_row(&conn, "axb", "Invoice", "axb@x.pt", "received", "inbox", 1, 0, 0, "2026-01-01T00:00:00Z");
-    seed_row(&conn, "a_b", "Invoice", "a_b@x.pt", "received", "inbox", 1, 0, 0, "2026-02-01T00:00:00Z");
+    seed_row(
+        &conn,
+        "axb",
+        "Invoice",
+        "axb@x.pt",
+        "received",
+        "inbox",
+        1,
+        0,
+        0,
+        "2026-01-01T00:00:00Z",
+    );
+    seed_row(
+        &conn,
+        "a_b",
+        "Invoice",
+        "a_b@x.pt",
+        "received",
+        "inbox",
+        1,
+        0,
+        0,
+        "2026-02-01T00:00:00Z",
+    );
 
-    assert_eq!(ids(&search_messages(&conn, "invoice from:a_b", None).expect("underscore")), ["a_b"]);
+    assert_eq!(
+        ids(&search_messages(&conn, "invoice from:a_b", None).expect("underscore")),
+        ["a_b"]
+    );
 }
 
 #[test]
@@ -807,11 +972,40 @@ fn several_from_clauses_must_all_match() {
     let key = generate_db_key();
     let conn = open_account_db(&path, &key, ACCOUNT).expect("open");
 
-    seed_row(&conn, "anna", "Invoice", "anna@school.pt", "received", "inbox", 1, 0, 0, "2026-01-01T00:00:00Z");
-    seed_row(&conn, "bob", "Invoice", "bob@other.pt", "received", "inbox", 1, 0, 0, "2026-02-01T00:00:00Z");
+    seed_row(
+        &conn,
+        "anna",
+        "Invoice",
+        "anna@school.pt",
+        "received",
+        "inbox",
+        1,
+        0,
+        0,
+        "2026-01-01T00:00:00Z",
+    );
+    seed_row(
+        &conn,
+        "bob",
+        "Invoice",
+        "bob@other.pt",
+        "received",
+        "inbox",
+        1,
+        0,
+        0,
+        "2026-02-01T00:00:00Z",
+    );
 
-    assert_eq!(ids(&search_messages(&conn, "invoice from:anna from:school", None).expect("both")), ["anna"]);
-    assert!(search_messages(&conn, "invoice from:anna from:bob", None).expect("neither").is_empty());
+    assert_eq!(
+        ids(&search_messages(&conn, "invoice from:anna from:school", None).expect("both")),
+        ["anna"]
+    );
+    assert!(
+        search_messages(&conn, "invoice from:anna from:bob", None)
+            .expect("neither")
+            .is_empty()
+    );
 }
 
 #[test]
@@ -819,7 +1013,18 @@ fn a_hit_serialises_the_fields_the_clients_read() {
     let (_dir, path) = temp_db();
     let key = generate_db_key();
     let conn = open_account_db(&path, &key, ACCOUNT).expect("open");
-    seed_row(&conn, "out", "Invoice", "me@thelemail.com", "sent", "inbox", 0, 1, 2, "2026-02-01T00:00:00Z");
+    seed_row(
+        &conn,
+        "out",
+        "Invoice",
+        "me@thelemail.com",
+        "sent",
+        "inbox",
+        0,
+        1,
+        2,
+        "2026-02-01T00:00:00Z",
+    );
 
     let hits = search_messages(&conn, "invoice", None).expect("search");
     let wire: serde_json::Value = serde_json::to_value(&hits[0]).expect("serialise");

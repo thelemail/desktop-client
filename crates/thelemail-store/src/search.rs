@@ -78,7 +78,10 @@ pub fn parse_query(input: &str) -> ParsedQuery {
         let split = token
             .split_once(':')
             .map(|(key, value)| (key.to_lowercase(), value.to_lowercase()));
-        match split.as_ref().map(|(key, value)| (key.as_str(), value.as_str())) {
+        match split
+            .as_ref()
+            .map(|(key, value)| (key.as_str(), value.as_str()))
+        {
             Some(("from", value)) if !value.is_empty() => parsed.from.push(value.to_string()),
             Some(("in", value)) if !value.is_empty() => match Folder::parse(value) {
                 Some(folder) => {
