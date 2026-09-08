@@ -4,7 +4,7 @@ const OUT: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../target/interop");
 
 #[test]
 fn a_generated_key_round_trips_in_rust() {
-    let key = generate_account_key("Test User", "user@thelemail.local", "a-passphrase")
+    let key = generate_account_key("Test User", "user@thelemail.local", "a-passphrase", 0)
         .expect("generate");
     let opened = UnlockedKey::open(&key.encrypted_private_key_armored, "a-passphrase")
         .expect("reopen generated key");
@@ -14,7 +14,7 @@ fn a_generated_key_round_trips_in_rust() {
 
 #[test]
 fn a_generated_key_is_readable_by_openpgp_js_with_the_expected_packet_shape() {
-    let key = generate_account_key("Test User", "user@thelemail.local", "a-passphrase")
+    let key = generate_account_key("Test User", "user@thelemail.local", "a-passphrase", 0)
         .expect("generate");
     std::fs::create_dir_all(OUT).expect("create out dir");
     std::fs::write(
@@ -45,7 +45,7 @@ fn a_generated_key_is_readable_by_openpgp_js_with_the_expected_packet_shape() {
 
 #[test]
 fn rust_encrypted_messages_decrypt_in_openpgp_js() {
-    let key = generate_account_key("Test User", "user@thelemail.local", "a-passphrase")
+    let key = generate_account_key("Test User", "user@thelemail.local", "a-passphrase", 0)
         .expect("generate");
     let unlocked =
         UnlockedKey::open(&key.encrypted_private_key_armored, "a-passphrase").expect("unlock");
@@ -104,7 +104,7 @@ fn rust_encrypted_messages_decrypt_in_openpgp_js() {
 
 #[test]
 fn openpgp_js_sees_a_signature_only_when_rust_was_asked_to_sign() {
-    let key = generate_account_key("Test User", "user@thelemail.local", "a-passphrase")
+    let key = generate_account_key("Test User", "user@thelemail.local", "a-passphrase", 0)
         .expect("generate");
     let unlocked =
         UnlockedKey::open(&key.encrypted_private_key_armored, "a-passphrase").expect("unlock");
@@ -150,12 +150,13 @@ fn openpgp_js_sees_a_signature_only_when_rust_was_asked_to_sign() {
 fn an_alias_grant_survives_the_armored_round_trip() {
     use thelemail_crypto::openpgp::generate_alias_key;
 
-    let member = generate_account_key("Member", "member@thelemail.local", "member-pass")
+    let member = generate_account_key("Member", "member@thelemail.local", "member-pass", 0)
         .expect("generate member key");
     let member_key = UnlockedKey::open(&member.encrypted_private_key_armored, "member-pass")
         .expect("open member key");
 
-    let alias = generate_alias_key("Team Alias", "team@thelemail.local").expect("generate alias");
+    let alias =
+        generate_alias_key("Team Alias", "team@thelemail.local", 0).expect("generate alias");
     let wrapped = member_key
         .encrypt_to_armored(
             std::slice::from_ref(&member.public_key_armored),
@@ -181,11 +182,11 @@ fn an_alias_grant_survives_the_armored_round_trip() {
 fn a_signature_is_reported_valid_only_for_the_key_that_made_it() {
     use thelemail_crypto::openpgp::SignatureState;
 
-    let sender = generate_account_key("Sender", "sender@thelemail.local", "sender-pass")
+    let sender = generate_account_key("Sender", "sender@thelemail.local", "sender-pass", 0)
         .expect("generate sender");
     let sender_key =
         UnlockedKey::open(&sender.encrypted_private_key_armored, "sender-pass").expect("unlock");
-    let stranger = generate_account_key("Stranger", "stranger@thelemail.local", "stranger-pass")
+    let stranger = generate_account_key("Stranger", "stranger@thelemail.local", "stranger-pass", 0)
         .expect("generate stranger");
 
     let plaintext = b"signed by the sender";
@@ -234,4 +235,69 @@ fn a_signature_is_reported_valid_only_for_the_key_that_made_it() {
         check.is_none(),
         "no verdict is claimed when no verification keys were supplied"
     );
+}
+
+#[test]
+fn a_generated_key_is_stamped_behind_the_local_clock() {
+    use pgp::composed::{Deserializable, SignedPublicKey};
+    use pgp::types::KeyDetails;
+
+    let before = std::time::SystemTime::now();
+    let key = generate_account_key("Test User", "user@thelemail.local", "a-passphrase", 0)
+        .expect("generate");
+    let (public, _) =
+        SignedPublicKey::from_armor_single(std::io::Cursor::new(&key.public_key_armored))
+            .expect("parse public key");
+
+    let primary: std::time::SystemTime = public.primary_key.created_at().into();
+    assert!(
+        primary < before,
+        "a key stamped at or ahead of the local clock is one the server cannot encrypt to yet"
+    );
+
+    assert!(
+        !public.public_subkeys.is_empty(),
+        "expected an encryption subkey"
+    );
+    for sub in &public.public_subkeys {
+        let at: std::time::SystemTime = sub.key.created_at().into();
+        assert!(
+            at < before,
+            "the encryption subkey must be stamped in the past too"
+        );
+    }
+}
+
+#[test]
+fn a_generated_key_follows_the_server_clock_not_the_device_clock() {
+    use pgp::composed::{Deserializable, SignedPublicKey};
+    use pgp::types::KeyDetails;
+
+    let device_ahead = std::time::Duration::from_secs(3 * 60 * 60);
+    let offset_ms = -(device_ahead.as_millis() as i64);
+    let server_now = std::time::SystemTime::now() - device_ahead;
+
+    let key = generate_account_key(
+        "Test User",
+        "user@thelemail.local",
+        "a-passphrase",
+        offset_ms,
+    )
+    .expect("generate");
+    let (public, _) =
+        SignedPublicKey::from_armor_single(std::io::Cursor::new(&key.public_key_armored))
+            .expect("parse public key");
+
+    let primary: std::time::SystemTime = public.primary_key.created_at().into();
+    assert!(
+        primary < server_now,
+        "a device hours fast must still produce a key the server can encrypt to"
+    );
+    for sub in &public.public_subkeys {
+        let at: std::time::SystemTime = sub.key.created_at().into();
+        assert!(
+            at < server_now,
+            "the encryption subkey must follow the server clock too"
+        );
+    }
 }

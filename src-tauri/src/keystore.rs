@@ -192,9 +192,12 @@ pub async fn keystore_opaque_start_registration(
 #[tauri::command]
 pub async fn keystore_opaque_finish_registration(
     ks: State<'_, Keystore>,
+    net: State<'_, Net>,
     args: OpaqueFinishRegistrationArgs,
 ) -> Result<OpaqueFinishRegistrationResponse, KeystoreError> {
-    Ok(ks.opaque_finish_registration(args).await)
+    Ok(ks
+        .opaque_finish_registration(args, net.clock_offset_ms())
+        .await)
 }
 
 #[tauri::command]
@@ -476,9 +479,10 @@ pub fn keystore_abandon_password_change(ks: State<'_, Keystore>) {
 #[tauri::command]
 pub fn keystore_create_alias_key(
     ks: State<'_, Keystore>,
+    net: State<'_, Net>,
     args: CreateAliasKeyArgs,
 ) -> CreateAliasKeyResponse {
-    ks.create_alias_key(args)
+    ks.create_alias_key(args, net.clock_offset_ms())
 }
 
 #[tauri::command]

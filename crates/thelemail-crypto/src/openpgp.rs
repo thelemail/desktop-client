@@ -382,22 +382,37 @@ pub struct GeneratedKey {
     pub fingerprint_hex: String,
 }
 
+const KEY_CREATION_BACKDATE_SECS: i64 = 5 * 60;
+
+fn key_creation_time(clock_offset_ms: i64) -> pgp::types::Timestamp {
+    let now = i64::from(pgp::types::Timestamp::now().as_secs());
+    let server = now.saturating_add(clock_offset_ms / 1000);
+    let stamped = server.saturating_sub(KEY_CREATION_BACKDATE_SECS).max(0);
+    pgp::types::Timestamp::from_secs(u32::try_from(stamped).unwrap_or(0))
+}
+
 pub fn generate_account_key(
     display_name: &str,
     email: &str,
     passphrase: &str,
+    clock_offset_ms: i64,
 ) -> Result<GeneratedKey, PgpError> {
-    generate_key(display_name, email, Some(passphrase))
+    generate_key(display_name, email, Some(passphrase), clock_offset_ms)
 }
 
-pub fn generate_alias_key(display_name: &str, email: &str) -> Result<GeneratedKey, PgpError> {
-    generate_key(display_name, email, None)
+pub fn generate_alias_key(
+    display_name: &str,
+    email: &str,
+    clock_offset_ms: i64,
+) -> Result<GeneratedKey, PgpError> {
+    generate_key(display_name, email, None, clock_offset_ms)
 }
 
 fn generate_key(
     display_name: &str,
     email: &str,
     passphrase: Option<&str>,
+    clock_offset_ms: i64,
 ) -> Result<GeneratedKey, PgpError> {
     use pgp::composed::{EncryptionCaps, KeyType, SecretKeyParamsBuilder, SubkeyParamsBuilder};
     use pgp::types::KeyVersion;
@@ -408,11 +423,13 @@ fn generate_key(
     } else {
         format!("{display_name} <{email}>")
     };
+    let created_at = key_creation_time(clock_offset_ms);
 
     let subkey = SubkeyParamsBuilder::default()
         .version(KeyVersion::V4)
         .key_type(KeyType::X25519)
         .can_encrypt(EncryptionCaps::All)
+        .created_at(created_at)
         .passphrase(passphrase.map(str::to_owned))
         .build()
         .map_err(|_| PgpError::InvalidKey)?;
@@ -423,6 +440,7 @@ fn generate_key(
         .can_sign(true)
         .can_certify(true)
         .primary_user_id(user_id)
+        .created_at(created_at)
         .passphrase(passphrase.map(str::to_owned))
         .subkey(subkey)
         .build()
