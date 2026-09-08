@@ -813,3 +813,25 @@ fn several_from_clauses_must_all_match() {
     assert_eq!(ids(&search_messages(&conn, "invoice from:anna from:school", None).expect("both")), ["anna"]);
     assert!(search_messages(&conn, "invoice from:anna from:bob", None).expect("neither").is_empty());
 }
+
+#[test]
+fn a_hit_serialises_the_fields_the_clients_read() {
+    let (_dir, path) = temp_db();
+    let key = generate_db_key();
+    let conn = open_account_db(&path, &key, ACCOUNT).expect("open");
+    seed_row(&conn, "out", "Invoice", "me@thelemail.com", "sent", "inbox", 0, 1, 2, "2026-02-01T00:00:00Z");
+
+    let hits = search_messages(&conn, "invoice", None).expect("search");
+    let wire: serde_json::Value = serde_json::to_value(&hits[0]).expect("serialise");
+
+    assert_eq!(wire["id"], "out");
+    assert_eq!(wire["direction"], "sent");
+    assert_eq!(wire["mailboxState"], "inbox");
+    assert_eq!(wire["senderAddress"], "me@thelemail.com");
+    assert_eq!(wire["senderDisplay"], "me@thelemail.com");
+    assert_eq!(wire["read"], false);
+    assert_eq!(wire["starred"], true);
+    assert_eq!(wire["attachmentCount"], 2);
+    assert!(wire["threadRootId"].is_null());
+    assert!(wire.get("excerpt").is_some());
+}
