@@ -4,9 +4,17 @@ use thelemail_api::Net;
 
 use crate::keychain;
 
-fn refresh_cookie_name(account_id: &str) -> String {
+fn refresh_cookie_suffix(account_id: &str) -> String {
     let digest = Sha256::digest(account_id.as_bytes());
-    format!("refresh_token_{}", hex::encode(&digest[..4]))
+    hex::encode(&digest[..4])
+}
+
+fn refresh_cookie_name(account_id: &str) -> String {
+    format!("rt_{}", refresh_cookie_suffix(account_id))
+}
+
+fn legacy_refresh_cookie_name(account_id: &str) -> String {
+    format!("refresh_token_{}", refresh_cookie_suffix(account_id))
 }
 
 #[derive(Debug, serde::Deserialize)]
@@ -19,10 +27,12 @@ pub struct SessionArgs {
 pub fn session_persist(net: State<'_, Net>, args: SessionArgs) -> Result<bool, String> {
     crate::ids::account_id(&args.account_id)?;
     let name = refresh_cookie_name(&args.account_id);
-    let Some((_, value)) = net
-        .export_cookies()
-        .into_iter()
+    let legacy = legacy_refresh_cookie_name(&args.account_id);
+    let cookies = net.export_cookies();
+    let Some((_, value)) = cookies
+        .iter()
         .find(|(cookie_name, _)| *cookie_name == name)
+        .or_else(|| cookies.iter().find(|(cookie_name, _)| *cookie_name == legacy))
     else {
         return Ok(false);
     };
@@ -52,6 +62,7 @@ pub fn session_forget(
 ) -> Result<(), String> {
     crate::ids::account_id(&args.account_id)?;
     net.forget_cookie(&refresh_cookie_name(&args.account_id));
+    net.forget_cookie(&legacy_refresh_cookie_name(&args.account_id));
     crate::keystore::forget_persisted(&args.account_id);
     let purged = mirror.purge(&args.account_id);
     let cookie = keychain::forget_refresh_cookie(&args.account_id);
@@ -61,7 +72,7 @@ pub fn session_forget(
 
 #[cfg(test)]
 mod tests {
-    use super::refresh_cookie_name;
+    use super::{legacy_refresh_cookie_name, refresh_cookie_name};
 
     #[test]
     fn cookie_name_matches_the_backend_derivation() {
@@ -79,14 +90,21 @@ mod tests {
     fn expected(account_id: &str) -> String {
         use sha2::{Digest, Sha256};
         let sum = Sha256::digest(account_id.as_bytes());
-        format!("refresh_token_{}", hex::encode(&sum[..4]))
+        format!("rt_{}", hex::encode(&sum[..4]))
     }
 
     #[test]
     fn the_suffix_is_eight_hex_characters() {
         let name = refresh_cookie_name("11111111-2222-3333-4444-555555555555");
-        let suffix = name.strip_prefix("refresh_token_").expect("prefix");
+        let suffix = name.strip_prefix("rt_").expect("prefix");
         assert_eq!(suffix.len(), 8);
         assert!(suffix.chars().all(|c| c.is_ascii_hexdigit()));
+    }
+
+    #[test]
+    fn both_names_share_one_suffix() {
+        let id = "11111111-2222-3333-4444-555555555555";
+        let suffix = refresh_cookie_name(id).strip_prefix("rt_").expect("prefix").to_owned();
+        assert_eq!(legacy_refresh_cookie_name(id), format!("refresh_token_{suffix}"));
     }
 }
