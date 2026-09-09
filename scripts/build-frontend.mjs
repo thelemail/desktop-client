@@ -92,9 +92,11 @@ for (const dir of [root, source]) {
 	}
 }
 
-rmSync(resolve(source, '.svelte-kit'), { recursive: true, force: true });
+const app = resolve(source, 'apps/mail');
 
-execFileSync('pnpm', ['build'], {
+rmSync(resolve(app, '.svelte-kit'), { recursive: true, force: true });
+
+execFileSync('pnpm', ['--filter', '@thelemail/mail', 'build'], {
 	cwd: source,
 	stdio: 'inherit',
 	env: {
@@ -106,7 +108,7 @@ execFileSync('pnpm', ['build'], {
 });
 
 rmSync(dist, { recursive: true, force: true });
-cpSync(resolve(source, 'build'), dist, { recursive: true });
+cpSync(resolve(app, 'build'), dist, { recursive: true });
 
 const now = new Date();
 for (const file of ['src-tauri/build.rs', 'src-tauri/src/main.rs']) {
