@@ -17,6 +17,16 @@ fn legacy_refresh_cookie_name(account_id: &str) -> String {
     format!("refresh_token_{}", refresh_cookie_suffix(account_id))
 }
 
+fn find_refresh_cookie(cookies: &[(String, String)], account_id: &str) -> Option<String> {
+    let name = refresh_cookie_name(account_id);
+    let legacy = legacy_refresh_cookie_name(account_id);
+    cookies
+        .iter()
+        .find(|(cookie_name, _)| *cookie_name == name)
+        .or_else(|| cookies.iter().find(|(cookie_name, _)| *cookie_name == legacy))
+        .map(|(_, value)| value.to_owned())
+}
+
 #[derive(Debug, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionArgs {
@@ -26,14 +36,7 @@ pub struct SessionArgs {
 #[tauri::command]
 pub fn session_persist(net: State<'_, Net>, args: SessionArgs) -> Result<bool, String> {
     crate::ids::account_id(&args.account_id)?;
-    let name = refresh_cookie_name(&args.account_id);
-    let legacy = legacy_refresh_cookie_name(&args.account_id);
-    let cookies = net.export_cookies();
-    let Some((_, value)) = cookies
-        .iter()
-        .find(|(cookie_name, _)| *cookie_name == name)
-        .or_else(|| cookies.iter().find(|(cookie_name, _)| *cookie_name == legacy))
-    else {
+    let Some(value) = find_refresh_cookie(&net.export_cookies(), &args.account_id) else {
         return Ok(false);
     };
     keychain::put_refresh_cookie(&args.account_id, &value)?;
@@ -99,6 +102,44 @@ mod tests {
         let suffix = name.strip_prefix("rt_").expect("prefix");
         assert_eq!(suffix.len(), 8);
         assert!(suffix.chars().all(|c| c.is_ascii_hexdigit()));
+    }
+
+    fn jar(pairs: &[(&str, &str)]) -> Vec<(String, String)> {
+        pairs
+            .iter()
+            .map(|(n, v)| ((*n).to_owned(), (*v).to_owned()))
+            .collect()
+    }
+
+    #[test]
+    fn a_session_left_under_the_old_name_is_still_persisted() {
+        let id = "11111111-2222-3333-4444-555555555555";
+        let cookies = jar(&[(&legacy_refresh_cookie_name(id), "carried-over")]);
+        assert_eq!(
+            super::find_refresh_cookie(&cookies, id),
+            Some("carried-over".to_owned())
+        );
+    }
+
+    #[test]
+    fn the_host_only_cookie_wins_over_a_stale_legacy_one() {
+        let id = "11111111-2222-3333-4444-555555555555";
+        let cookies = jar(&[
+            (&legacy_refresh_cookie_name(id), "stale"),
+            (&refresh_cookie_name(id), "current"),
+        ]);
+        assert_eq!(
+            super::find_refresh_cookie(&cookies, id),
+            Some("current".to_owned())
+        );
+    }
+
+    #[test]
+    fn another_accounts_cookie_is_never_persisted() {
+        let id = "11111111-2222-3333-4444-555555555555";
+        let other = "99999999-2222-3333-4444-555555555555";
+        let cookies = jar(&[(&refresh_cookie_name(other), "theirs")]);
+        assert_eq!(super::find_refresh_cookie(&cookies, id), None);
     }
 
     #[test]
