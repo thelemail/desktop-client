@@ -108,3 +108,28 @@ async fn neither_command_reaches_an_unrelated_host() {
     assert!(net().submit(post("https://evil.example/x")).await.is_err());
     assert!(net().blob_get("https://evil.example/x").await.is_err());
 }
+
+#[tokio::test]
+#[ignore = "requires a local backend and LIVE_ACCOUNT/LIVE_TOKEN/LIVE_SUFFIX"]
+async fn a_session_left_under_the_old_cookie_name_still_refreshes() {
+    let account = std::env::var("LIVE_ACCOUNT").expect("LIVE_ACCOUNT");
+    let token = std::env::var("LIVE_TOKEN").expect("LIVE_TOKEN");
+    let suffix = std::env::var("LIVE_SUFFIX").expect("LIVE_SUFFIX");
+
+    let net = net();
+    net.import_cookie(&format!("refresh_token_{suffix}"), &token)
+        .expect("seed the legacy cookie");
+
+    let mut req = post("http://localhost:8180/v1/auth/refresh");
+    req.headers.insert("X-Account-Id".to_owned(), account);
+    let resp = net.request(req).await.expect("request");
+    assert_eq!(resp.status, 200, "a desktop session on the old cookie must survive");
+
+    let jar = net.export_cookies();
+    let adopted = jar.iter().find(|(name, _)| *name == format!("rt_{suffix}"));
+    assert_eq!(
+        adopted.map(|(_, v)| v.as_str()),
+        Some(token.as_str()),
+        "the jar should now hold the same session under the new name"
+    );
+}
