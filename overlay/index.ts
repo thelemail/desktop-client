@@ -358,6 +358,41 @@ const notifications = {
 		subscribe<NotificationTarget>('notification://opened', cb)
 };
 
+interface AvailableUpdate {
+	version: string;
+	notes: string | null;
+	publishedAt: string | null;
+	releaseUrl: string;
+}
+
+interface UpdateStatus {
+	currentVersion: string;
+	available: AvailableUpdate | null;
+	snoozed: boolean;
+	lastCheck: number | null;
+	lastFailure: string | null;
+	installing: boolean;
+	blocked: 'translocated' | 'read-only' | 'unbundled' | null;
+	releasesUrl: string;
+}
+
+interface UpdateProgress {
+	downloaded: number;
+	total: number | null;
+	phase: 'download' | 'verify' | 'restart';
+}
+
+const updates = {
+	status: () => invoke<UpdateStatus>('updates_status'),
+	check: () => invoke<AvailableUpdate | null>('updates_check'),
+	snooze: (version: string) => invoke<void>('updates_snooze', { version }),
+	install: (version: string) => invoke<void>('updates_install', { version }),
+	onAvailable: (cb: (update: AvailableUpdate) => void) =>
+		subscribe<AvailableUpdate>('updates://available', cb),
+	onProgress: (cb: (progress: UpdateProgress) => void) =>
+		subscribe<UpdateProgress>('updates://progress', cb)
+};
+
 const session = {
 	persist: (accountId: string) =>
 		invoke<boolean>('session_persist', { args: { accountId } }),
@@ -382,6 +417,7 @@ export const platform = {
 	transport: nativeRequest,
 	openEventSource,
 	notifications,
+	updates,
 	blobFetch: nativeBlobFetch,
 	blobPut: nativeBlobPut,
 	returnOrigin: () => env.PUBLIC_APP_URL || 'https://app.thelemail.com',
