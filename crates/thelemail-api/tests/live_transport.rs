@@ -123,7 +123,10 @@ async fn a_session_left_under_the_old_cookie_name_still_refreshes() {
     let mut req = post("http://localhost:8180/v1/auth/refresh");
     req.headers.insert("X-Account-Id".to_owned(), account);
     let resp = net.request(req).await.expect("request");
-    assert_eq!(resp.status, 200, "a desktop session on the old cookie must survive");
+    assert_eq!(
+        resp.status, 200,
+        "a desktop session on the old cookie must survive"
+    );
 
     let jar = net.export_cookies();
     let adopted = jar.iter().find(|(name, _)| *name == format!("rt_{suffix}"));
