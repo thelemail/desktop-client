@@ -4,7 +4,7 @@ import {
 	unwrapMasterKey,
 	deriveMasterKeyId,
 	derivePgpPassphrase
-} from '../../web-client/src/lib/keystore/opaque-params.ts';
+} from '../../web-client/packages/core/src/keystore/opaque-params.ts';
 
 const hex = (b) => Buffer.from(b).toString('hex');
 const vectors = [];
@@ -28,5 +28,5 @@ for (let i = 0; i < 6; i++) {
 }
 
 const out = new URL('../../fixtures/amk/vectors.json', import.meta.url);
-writeFileSync(out, JSON.stringify({ source: 'web-client/src/lib/keystore/opaque-params.ts', vectors }, null, '\t') + '\n');
+writeFileSync(out, JSON.stringify({ source: 'web-client/packages/core/src/keystore/opaque-params.ts', vectors }, null, '\t') + '\n');
 console.log(`wrote ${vectors.length} vectors`);
