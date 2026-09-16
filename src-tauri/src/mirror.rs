@@ -1,5 +1,6 @@
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use futures_util::{StreamExt, stream};
@@ -20,6 +21,7 @@ const BODY_CONCURRENCY: usize = 4;
 
 const DELTA_SCOPE: &str = "__delta__";
 const DELTA_LIMIT: u32 = 200;
+const SHUTTING_DOWN: &str = "the mirror is shutting down";
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -117,6 +119,7 @@ pub struct Mirror {
     pokes: Mutex<HashSet<String>>,
     watching: Mutex<HashMap<String, bool>>,
     notify_armed: Mutex<HashMap<String, bool>>,
+    closed: AtomicBool,
     started_at: i64,
 }
 
@@ -130,6 +133,7 @@ impl Default for Mirror {
             pokes: Mutex::default(),
             watching: Mutex::default(),
             notify_armed: Mutex::default(),
+            closed: AtomicBool::new(false),
             started_at: now_unix(),
         }
     }
@@ -143,6 +147,9 @@ impl Mirror {
     pub fn open(&self, account_id: &str) -> Result<(), String> {
         crate::ids::account_id(account_id)?;
         let mut conns = self.connections.lock().expect("mirror connections");
+        if self.closed.load(Ordering::SeqCst) {
+            return Err(SHUTTING_DOWN.to_owned());
+        }
         if conns.contains_key(account_id) {
             return Ok(());
         }
@@ -207,6 +214,29 @@ impl Mirror {
                 )
                 .unwrap_or(None))
         })
+    }
+
+    pub fn shutdown(&self) {
+        self.closed.store(true, Ordering::SeqCst);
+        let watched: Vec<String> = {
+            let mut watching = self.watching.lock().expect("mirror watching");
+            watching.values_mut().for_each(|w| *w = false);
+            watching.keys().cloned().collect()
+        };
+        for account_id in watched {
+            self.token_waker(&account_id).notify_one();
+        }
+        let drained: Vec<(String, Connection)> = self
+            .connections
+            .lock()
+            .expect("mirror connections")
+            .drain()
+            .collect();
+        for (account_id, conn) in drained {
+            if let Err((_, err)) = conn.close() {
+                eprintln!("mirror: closing {account_id} on shutdown failed: {err}");
+            }
+        }
     }
 
     pub fn close(&self, account_id: &str) {
@@ -316,10 +346,11 @@ impl Mirror {
 
     pub fn adopt_connection(&self, account_id: &str, conn: Connection) -> Result<(), String> {
         crate::ids::account_id(account_id)?;
-        self.connections
-            .lock()
-            .expect("mirror connections")
-            .insert(account_id.to_owned(), conn);
+        let mut conns = self.connections.lock().expect("mirror connections");
+        if self.closed.load(Ordering::SeqCst) {
+            return Err(SHUTTING_DOWN.to_owned());
+        }
+        conns.insert(account_id.to_owned(), conn);
         Ok(())
     }
 
@@ -1005,6 +1036,43 @@ mod tests {
         let delay = next_delay(0);
         assert!(delay >= POLL_INTERVAL);
         assert!(delay <= POLL_INTERVAL + POLL_INTERVAL / 5);
+    }
+
+    #[tokio::test]
+    async fn shutdown_stops_watchers_closes_databases_and_refuses_new_ones() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let account = "0f0f0f0f-0f0f-4f0f-8f0f-0f0f0f0f0f0f";
+        let conn = Connection::open(dir.path().join("mirror.db")).expect("db");
+        conn.execute_batch(
+            "PRAGMA journal_mode=WAL; CREATE TABLE t (v INTEGER); INSERT INTO t VALUES (1);",
+        )
+        .expect("seed");
+
+        let mirror = Mirror::default();
+        mirror.adopt_connection(account, conn).expect("adopt");
+        assert!(mirror.claim_watch(account));
+        let waker = mirror.token_waker(account);
+
+        mirror.shutdown();
+
+        assert!(!mirror.is_watching(account));
+        assert!(
+            tokio::time::timeout(std::time::Duration::from_millis(20), waker.notified())
+                .await
+                .is_ok(),
+            "a sleeping watcher must be woken so it sees the stop"
+        );
+        assert!(mirror.with_conn(account, |_| Ok(())).is_err());
+        assert!(
+            !dir.path().join("mirror.db-wal").exists(),
+            "closing the last connection checkpoints the write-ahead log"
+        );
+        let again = Connection::open(dir.path().join("mirror.db")).expect("reopen");
+        assert!(
+            mirror.adopt_connection(account, again).is_err(),
+            "nothing may reopen a database once shutdown has begun"
+        );
+        assert_eq!(mirror.open(account), Err(SHUTTING_DOWN.to_owned()));
     }
 
     #[test]

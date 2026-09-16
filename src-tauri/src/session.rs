@@ -23,7 +23,11 @@ fn find_refresh_cookie(cookies: &[(String, String)], account_id: &str) -> Option
     cookies
         .iter()
         .find(|(cookie_name, _)| *cookie_name == name)
-        .or_else(|| cookies.iter().find(|(cookie_name, _)| *cookie_name == legacy))
+        .or_else(|| {
+            cookies
+                .iter()
+                .find(|(cookie_name, _)| *cookie_name == legacy)
+        })
         .map(|(_, value)| value.to_owned())
 }
 
@@ -145,7 +149,13 @@ mod tests {
     #[test]
     fn both_names_share_one_suffix() {
         let id = "11111111-2222-3333-4444-555555555555";
-        let suffix = refresh_cookie_name(id).strip_prefix("rt_").expect("prefix").to_owned();
-        assert_eq!(legacy_refresh_cookie_name(id), format!("refresh_token_{suffix}"));
+        let suffix = refresh_cookie_name(id)
+            .strip_prefix("rt_")
+            .expect("prefix")
+            .to_owned();
+        assert_eq!(
+            legacy_refresh_cookie_name(id),
+            format!("refresh_token_{suffix}")
+        );
     }
 }

@@ -72,7 +72,17 @@ Requests to any other host are refused by the transport rather than merely disco
 
 ## Updates
 
-The app never updates itself. It does not check on launch, on a timer, or in the background, and it will not install anything without an explicit action from the person using it. Updating is something you choose, not something that happens to you.
+The app never installs anything on its own. About a minute after launch and then every six hours it fetches `latest.json` from the latest GitHub release, and when a newer version is listed it shows a banner in the mail view and an entry under Settings, About & updates. Nothing is downloaded until the person using the app chooses Install. Later hides that version for three days; a newer release shows up straight away.
+
+Choosing Install downloads `Thelemail_<version>_aarch64.app.tar.gz` and accepts it only if all of these hold:
+
+1. The archive carries a minisign signature from the release key whose public half is pinned in `src-tauri/tauri.conf.json`.
+2. The unpacked bundle is `com.thelemail.desktop`, its version equals the one the manifest announced, and that version is newer than the running one. An older signed build relabelled as new is refused, and so is any downgrade.
+3. `codesign` accepts the bundle against a Developer ID requirement pinned to our Apple team, and Gatekeeper accepts its notarization.
+
+The bundle is unpacked next to the running app and verified there, so a failed check leaves the installed app untouched. Before the swap the app refuses to restart while a message is sending, an attachment is uploading or a draft cannot be saved. It then stops sync, closes every local database and exchanges the two bundles in one atomic rename. If the app runs from a translocated or read-only location it never asks for administrator rights; it points to the release page instead.
+
+The update channel is not TLS-pinned, because GitHub rotates its certificates. The trust comes from the two signatures above, so whoever controls the network or the release host still cannot get code installed.
 
 ## Releases
 

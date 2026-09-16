@@ -15,15 +15,21 @@ tauri-build = { version = "2", features = [] }
 [dependencies]
 base64.workspace = true
 rand.workspace = true
+flate2 = "1.1"
 futures-util = "0.3"
 rusqlite = { workspace = true, features = ["bundled-sqlcipher-vendored-openssl"] }
 hex.workspace = true
+libc = "0.2"
+plist = "1.10"
+semver = "1"
 serde.workspace = true
 sha2.workspace = true
 serde_json.workspace = true
 tauri = { version = "2.11", features = ["tray-icon", "image-png"] }
 tauri-plugin-dialog.workspace = true
 tauri-plugin-opener.workspace = true
+tauri-plugin-updater.workspace = true
+tar = "0.4.46"
 thelemail-api = { path = "../crates/thelemail-api" }
 thelemail-crypto = { path = "../crates/thelemail-crypto" }
 thelemail-keystore = { path = "../crates/thelemail-keystore" }
