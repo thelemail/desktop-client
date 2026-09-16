@@ -42,7 +42,7 @@
   },
   "plugins": {
     "updater": {
-      "pubkey": "",
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IENFODEyOTgyM0NBNDY0MApSV1JBUnNvam1CTG9ES2dvZUo4RnZBTEYvOVJzdENCYlFORFdyQm1NK2VTNUY1c1o2WEl3WGFrTQo=",
       "endpoints": [
         "https://github.com/thelemail/desktop-client/releases/latest/download/latest.json"
       ]
