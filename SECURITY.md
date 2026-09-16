@@ -20,7 +20,7 @@ This repository is the macOS desktop client. Findings that are in scope here inc
 - Cross-site scripting or code execution through the rendering of received mail, and any escape from the sandboxed frame it is rendered in
 - Reading or tampering with the local mirror without the keychain key, weaknesses in how that key is stored, or mail that is retained after an account is signed out
 - Failures in directory key verification or transparency log proof checking that would let a substituted key be accepted
-- Any way to make the app install or run code the user did not ask for, including anything that defeats the user-initiated-only update policy
+- Any way to make the app install or run code the user did not ask for, including anything that defeats the user-initiated-only install policy or gets an update accepted without the release signature, the pinned Developer ID requirement, or a newer version
 - A release whose signature, notarization, provenance or checksums do not match the commit it claims
 
 Findings in the shared UI belong to [thelemail/web-client](https://github.com/thelemail/web-client), and server-side issues to the backend, but report them to the same address and we will route them.
