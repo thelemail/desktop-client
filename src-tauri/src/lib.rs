@@ -10,8 +10,10 @@ mod notify;
 mod session;
 mod shell;
 mod sse;
+mod updates;
 
 use crate::mirror::Mirror;
+use crate::updates::Updates;
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::TrayIconBuilder;
 use tauri::{Emitter, Manager, WebviewUrl, WebviewWindowBuilder, WindowEvent};
@@ -62,10 +64,12 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(net)
         .manage(Keystore::new())
         .manage(Mirror::default())
         .manage(sse::Streams::default())
+        .manage(Updates::new(&Mirror::root()))
         .invoke_handler(tauri::generate_handler![
             net::api_request,
             net::submission_request,
@@ -128,7 +132,11 @@ pub fn run() {
             shell::open_external,
             shell::save_bytes,
             sse::realtime_open,
-            sse::realtime_close
+            sse::realtime_close,
+            updates::updates_status,
+            updates::updates_check,
+            updates::updates_snooze,
+            updates::updates_install
         ])
         .setup(|app| {
             let window = WebviewWindowBuilder::new(app, "main", WebviewUrl::default())
@@ -152,6 +160,7 @@ pub fn run() {
 
             build_tray(app.handle())?;
             notify::prepare(app.handle());
+            updates::spawn(app.handle());
 
             #[cfg(all(debug_assertions, feature = "devtools"))]
             devbridge::spawn(app.handle());
@@ -174,9 +183,12 @@ pub fn run() {
         })
         .build(tauri::generate_context!())
         .expect("thelemail desktop failed to start")
-        .run(|app, event| {
-            if let tauri::RunEvent::Reopen { .. } = event {
-                show_main(app);
+        .run(|app, event| match event {
+            tauri::RunEvent::Reopen { .. } => show_main(app),
+            tauri::RunEvent::Exit => {
+                app.state::<sse::Streams>().close_all();
+                app.state::<Mirror>().shutdown();
             }
+            _ => {}
         });
 }

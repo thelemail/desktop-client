@@ -38,6 +38,14 @@ pub struct Streams {
     open: Mutex<HashMap<String, oneshot::Sender<()>>>,
 }
 
+impl Streams {
+    pub fn close_all(&self) {
+        for (_, tx) in self.open.lock().expect("streams").drain() {
+            let _ = tx.send(());
+        }
+    }
+}
+
 #[tauri::command]
 pub async fn realtime_open(
     app: AppHandle,
