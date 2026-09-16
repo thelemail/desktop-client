@@ -110,6 +110,8 @@ jobs:
           APPLE_API_KEY_B64: ${{ secrets.APPLE_API_KEY }}
           APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
           APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: |
           set -euo pipefail
           export APPLE_API_KEY_PATH="$RUNNER_TEMP/AuthKey.p8"
@@ -124,14 +126,23 @@ jobs:
           set -euo pipefail
           version="${TAG#v}"
           mkdir -p dist
+          updater="Thelemail_${version}_aarch64.app.tar.gz"
           cp "target/release/Thelemail_${version}_aarch64.dmg" dist/
+          cp "target/release/${updater}" "target/release/${updater}.sig" dist/
+          jq -n --arg version "$version" \
+                --arg notes "Thelemail ${version}" \
+                --arg pubDate "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+                --arg url "https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG}/${updater}" \
+                --rawfile signature "dist/${updater}.sig" \
+                '{version: $version, notes: $notes, pub_date: $pubDate, platforms: {"darwin-aarch64": {signature: ($signature | rtrimstr("\n")), url: $url}}}' \
+            > dist/latest.json
           jq -n --arg tag "$TAG" --arg commit "$GITHUB_SHA" \
                 --arg webClient "$(cat web-client.version)" \
                 --arg webClientCommit "$(git -C web-client rev-parse HEAD)" \
                 '{tag: $tag, commit: $commit, webClient: $webClient, webClientCommit: $webClientCommit, arch: "aarch64"}' \
             > dist/release-metadata.json
           cd dist
-          shasum -a 256 ./*.dmg release-metadata.json > SHA256SUMS
+          shasum -a 256 ./*.dmg ./*.app.tar.gz ./*.app.tar.gz.sig latest.json release-metadata.json > SHA256SUMS
           sort -k2 -o SHA256SUMS SHA256SUMS
           cat SHA256SUMS
 
@@ -149,6 +160,8 @@ jobs:
         with:
           subject-path: |
             dist/*.dmg
+            dist/*.app.tar.gz
+            dist/latest.json
             dist/release-metadata.json
             dist/SHA256SUMS
 
@@ -183,6 +196,9 @@ jobs:
             --title "$TAG" \
             --notes-file dist/notes.md \
             dist/*.dmg \
+            dist/*.app.tar.gz \
+            dist/*.app.tar.gz.sig \
+            dist/latest.json \
             dist/release-metadata.json \
             dist/sbom.source.spdx.json \
             dist/SHA256SUMS \
