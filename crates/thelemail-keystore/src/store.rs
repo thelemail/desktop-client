@@ -1266,6 +1266,27 @@ impl Keystore {
         }
     }
 
+    pub fn sign_detached(&self, args: SignDetachedArgs) -> SignDetachedResponse {
+        let vaults = self.vaults.lock().expect("keystore vaults");
+        let Some(vault) = vaults.get(&args.account_id) else {
+            return SignDetachedResponse::Err {
+                ok: false,
+                code: "locked",
+            };
+        };
+        match vault.key.sign_detached(&args.data) {
+            Ok(signature) => SignDetachedResponse::Ok {
+                ok: true,
+                signature,
+                key_fingerprint_hex: vault.key.fingerprint_hex(),
+            },
+            Err(_) => SignDetachedResponse::Err {
+                ok: false,
+                code: "unknown",
+            },
+        }
+    }
+
     pub fn get_public_key(&self, account_id: &str) -> GetPublicKeyResponse {
         let vaults = self.vaults.lock().expect("keystore vaults");
         match vaults.get(account_id) {

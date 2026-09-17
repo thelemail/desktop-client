@@ -507,6 +507,14 @@ pub fn keystore_encrypt_to_keys(
 }
 
 #[tauri::command]
+pub fn keystore_sign_detached(
+    ks: State<'_, Keystore>,
+    args: SignDetachedArgs,
+) -> SignDetachedResponse {
+    ks.sign_detached(args)
+}
+
+#[tauri::command]
 pub fn keystore_get_public_key(
     ks: State<'_, Keystore>,
     args: AccountScopedArgs,

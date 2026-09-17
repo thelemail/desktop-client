@@ -140,6 +140,7 @@ const KEYSTORE_COMMANDS: Record<string, string> = {
 	attachmentBytes: 'keystore_attachment_bytes',
 	encrypt: 'keystore_encrypt',
 	encryptToKeys: 'keystore_encrypt_to_keys',
+	signDetached: 'keystore_sign_detached',
 	getPublicKey: 'keystore_get_public_key',
 	opaqueRecoverySetupStart: 'keystore_opaque_recovery_setup_start',
 	opaqueRecoverySetupFinish: 'keystore_opaque_recovery_setup_finish',
@@ -188,7 +189,7 @@ function bindKeystoreEvents() {
 	});
 }
 
-const BYTE_FIELDS = ['ciphertext', 'plaintextBinary', 'fingerprint', 'exportKey', 'sessionKey'];
+const BYTE_FIELDS = ['ciphertext', 'plaintextBinary', 'fingerprint', 'exportKey', 'sessionKey', 'signature'];
 
 function normalizeBytes<T>(value: T): T {
 	if (!value || typeof value !== 'object' || Array.isArray(value)) return value;

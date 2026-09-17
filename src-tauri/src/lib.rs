@@ -102,6 +102,7 @@ pub fn run() {
             keystore::keystore_attachment_bytes,
             keystore::keystore_encrypt,
             keystore::keystore_encrypt_to_keys,
+            keystore::keystore_sign_detached,
             keystore::keystore_get_public_key,
             keystore::keystore_opaque_recovery_setup_start,
             keystore::keystore_opaque_recovery_setup_finish,
