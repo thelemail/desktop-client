@@ -8,11 +8,18 @@ pub struct Migration {
     pub up: fn(&Transaction) -> rusqlite::Result<()>,
 }
 
-pub static MIGRATIONS: &[Migration] = &[Migration {
-    version: 1,
-    name: "initial",
-    up: m0001_initial,
-}];
+pub static MIGRATIONS: &[Migration] = &[
+    Migration {
+        version: 1,
+        name: "initial",
+        up: m0001_initial,
+    },
+    Migration {
+        version: 2,
+        name: "delivered_to",
+        up: m0002_delivered_to,
+    },
+];
 
 pub fn migrate(conn: &Connection) -> Result<(), StoreError> {
     let from: i32 = conn.pragma_query_value(None, "user_version", |r| r.get(0))?;
@@ -32,6 +39,10 @@ pub fn migrate(conn: &Connection) -> Result<(), StoreError> {
         tx.commit()?;
     }
     Ok(())
+}
+
+fn m0002_delivered_to(tx: &Transaction) -> rusqlite::Result<()> {
+    tx.execute_batch("ALTER TABLE messages ADD COLUMN delivered_to TEXT NOT NULL DEFAULT '';")
 }
 
 fn m0001_initial(tx: &Transaction) -> rusqlite::Result<()> {

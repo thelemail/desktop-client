@@ -89,6 +89,8 @@ struct MessagePreview {
     display_date: String,
     #[serde(default)]
     recipients: Vec<PreviewParty>,
+    #[serde(default)]
+    delivered_to: String,
 }
 
 #[derive(Debug, Deserialize, Default, Clone)]
@@ -415,15 +417,17 @@ fn upsert_message(
     conn.execute(
         "INSERT INTO messages (id, direction, source, mailbox_state, starred, read, stored_at, \
           body_size_bytes, attachment_count, thread_root_id, subject, sender_display, \
-          sender_address, recipients_json, snippet, display_date, preview_state, synced_at) \
-         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18) \
+          sender_address, recipients_json, snippet, display_date, preview_state, synced_at, \
+          delivered_to) \
+         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19) \
          ON CONFLICT(id) DO UPDATE SET \
           mailbox_state=excluded.mailbox_state, starred=excluded.starred, read=excluded.read, \
           attachment_count=excluded.attachment_count, thread_root_id=excluded.thread_root_id, \
           subject=excluded.subject, sender_display=excluded.sender_display, \
           sender_address=excluded.sender_address, recipients_json=excluded.recipients_json, \
           snippet=excluded.snippet, display_date=excluded.display_date, \
-          preview_state=excluded.preview_state, deleted=0, synced_at=excluded.synced_at \
+          preview_state=excluded.preview_state, deleted=0, synced_at=excluded.synced_at, \
+          delivered_to=excluded.delivered_to \
          WHERE messages.dirty = 0",
         params![
             item.id,
@@ -444,6 +448,7 @@ fn upsert_message(
             preview.display_date,
             if decrypted { "ok" } else { "undecryptable" },
             now,
+            preview.delivered_to,
         ],
     )?;
 
@@ -462,7 +467,9 @@ fn upsert_message(
             rowid,
             preview.subject,
             format!("{} {}", preview.sender.display, preview.sender.address),
-            recipients,
+            format!("{} {}", recipients, preview.delivered_to)
+                .trim_end()
+                .to_owned(),
             preview.snippet,
         ],
     )?;
@@ -887,6 +894,44 @@ pub async fn watch_inbox(app: AppHandle, account_id: String) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_plus_tagged_delivery_is_kept_for_the_reader_and_search() {
+        let conn = Connection::open_in_memory().expect("db");
+        thelemail_store::migrations::migrate(&conn).expect("migrate");
+        let item: MessageListItem = serde_json::from_value(serde_json::json!({
+            "id": "m1",
+            "direction": "received",
+            "source": "inbound_external",
+            "mailboxState": "inbox",
+            "storedAt": "2026-09-17T10:00:00Z"
+        }))
+        .expect("item");
+        let preview: MessagePreview = serde_json::from_str(
+            r#"{"subject":"Your order","sender":{"display":"Store","address":"orders@example.com"},
+                "recipients":[{"display":"","address":"someone@example.com"}],
+                "delivered_to":"vlad+receipts@thelemail.com"}"#,
+        )
+        .expect("preview");
+
+        upsert_message(&conn, &item, &preview, true).expect("upsert");
+
+        let got = thelemail_store::list::get_message(&conn, "m1", "now")
+            .expect("query")
+            .expect("message");
+        assert_eq!(got.delivered_to, "vlad+receipts@thelemail.com");
+        let hits =
+            thelemail_store::search::search_messages(&conn, "receipts", None).expect("search");
+        assert_eq!(hits.len(), 1, "the tag must be searchable offline");
+
+        let plain: MessagePreview =
+            serde_json::from_str(r#"{"subject":"x","recipients":[]}"#).expect("preview");
+        upsert_message(&conn, &item, &plain, true).expect("upsert");
+        let got = thelemail_store::list::get_message(&conn, "m1", "now")
+            .expect("query")
+            .expect("message");
+        assert_eq!(got.delivered_to, "");
+    }
 
     #[test]
     fn notifications_stay_silent_until_the_first_backfill_finishes() {
