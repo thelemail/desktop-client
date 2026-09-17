@@ -99,6 +99,7 @@ pub struct MirrorMessage {
     pub sender_display: String,
     pub sender_address: String,
     pub recipients_json: String,
+    pub delivered_to: String,
     pub snippet: String,
     pub display_date: String,
     pub attachment_count: i64,
@@ -109,7 +110,7 @@ pub struct MirrorMessage {
 const MESSAGE_COLUMNS: &str = "m.rowid, m.id, m.direction, m.source, m.mailbox_state, m.stored_at, \
      m.read, m.starred, m.thread_root_id, m.external_message_id, m.in_reply_to, m.labels_json, \
      m.signature_status, m.subject, m.sender_display, m.sender_address, m.recipients_json, \
-     m.snippet, m.display_date, m.attachment_count, b.mime";
+     m.snippet, m.display_date, m.attachment_count, b.mime, m.delivered_to";
 
 fn read_message(row: &rusqlite::Row<'_>) -> rusqlite::Result<(i64, MirrorMessage)> {
     let mime: Option<Vec<u8>> = row.get(20)?;
@@ -132,6 +133,7 @@ fn read_message(row: &rusqlite::Row<'_>) -> rusqlite::Result<(i64, MirrorMessage
             sender_display: row.get(14)?,
             sender_address: row.get(15)?,
             recipients_json: row.get(16)?,
+            delivered_to: row.get(21)?,
             snippet: row.get(17)?,
             display_date: row.get(18)?,
             attachment_count: row.get(19)?,
