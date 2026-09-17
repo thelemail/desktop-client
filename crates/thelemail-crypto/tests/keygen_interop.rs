@@ -301,3 +301,39 @@ fn a_generated_key_follows_the_server_clock_not_the_device_clock() {
         );
     }
 }
+
+#[test]
+fn rust_detached_signatures_verify_in_openpgp_js() {
+    let key = generate_account_key("Signer", "signer@thelemail.local", "signer-pass", 0)
+        .expect("generate signer");
+    let unlocked =
+        UnlockedKey::open(&key.encrypted_private_key_armored, "signer-pass").expect("unlock");
+    let data = br#"{"address":"contact@acme.test","type":"thelemail-read-delegation/v1"}"#;
+    let signature = unlocked.sign_detached(data).expect("sign detached");
+
+    let dir = format!("{OUT}/detached");
+    std::fs::create_dir_all(&dir).expect("create out dir");
+    std::fs::write(
+        format!("{dir}/rust-signer.pub.asc"),
+        &key.public_key_armored,
+    )
+    .expect("write pub");
+    std::fs::write(format!("{dir}/rust-signed.bin"), data).expect("write data");
+    std::fs::write(format!("{dir}/rust-signature.sig"), &signature).expect("write signature");
+
+    let script = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../xtask/js/verify-rust-signature.mjs"
+    );
+    let out = std::process::Command::new("node")
+        .arg(script)
+        .arg(&dir)
+        .arg(unlocked.fingerprint_hex())
+        .output()
+        .expect("run verifier");
+    assert!(
+        out.status.success(),
+        "openpgp.js rejected a Rust detached signature:\n{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+}

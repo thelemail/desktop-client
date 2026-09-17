@@ -21,6 +21,8 @@ pub enum PgpError {
     InvalidRecipientKey,
     #[error("no recipients")]
     NoRecipients,
+    #[error("signing failed")]
+    SignFailed,
 }
 
 const ARMOR_PREFIX: &[u8] = b"-----BEGIN PGP MESSAGE";
@@ -171,6 +173,22 @@ impl UnlockedKey {
         builder
             .to_armored_string(OsRng, Default::default())
             .map_err(|_| PgpError::EncryptFailed)
+    }
+
+    pub fn sign_detached(&self, data: &[u8]) -> Result<Vec<u8>, PgpError> {
+        use pgp::composed::DetachedSignature;
+        use pgp::ser::Serialize;
+        use rand::rngs::OsRng;
+
+        DetachedSignature::sign_binary_data(
+            OsRng,
+            &self.key.primary_key,
+            &Password::empty(),
+            HashAlgorithm::Sha256,
+            data,
+        )
+        .and_then(|sig| sig.to_bytes())
+        .map_err(|_| PgpError::SignFailed)
     }
 
     pub fn open_unlocked(armored: &str) -> Result<Self, PgpError> {

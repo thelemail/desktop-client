@@ -340,6 +340,28 @@ pub enum EncryptResponse {
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct SignDetachedArgs {
+    pub account_id: String,
+    pub data: Vec<u8>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(untagged)]
+pub enum SignDetachedResponse {
+    Ok {
+        ok: bool,
+        signature: Vec<u8>,
+        #[serde(rename = "keyFingerprintHex")]
+        key_fingerprint_hex: String,
+    },
+    Err {
+        ok: bool,
+        code: &'static str,
+    },
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct EncryptToKeysArgs {
     pub account_id: String,
     pub recipient_public_keys_armored: Vec<String>,
