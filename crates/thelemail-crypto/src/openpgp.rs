@@ -85,45 +85,7 @@ impl UnlockedKey {
         plaintext: &[u8],
         signer: Option<&UnlockedKey>,
     ) -> Result<Vec<u8>, PgpError> {
-        use pgp::composed::MessageBuilder;
-        use pgp::types::Password;
-        use rand::rngs::OsRng;
-
-        if recipients_armored.is_empty() {
-            return Err(PgpError::NoRecipients);
-        }
-
-        let mut keys = Vec::with_capacity(recipients_armored.len());
-        for armored in recipients_armored {
-            let (key, _) =
-                SignedPublicKey::from_string(armored).map_err(|_| PgpError::InvalidRecipientKey)?;
-            keys.push(key);
-        }
-
-        let owned = plaintext.to_vec();
-        let mut builder =
-            MessageBuilder::from_bytes("", owned).seipd_v1(OsRng, SymmetricKeyAlgorithm::AES256);
-
-        for key in &keys {
-            let subkey = key
-                .public_subkeys
-                .iter()
-                .find(|sub| sub.key.algorithm().can_encrypt())
-                .ok_or(PgpError::InvalidRecipientKey)?;
-            builder
-                .encrypt_to_key(OsRng, subkey)
-                .map_err(|_| PgpError::InvalidRecipientKey)?;
-        }
-
-        if let Some(signer) = signer {
-            builder.sign(
-                &signer.key.primary_key,
-                Password::empty(),
-                HashAlgorithm::Sha256,
-            );
-        }
-
-        builder.to_vec(OsRng).map_err(|_| PgpError::EncryptFailed)
+        seal(recipients_armored, plaintext, signer, false)
     }
 
     pub fn encrypt_to_armored(
@@ -132,47 +94,8 @@ impl UnlockedKey {
         plaintext: &[u8],
         signer: Option<&UnlockedKey>,
     ) -> Result<String, PgpError> {
-        use pgp::composed::MessageBuilder;
-        use pgp::types::Password;
-        use rand::rngs::OsRng;
-
-        if recipients_armored.is_empty() {
-            return Err(PgpError::NoRecipients);
-        }
-
-        let mut keys = Vec::with_capacity(recipients_armored.len());
-        for armored in recipients_armored {
-            let (key, _) =
-                SignedPublicKey::from_string(armored).map_err(|_| PgpError::InvalidRecipientKey)?;
-            keys.push(key);
-        }
-
-        let owned = plaintext.to_vec();
-        let mut builder =
-            MessageBuilder::from_bytes("", owned).seipd_v1(OsRng, SymmetricKeyAlgorithm::AES256);
-
-        for key in &keys {
-            let subkey = key
-                .public_subkeys
-                .iter()
-                .find(|sub| sub.key.algorithm().can_encrypt())
-                .ok_or(PgpError::InvalidRecipientKey)?;
-            builder
-                .encrypt_to_key(OsRng, subkey)
-                .map_err(|_| PgpError::InvalidRecipientKey)?;
-        }
-
-        if let Some(signer) = signer {
-            builder.sign(
-                &signer.key.primary_key,
-                Password::empty(),
-                HashAlgorithm::Sha256,
-            );
-        }
-
-        builder
-            .to_armored_string(OsRng, Default::default())
-            .map_err(|_| PgpError::EncryptFailed)
+        let armored = seal(recipients_armored, plaintext, signer, true)?;
+        String::from_utf8(armored).map_err(|_| PgpError::EncryptFailed)
     }
 
     pub fn sign_detached(&self, data: &[u8]) -> Result<Vec<u8>, PgpError> {
@@ -195,6 +118,94 @@ impl UnlockedKey {
         let (key, _) = SignedSecretKey::from_string(armored).map_err(|_| PgpError::InvalidKey)?;
         Ok(Self { key })
     }
+}
+
+fn seal(
+    recipients_armored: &[String],
+    plaintext: &[u8],
+    signer: Option<&UnlockedKey>,
+    armored: bool,
+) -> Result<Vec<u8>, PgpError> {
+    use pgp::composed::MessageBuilder;
+    use pgp::crypto::aead::{AeadAlgorithm, ChunkSize};
+    use rand::rngs::OsRng;
+
+    if recipients_armored.is_empty() {
+        return Err(PgpError::NoRecipients);
+    }
+
+    let mut keys = Vec::with_capacity(recipients_armored.len());
+    for armored_key in recipients_armored {
+        let (key, _) =
+            SignedPublicKey::from_string(armored_key).map_err(|_| PgpError::InvalidRecipientKey)?;
+        keys.push(key);
+    }
+    let mut subkeys = Vec::with_capacity(keys.len());
+    for key in &keys {
+        let subkey = key
+            .public_subkeys
+            .iter()
+            .find(|sub| sub.key.algorithm().can_encrypt())
+            .ok_or(PgpError::InvalidRecipientKey)?;
+        subkeys.push(subkey);
+    }
+
+    let builder = MessageBuilder::from_bytes("", plaintext.to_vec());
+    if keys.iter().all(supports_seipd_v2) {
+        let mut builder = builder.seipd_v2(
+            OsRng,
+            SymmetricKeyAlgorithm::AES256,
+            AeadAlgorithm::Ocb,
+            ChunkSize::default(),
+        );
+        for subkey in subkeys {
+            builder
+                .encrypt_to_key(OsRng, subkey)
+                .map_err(|_| PgpError::InvalidRecipientKey)?;
+        }
+        finish(builder, signer, armored)
+    } else {
+        let mut builder = builder.seipd_v1(OsRng, SymmetricKeyAlgorithm::AES256);
+        for subkey in subkeys {
+            builder
+                .encrypt_to_key(OsRng, subkey)
+                .map_err(|_| PgpError::InvalidRecipientKey)?;
+        }
+        finish(builder, signer, armored)
+    }
+}
+
+fn finish<'a, E: pgp::composed::Encryption>(
+    mut builder: pgp::composed::MessageBuilder<'a, pgp::composed::DummyReader, E>,
+    signer: Option<&'a UnlockedKey>,
+    armored: bool,
+) -> Result<Vec<u8>, PgpError> {
+    use rand::rngs::OsRng;
+
+    if let Some(signer) = signer {
+        builder.sign(
+            &signer.key.primary_key,
+            Password::empty(),
+            HashAlgorithm::Sha256,
+        );
+    }
+    if armored {
+        builder
+            .to_armored_string(OsRng, Default::default())
+            .map(String::into_bytes)
+            .map_err(|_| PgpError::EncryptFailed)
+    } else {
+        builder.to_vec(OsRng).map_err(|_| PgpError::EncryptFailed)
+    }
+}
+
+fn supports_seipd_v2(key: &SignedPublicKey) -> bool {
+    key.details
+        .direct_signatures
+        .iter()
+        .chain(key.details.users.iter().flat_map(|user| &user.signatures))
+        .filter_map(|sig| sig.features())
+        .any(|features| features.seipd_v2())
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -426,6 +437,23 @@ pub fn generate_alias_key(
     generate_key(display_name, email, None, clock_offset_ms)
 }
 
+fn key_protection() -> pgp::types::S2kParams {
+    use pgp::crypto::aead::AeadAlgorithm;
+    use pgp::types::{S2kParams, StringToKey};
+    use rand::RngCore;
+    use rand::rngs::OsRng;
+
+    let aead_mode = AeadAlgorithm::Gcm;
+    let mut nonce = vec![0u8; aead_mode.nonce_size()];
+    OsRng.fill_bytes(&mut nonce);
+    S2kParams::Aead {
+        sym_alg: SymmetricKeyAlgorithm::AES256,
+        aead_mode,
+        s2k: StringToKey::new_iterated(OsRng, HashAlgorithm::Sha256, 224),
+        nonce: nonce.into(),
+    }
+}
+
 fn generate_key(
     display_name: &str,
     email: &str,
@@ -433,6 +461,7 @@ fn generate_key(
     clock_offset_ms: i64,
 ) -> Result<GeneratedKey, PgpError> {
     use pgp::composed::{EncryptionCaps, KeyType, SecretKeyParamsBuilder, SubkeyParamsBuilder};
+    use pgp::crypto::aead::AeadAlgorithm;
     use pgp::types::KeyVersion;
     use rand::rngs::OsRng;
 
@@ -444,22 +473,38 @@ fn generate_key(
     let created_at = key_creation_time(clock_offset_ms);
 
     let subkey = SubkeyParamsBuilder::default()
-        .version(KeyVersion::V4)
+        .version(KeyVersion::V6)
         .key_type(KeyType::X25519)
         .can_encrypt(EncryptionCaps::All)
         .created_at(created_at)
         .passphrase(passphrase.map(str::to_owned))
+        .s2k(passphrase.map(|_| key_protection()))
         .build()
         .map_err(|_| PgpError::InvalidKey)?;
 
     let params = SecretKeyParamsBuilder::default()
-        .version(KeyVersion::V4)
+        .version(KeyVersion::V6)
         .key_type(KeyType::Ed25519)
         .can_sign(true)
         .can_certify(true)
+        .feature_seipd_v2(true)
+        .preferred_symmetric_algorithms(
+            vec![SymmetricKeyAlgorithm::AES256, SymmetricKeyAlgorithm::AES128].into(),
+        )
+        .preferred_hash_algorithms(vec![HashAlgorithm::Sha512, HashAlgorithm::Sha256].into())
+        .preferred_aead_algorithms(
+            vec![
+                (SymmetricKeyAlgorithm::AES256, AeadAlgorithm::Ocb),
+                (SymmetricKeyAlgorithm::AES256, AeadAlgorithm::Gcm),
+                (SymmetricKeyAlgorithm::AES128, AeadAlgorithm::Ocb),
+                (SymmetricKeyAlgorithm::AES128, AeadAlgorithm::Gcm),
+            ]
+            .into(),
+        )
         .primary_user_id(user_id)
         .created_at(created_at)
         .passphrase(passphrase.map(str::to_owned))
+        .s2k(passphrase.map(|_| key_protection()))
         .subkey(subkey)
         .build()
         .map_err(|_| PgpError::InvalidKey)?;
