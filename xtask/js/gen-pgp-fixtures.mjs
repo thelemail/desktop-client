@@ -3,19 +3,36 @@ const openpgp = await import(
 	new URL('../../web-client/node_modules/openpgp/dist/node/openpgp.mjs', import.meta.url).href
 );
 
+const variant = process.argv[2] ?? 'v4';
+if (variant !== 'v4' && variant !== 'v6') {
+	throw new Error(`unknown variant ${variant}, expected v4 or v6`);
+}
+const suffix = variant === 'v6' ? '-v6' : '';
+
 const dir = new URL('../../fixtures/', import.meta.url);
 const passphrase = 'YnJlYWQtYW5kLXNhbHQtZml4dHVyZS1wYXNzcGhyYXNlLTAx';
+const userIDs = [{ name: 'Fixture Account', email: 'fixture@thelemail.local' }];
 
-const { privateKey, publicKey } = await openpgp.generateKey({
-	type: 'curve25519',
-	userIDs: [{ name: 'Fixture Account', email: 'fixture@thelemail.local' }],
-	format: 'object'
-});
+async function generate() {
+	if (variant === 'v4') {
+		const { privateKey, publicKey } = await openpgp.generateKey({
+			type: 'curve25519',
+			userIDs,
+			format: 'object'
+		});
+		return { privateKey, publicKey, locked: await openpgp.encryptKey({ privateKey, passphrase }) };
+	}
+	const keys = await import(
+		new URL('../../web-client/packages/core/src/keys/pgpKeys.ts', import.meta.url).href
+	);
+	const { privateKey, publicKey } = await keys.generateCurve25519Key({ userIDs, date: new Date() });
+	return { privateKey, publicKey, locked: await keys.lockKey(privateKey, passphrase) };
+}
 
-const locked = await openpgp.encryptKey({ privateKey, passphrase });
+const { privateKey, publicKey, locked } = await generate();
 
-writeFileSync(new URL('keys/account.pub.asc', dir), publicKey.armor());
-writeFileSync(new URL('keys/account.enc.asc', dir), locked.armor());
+writeFileSync(new URL(`keys/account${suffix}.pub.asc`, dir), publicKey.armor());
+writeFileSync(new URL(`keys/account${suffix}.enc.asc`, dir), locked.armor());
 
 const plaintexts = {
 	'body-plain': 'Subject: fixture\r\n\r\nplain body for interop\r\n',
@@ -42,9 +59,9 @@ for (const [name, text] of Object.entries(plaintexts)) {
 		encryptionKeys: publicKey,
 		format: 'binary'
 	});
-	writeFileSync(new URL(`messages/${name}.js.pgp`, dir), Buffer.from(armored));
+	writeFileSync(new URL(`messages/${name}${suffix}.js.pgp`, dir), Buffer.from(armored));
 	meta.messages[name] = { plaintext: text, producer: 'openpgp.js' };
 }
 
-writeFileSync(new URL('keys/meta.json', dir), JSON.stringify(meta, null, '\t') + '\n');
+writeFileSync(new URL(`keys/meta${suffix}.json`, dir), JSON.stringify(meta, null, '\t') + '\n');
 console.log('fingerprint', meta.fingerprint);
