@@ -1,0 +1,23 @@
+{
+	"body-large-go": {
+		"ciphertextLen": 524515,
+		"pkeskTag": 0,
+		"pkeskVersion": 6,
+		"plaintextLen": 524288,
+		"producer": "ProtonMail/go-crypto openpgp.Encrypt, packet.Config{DefaultCipher: AES256, AEADConfig: \u0026AEADConfig{}}"
+	},
+	"body-plain-go": {
+		"ciphertextLen": 254,
+		"pkeskTag": 0,
+		"pkeskVersion": 6,
+		"plaintextLen": 65,
+		"producer": "ProtonMail/go-crypto openpgp.Encrypt, packet.Config{DefaultCipher: AES256, AEADConfig: \u0026AEADConfig{}}"
+	},
+	"preview-go": {
+		"ciphertextLen": 258,
+		"pkeskTag": 0,
+		"pkeskVersion": 6,
+		"plaintextLen": 69,
+		"producer": "ProtonMail/go-crypto openpgp.Encrypt, packet.Config{DefaultCipher: AES256, AEADConfig: \u0026AEADConfig{}}"
+	}
+}

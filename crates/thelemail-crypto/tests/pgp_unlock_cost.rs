@@ -33,3 +33,42 @@ fn decrypting_does_not_rerun_the_key_derivation() {
          The key is being re-derived per message instead of once per unlock."
     );
 }
+
+#[test]
+fn generated_keys_are_locked_with_the_iterated_s2k_under_aead() {
+    use pgp::composed::{Deserializable, SignedSecretKey};
+    use pgp::crypto::aead::AeadAlgorithm;
+    use pgp::crypto::sym::SymmetricKeyAlgorithm;
+    use pgp::types::{S2kParams, SecretParams, StringToKey};
+
+    let key = thelemail_crypto::openpgp::generate_account_key(
+        "",
+        "user@thelemail.local",
+        "a-passphrase",
+        0,
+    )
+    .expect("generate");
+    let (parsed, _) =
+        SignedSecretKey::from_string(&key.encrypted_private_key_armored).expect("parse");
+
+    let params = std::iter::once(parsed.primary_key.secret_params()).chain(
+        parsed
+            .secret_subkeys
+            .iter()
+            .map(|sub| sub.key.secret_params()),
+    );
+    for params in params {
+        let SecretParams::Encrypted(encrypted) = params else {
+            panic!("secret key material is not passphrase-protected");
+        };
+        match encrypted.string_to_key_params() {
+            S2kParams::Aead {
+                sym_alg: SymmetricKeyAlgorithm::AES256,
+                aead_mode: AeadAlgorithm::Gcm,
+                s2k: StringToKey::IteratedAndSalted { .. },
+                ..
+            } => {}
+            other => panic!("unexpected key protection {other:?}"),
+        }
+    }
+}

@@ -29,7 +29,7 @@ func readArmoredEntity(armored string) (*openpgp.Entity, error) {
 	return list[0], nil
 }
 
-func encryptToRecipient(armoredPubKey string, plaintext []byte) ([]byte, error) {
+func encryptToRecipient(armoredPubKey string, plaintext []byte, aead bool) ([]byte, error) {
 	entity, err := readArmoredEntity(armoredPubKey)
 	if err != nil {
 		return nil, err
@@ -37,6 +37,9 @@ func encryptToRecipient(armoredPubKey string, plaintext []byte) ([]byte, error) 
 	now := time.Now
 	var out bytes.Buffer
 	cfg := &packet.Config{DefaultCipher: packet.CipherAES256, Time: now}
+	if aead {
+		cfg.AEADConfig = &packet.AEADConfig{}
+	}
 	enc, err := openpgp.Encrypt(&out, []*openpgp.Entity{entity}, nil, nil, cfg)
 	if err != nil {
 		return nil, err
@@ -52,7 +55,19 @@ func encryptToRecipient(armoredPubKey string, plaintext []byte) ([]byte, error) 
 
 func main() {
 	root := os.Args[1]
-	pub, err := os.ReadFile(filepath.Join(root, "keys", "account.pub.asc"))
+	variant := "v4"
+	if len(os.Args) > 2 {
+		variant = os.Args[2]
+	}
+	suffix, producer, aead := "", "ProtonMail/go-crypto openpgp.Encrypt, packet.Config{DefaultCipher: AES256}, no AEADConfig", false
+	switch variant {
+	case "v4":
+	case "v6":
+		suffix, producer, aead = "-v6", "ProtonMail/go-crypto openpgp.Encrypt, packet.Config{DefaultCipher: AES256, AEADConfig: &AEADConfig{}}", true
+	default:
+		panic("unknown variant " + variant)
+	}
+	pub, err := os.ReadFile(filepath.Join(root, "keys", "account"+suffix+".pub.asc"))
 	if err != nil {
 		panic(err)
 	}
@@ -70,22 +85,22 @@ func main() {
 
 	meta := map[string]any{}
 	for name, plaintext := range cases {
-		ct, err := encryptToRecipient(string(pub), []byte(plaintext))
+		ct, err := encryptToRecipient(string(pub), []byte(plaintext), aead)
 		if err != nil {
 			panic(err)
 		}
-		if err := os.WriteFile(filepath.Join(root, "messages", name+".pgp"), ct, 0o644); err != nil {
+		if err := os.WriteFile(filepath.Join(root, "messages", name+suffix+".pgp"), ct, 0o644); err != nil {
 			panic(err)
 		}
 		meta[name] = map[string]any{
-			"plaintextLen":   len(plaintext),
-			"producer":       "ProtonMail/go-crypto openpgp.Encrypt, packet.Config{DefaultCipher: AES256}, no AEADConfig",
-			"pkeskTag":       int(ct[0] >> 2 & 0x0f),
-			"pkeskVersion":   int(ct[2]),
-			"ciphertextLen":  len(ct),
+			"plaintextLen":  len(plaintext),
+			"producer":      producer,
+			"pkeskTag":      int(ct[0] >> 2 & 0x0f),
+			"pkeskVersion":  int(ct[2]),
+			"ciphertextLen": len(ct),
 		}
 		fmt.Printf("%-16s ct=%7d first=0x%02x pkeskVersion=%d\n", name, len(ct), ct[0], ct[2])
 	}
 	out, _ := json.MarshalIndent(meta, "", "\t")
-	_ = os.WriteFile(filepath.Join(root, "messages", "go-meta.json"), append(out, '\n'), 0o644)
+	_ = os.WriteFile(filepath.Join(root, "messages", "go-meta"+suffix+".json"), append(out, '\n'), 0o644)
 }

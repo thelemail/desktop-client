@@ -1,6 +1,54 @@
-use thelemail_crypto::openpgp::{UnlockedKey, generate_account_key};
+use thelemail_crypto::openpgp::{UnlockedKey, generate_account_key, inspect_wire_shape};
 
 const OUT: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../target/interop");
+const FIXTURES: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../fixtures");
+
+#[test]
+fn a_generated_key_is_v6_with_a_32_byte_fingerprint() {
+    let key =
+        generate_account_key("", "user@thelemail.local", "a-passphrase", 0).expect("generate");
+    assert_eq!(key.fingerprint_hex.len(), 64);
+    let opened = UnlockedKey::open(&key.encrypted_private_key_armored, "a-passphrase")
+        .expect("reopen generated key");
+    assert_eq!(opened.fingerprint_bytes().len(), 32);
+}
+
+#[test]
+fn a_v4_recipient_keeps_the_message_on_seipd_v1() {
+    let key =
+        generate_account_key("", "user@thelemail.local", "a-passphrase", 0).expect("generate");
+    let unlocked =
+        UnlockedKey::open(&key.encrypted_private_key_armored, "a-passphrase").expect("unlock");
+    let legacy_pub =
+        std::fs::read_to_string(format!("{FIXTURES}/keys/account.pub.asc")).expect("read pub");
+    let legacy_meta: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(format!("{FIXTURES}/keys/meta.json")).expect("read meta"),
+    )
+    .expect("parse meta");
+    let legacy = UnlockedKey::open(
+        &std::fs::read_to_string(format!("{FIXTURES}/keys/account.enc.asc")).expect("read key"),
+        legacy_meta["passphrase"].as_str().expect("passphrase"),
+    )
+    .expect("unlock legacy");
+
+    let plaintext = b"to a v6 and a v4 recipient";
+    let ciphertext = unlocked
+        .encrypt_to(
+            &[key.public_key_armored.clone(), legacy_pub],
+            plaintext,
+            Some(&unlocked),
+        )
+        .expect("encrypt");
+
+    let shape = inspect_wire_shape(&ciphertext).expect("shape");
+    assert_eq!(shape.pkesk_version, 3);
+    assert_eq!(shape.seipd_version, 1);
+    assert_eq!(
+        unlocked.decrypt(&ciphertext).expect("v6 decrypt"),
+        plaintext
+    );
+    assert_eq!(legacy.decrypt(&ciphertext).expect("v4 decrypt"), plaintext);
+}
 
 #[test]
 fn a_generated_key_round_trips_in_rust() {
@@ -60,14 +108,8 @@ fn rust_encrypted_messages_decrypt_in_openpgp_js() {
         .expect("encrypt");
 
     let shape = thelemail_crypto::openpgp::inspect_wire_shape(&ciphertext).expect("shape");
-    assert_eq!(
-        shape.pkesk_version, 3,
-        "must match the server's PKESK version"
-    );
-    assert_eq!(
-        shape.seipd_version, 1,
-        "must match the server's SEIPD version"
-    );
+    assert_eq!(shape.pkesk_version, 6);
+    assert_eq!(shape.seipd_version, 2);
 
     assert_eq!(
         unlocked.decrypt(&ciphertext).expect("self decrypt"),

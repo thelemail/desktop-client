@@ -35,7 +35,9 @@ if (expectSigner === 'unsigned') {
 	}
 	await signatures[0].verified;
 	const keyId = signatures[0].keyID.toHex().toLowerCase();
-	if (!expectSigner.toLowerCase().endsWith(keyId)) {
-		throw new Error(`signature is from ${keyId}, expected a key ending ${expectSigner}`);
+	const fingerprint = expectSigner.toLowerCase();
+	const matches = fingerprint.length === 64 ? fingerprint.startsWith(keyId) : fingerprint.endsWith(keyId);
+	if (!matches) {
+		throw new Error(`signature is from ${keyId}, expected key ${expectSigner}`);
 	}
 }
