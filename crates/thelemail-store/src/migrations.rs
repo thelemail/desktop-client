@@ -19,6 +19,11 @@ pub static MIGRATIONS: &[Migration] = &[
         name: "delivered_to",
         up: m0002_delivered_to,
     },
+    Migration {
+        version: 3,
+        name: "signature_facts",
+        up: m0003_signature_facts,
+    },
 ];
 
 pub fn migrate(conn: &Connection) -> Result<(), StoreError> {
@@ -43,6 +48,14 @@ pub fn migrate(conn: &Connection) -> Result<(), StoreError> {
 
 fn m0002_delivered_to(tx: &Transaction) -> rusqlite::Result<()> {
     tx.execute_batch("ALTER TABLE messages ADD COLUMN delivered_to TEXT NOT NULL DEFAULT '';")
+}
+
+fn m0003_signature_facts(tx: &Transaction) -> rusqlite::Result<()> {
+    tx.execute_batch(
+        "ALTER TABLE messages ADD COLUMN encrypted INTEGER NOT NULL DEFAULT 0;
+         ALTER TABLE messages ADD COLUMN signer_key_fingerprint TEXT;
+         ALTER TABLE messages ADD COLUMN signer_delegation_id TEXT;",
+    )
 }
 
 fn m0001_initial(tx: &Transaction) -> rusqlite::Result<()> {

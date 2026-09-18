@@ -74,6 +74,14 @@ pub struct MessageListItem {
     thread_root_id: Option<String>,
     #[serde(default, rename = "encryptedPreview")]
     encrypted_preview: Option<String>,
+    #[serde(default)]
+    encrypted: bool,
+    #[serde(default, rename = "signatureStatus")]
+    signature_status: Option<String>,
+    #[serde(default, rename = "signerKeyFingerprint")]
+    signer_key_fingerprint: Option<String>,
+    #[serde(default, rename = "signerDelegationId")]
+    signer_delegation_id: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Default)]
@@ -418,8 +426,8 @@ fn upsert_message(
         "INSERT INTO messages (id, direction, source, mailbox_state, starred, read, stored_at, \
           body_size_bytes, attachment_count, thread_root_id, subject, sender_display, \
           sender_address, recipients_json, snippet, display_date, preview_state, synced_at, \
-          delivered_to) \
-         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19) \
+          delivered_to, encrypted, signature_status, signer_key_fingerprint, signer_delegation_id) \
+         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23) \
          ON CONFLICT(id) DO UPDATE SET \
           mailbox_state=excluded.mailbox_state, starred=excluded.starred, read=excluded.read, \
           attachment_count=excluded.attachment_count, thread_root_id=excluded.thread_root_id, \
@@ -427,7 +435,10 @@ fn upsert_message(
           sender_address=excluded.sender_address, recipients_json=excluded.recipients_json, \
           snippet=excluded.snippet, display_date=excluded.display_date, \
           preview_state=excluded.preview_state, deleted=0, synced_at=excluded.synced_at, \
-          delivered_to=excluded.delivered_to \
+          delivered_to=excluded.delivered_to, encrypted=excluded.encrypted, \
+          signature_status=excluded.signature_status, \
+          signer_key_fingerprint=excluded.signer_key_fingerprint, \
+          signer_delegation_id=excluded.signer_delegation_id \
          WHERE messages.dirty = 0",
         params![
             item.id,
@@ -449,6 +460,10 @@ fn upsert_message(
             if decrypted { "ok" } else { "undecryptable" },
             now,
             preview.delivered_to,
+            item.encrypted as i64,
+            item.signature_status,
+            item.signer_key_fingerprint,
+            item.signer_delegation_id,
         ],
     )?;
 
@@ -934,6 +949,37 @@ mod tests {
     }
 
     #[test]
+    fn signature_facts_survive_for_the_offline_reader() {
+        let conn = Connection::open_in_memory().expect("db");
+        thelemail_store::migrations::migrate(&conn).expect("migrate");
+        let item: MessageListItem = serde_json::from_value(serde_json::json!({
+            "id": "m1",
+            "direction": "received",
+            "source": "inbound_external",
+            "mailboxState": "inbox",
+            "storedAt": "2026-09-18T20:50:00Z",
+            "signatureStatus": "verified",
+            "signerKeyFingerprint": "pwV4+KcFePinBXj4pwV4+KcFePg="
+        }))
+        .expect("item");
+        let preview: MessagePreview =
+            serde_json::from_str(r#"{"subject":"hi","recipients":[]}"#).expect("preview");
+
+        upsert_message(&conn, &item, &preview, true).expect("upsert");
+
+        let got = thelemail_store::list::get_message(&conn, "m1", "now")
+            .expect("query")
+            .expect("message");
+        assert_eq!(got.signature_status.as_deref(), Some("verified"));
+        assert_eq!(
+            got.signer_key_fingerprint.as_deref(),
+            Some("pwV4+KcFePinBXj4pwV4+KcFePg=")
+        );
+        assert_eq!(got.signer_delegation_id, None);
+        assert!(!got.encrypted);
+    }
+
+    #[test]
     fn notifications_stay_silent_until_the_first_backfill_finishes() {
         let mirror = Mirror::default();
         assert!(
@@ -1033,6 +1079,10 @@ mod tests {
             attachment_count: 0,
             thread_root_id: None,
             encrypted_preview: None,
+            encrypted: false,
+            signature_status: None,
+            signer_key_fingerprint: None,
+            signer_delegation_id: None,
         }
     }
 
