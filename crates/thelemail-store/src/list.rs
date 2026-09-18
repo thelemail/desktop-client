@@ -95,6 +95,9 @@ pub struct MirrorMessage {
     pub in_reply_to: Option<String>,
     pub labels_json: String,
     pub signature_status: Option<String>,
+    pub signer_key_fingerprint: Option<String>,
+    pub signer_delegation_id: Option<String>,
+    pub encrypted: bool,
     pub subject: String,
     pub sender_display: String,
     pub sender_address: String,
@@ -110,7 +113,8 @@ pub struct MirrorMessage {
 const MESSAGE_COLUMNS: &str = "m.rowid, m.id, m.direction, m.source, m.mailbox_state, m.stored_at, \
      m.read, m.starred, m.thread_root_id, m.external_message_id, m.in_reply_to, m.labels_json, \
      m.signature_status, m.subject, m.sender_display, m.sender_address, m.recipients_json, \
-     m.snippet, m.display_date, m.attachment_count, b.mime, m.delivered_to";
+     m.snippet, m.display_date, m.attachment_count, b.mime, m.delivered_to, \
+     m.signer_key_fingerprint, m.signer_delegation_id, m.encrypted";
 
 fn read_message(row: &rusqlite::Row<'_>) -> rusqlite::Result<(i64, MirrorMessage)> {
     let mime: Option<Vec<u8>> = row.get(20)?;
@@ -129,6 +133,9 @@ fn read_message(row: &rusqlite::Row<'_>) -> rusqlite::Result<(i64, MirrorMessage
             in_reply_to: row.get(10)?,
             labels_json: row.get(11)?,
             signature_status: row.get(12)?,
+            signer_key_fingerprint: row.get(22)?,
+            signer_delegation_id: row.get(23)?,
+            encrypted: row.get::<_, i64>(24)? != 0,
             subject: row.get(13)?,
             sender_display: row.get(14)?,
             sender_address: row.get(15)?,
