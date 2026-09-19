@@ -13,17 +13,17 @@ pub struct NewMail {
 }
 
 impl NewMail {
-    fn title(&self) -> String {
+    fn title(&self, locale: &str) -> String {
         if self.sender.is_empty() {
-            "New message".to_owned()
+            crate::locale::text(locale, crate::locale::Text::NewMessage).to_owned()
         } else {
             self.sender.clone()
         }
     }
 
-    fn subtitle(&self) -> String {
+    fn subtitle(&self, locale: &str) -> String {
         if self.subject.is_empty() {
-            "(no subject)".to_owned()
+            crate::locale::text(locale, crate::locale::Text::NoSubject).to_owned()
         } else {
             self.subject.clone()
         }
@@ -304,10 +304,11 @@ mod platform {
     }
 
     fn deliver(app: &AppHandle, mail: &NewMail) {
+        let lang = crate::locale::current(app);
         unsafe {
             let content = UNMutableNotificationContent::new();
-            content.setTitle(&NSString::from_str(&mail.title()));
-            content.setSubtitle(&NSString::from_str(&mail.subtitle()));
+            content.setTitle(&NSString::from_str(&mail.title(lang)));
+            content.setSubtitle(&NSString::from_str(&mail.subtitle(lang)));
             if !mail.snippet.is_empty() {
                 content.setBody(&NSString::from_str(&mail.snippet));
             }

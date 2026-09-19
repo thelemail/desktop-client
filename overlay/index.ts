@@ -402,6 +402,31 @@ const session = {
 	forget: (accountId: string) => invoke<void>('session_forget', { args: { accountId } })
 };
 
+const LOCALE_KEY = 'thelemail.locale';
+
+const locale = {
+	saved: () => {
+		try {
+			return localStorage.getItem(LOCALE_KEY);
+		} catch {
+			return null;
+		}
+	},
+	save: (value: string | null) => {
+		try {
+			if (value) localStorage.setItem(LOCALE_KEY, value);
+			else localStorage.removeItem(LOCALE_KEY);
+		} catch {}
+	},
+	preferred: async () => {
+		const system = await invoke<string[]>('system_locales').catch(() => [] as string[]);
+		return system.length > 0 ? system : [...navigator.languages];
+	},
+	applied: (value: string) => {
+		void invoke('set_ui_locale', { locale: value }).catch(() => {});
+	}
+};
+
 export const platform = {
 	reportError: (kind: string, err: unknown) =>
 		report(
@@ -413,6 +438,7 @@ export const platform = {
 	writeFrameDoc: true,
 	session,
 	billing: 'handoff' as const,
+	locale,
 	mirror,
 	keystoreChannel,
 	transport: nativeRequest,

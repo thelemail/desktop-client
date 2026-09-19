@@ -3,6 +3,7 @@ mod devbridge;
 mod ids;
 mod keychain;
 mod keystore;
+mod locale;
 pub mod mirror;
 mod mirror_cmds;
 mod net;
@@ -33,10 +34,25 @@ fn show_main(app: &tauri::AppHandle) {
 }
 
 fn build_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
-    let show = MenuItem::with_id(app, "show", "Show Thelemail", true, None::<&str>)?;
+    let lang = locale::current(app);
+    let show = MenuItem::with_id(
+        app,
+        "show",
+        locale::text(lang, locale::Text::ShowApp),
+        true,
+        None::<&str>,
+    )?;
     let separator = PredefinedMenuItem::separator(app)?;
-    let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
+    let quit = MenuItem::with_id(
+        app,
+        "quit",
+        locale::text(lang, locale::Text::Quit),
+        true,
+        None::<&str>,
+    )?;
     let menu = Menu::with_items(app, &[&show, &separator, &quit])?;
+    app.state::<locale::UiLocale>()
+        .attach_tray(show.clone(), quit.clone());
 
     let icon =
         tauri::image::Image::from_bytes(include_bytes!("../icons/tray@2x.png")).expect("tray icon");
@@ -68,6 +84,7 @@ pub fn run() {
         .manage(net)
         .manage(Keystore::new())
         .manage(Mirror::default())
+        .manage(locale::UiLocale::default())
         .manage(sse::Streams::default())
         .manage(Updates::new(&Mirror::root()))
         .invoke_handler(tauri::generate_handler![
@@ -80,6 +97,8 @@ pub fn run() {
             notify::notify_status,
             notify::notify_take_opened,
             keystore::keystore_status,
+            locale::system_locales,
+            locale::set_ui_locale,
             keystore::keystore_opaque_start_auth,
             keystore::keystore_opaque_finish_auth,
             keystore::keystore_opaque_complete_login_unlock,
