@@ -16,6 +16,18 @@ const STRINGS: &[(&str, Text, &str)] = &[
     ("en", Text::Quit, "Quit"),
     ("en", Text::NewMessage, "New message"),
     ("en", Text::NoSubject, "(no subject)"),
+    ("de", Text::ShowApp, "Thelemail anzeigen"),
+    ("de", Text::Quit, "Beenden"),
+    ("de", Text::NewMessage, "Neue Nachricht"),
+    ("de", Text::NoSubject, "(kein Betreff)"),
+    ("fr", Text::ShowApp, "Afficher Thelemail"),
+    ("fr", Text::Quit, "Quitter"),
+    ("fr", Text::NewMessage, "Nouveau message"),
+    ("fr", Text::NoSubject, "(sans objet)"),
+    ("pt", Text::ShowApp, "Mostrar Thelemail"),
+    ("pt", Text::Quit, "Sair"),
+    ("pt", Text::NewMessage, "Nova mensagem"),
+    ("pt", Text::NoSubject, "(sem assunto)"),
 ];
 
 const LOCALES: &[&str] = &["en", "de", "fr", "pt"];
@@ -90,14 +102,19 @@ mod tests {
 
     #[test]
     fn falls_back_to_english_for_missing_entries() {
-        assert_eq!(text("de", Text::Quit), text("en", Text::Quit));
+        assert_eq!(text("xx", Text::Quit), text("en", Text::Quit));
         assert_eq!(text("xx", Text::NoSubject), "(no subject)");
     }
 
     #[test]
-    fn every_key_has_english() {
-        for key in [Text::ShowApp, Text::Quit, Text::NewMessage, Text::NoSubject] {
-            assert!(STRINGS.iter().any(|(l, k, _)| *l == "en" && *k == key));
+    fn every_locale_has_every_key() {
+        for locale in LOCALES {
+            for key in [Text::ShowApp, Text::Quit, Text::NewMessage, Text::NoSubject] {
+                assert!(
+                    STRINGS.iter().any(|(l, k, _)| l == locale && *k == key),
+                    "{locale} is missing {key:?}"
+                );
+            }
         }
     }
 
