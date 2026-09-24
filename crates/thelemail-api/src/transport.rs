@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 use url::Url;
 
 use crate::config::ApiConfig;
+use crate::upload::{UploadBegin, Uploads};
 
 const MAX_BLOB_BYTES: usize = 64 * 1024 * 1024;
 
@@ -58,6 +59,7 @@ pub struct ApiResponse {
 pub struct Net {
     api: Client,
     blob: Client,
+    uploads: Uploads,
     cookies: Arc<CookieStoreMutex>,
     config: ApiConfig,
     clock_offset_ms: AtomicI64,
@@ -82,6 +84,7 @@ impl Net {
         Ok(Self {
             api,
             blob,
+            uploads: Uploads::new(&user_agent())?,
             cookies,
             config,
             clock_offset_ms: AtomicI64::new(0),
@@ -251,27 +254,20 @@ impl Net {
             .map_err(|_| TransportError::Network)
     }
 
-    pub async fn blob_put(
-        &self,
-        raw_url: &str,
-        bytes: Vec<u8>,
-        content_type: Option<String>,
-    ) -> Result<u16, TransportError> {
-        let url = Url::parse(raw_url).map_err(|_| TransportError::InvalidRequest)?;
-        if !self.config.allows_blob_host(&url) {
-            return Err(TransportError::HostNotAllowed);
-        }
-        if bytes.len() > MAX_BLOB_BYTES {
-            return Err(TransportError::ResponseTooLarge);
-        }
+    pub fn upload_begin(&self, req: UploadBegin) -> Result<String, TransportError> {
+        self.uploads.begin(&self.config, req)
+    }
 
-        let mut request = self.blob.put(url).body(bytes);
-        if let Some(ct) = content_type {
-            let value = HeaderValue::from_str(&ct).map_err(|_| TransportError::InvalidRequest)?;
-            request = request.header(reqwest::header::CONTENT_TYPE, value);
-        }
-        let resp = request.send().await.map_err(|_| TransportError::Network)?;
-        Ok(resp.status().as_u16())
+    pub async fn upload_chunk(&self, id: &str, chunk: Vec<u8>) -> Result<(), TransportError> {
+        self.uploads.push(id, chunk).await
+    }
+
+    pub async fn upload_finish(&self, id: &str) -> Result<ApiResponse, TransportError> {
+        self.uploads.finish(id).await
+    }
+
+    pub fn upload_abort(&self, id: &str) {
+        self.uploads.abort(id);
     }
 
     pub async fn blob_get(&self, raw_url: &str) -> Result<Vec<u8>, TransportError> {
@@ -305,12 +301,12 @@ fn user_agent() -> String {
     format!("Thelemail/{} (macOS)", env!("CARGO_PKG_VERSION"))
 }
 
-fn is_forbidden_request_header(name: &str) -> bool {
+pub(crate) fn is_forbidden_request_header(name: &str) -> bool {
     let lower = name.to_ascii_lowercase();
     matches!(lower.as_str(), "cookie" | "origin" | "referer" | "host")
 }
 
-fn is_hidden_response_header(name: &str) -> bool {
+pub(crate) fn is_hidden_response_header(name: &str) -> bool {
     let lower = name.to_ascii_lowercase();
     matches!(
         lower.as_str(),

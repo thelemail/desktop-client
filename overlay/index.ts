@@ -96,19 +96,66 @@ async function nativeRequest(
 	});
 }
 
-async function nativeBlobPut(
+const UPLOAD_CHUNK_BYTES = 1024 * 1024;
+
+interface UploadOptions {
+	signal?: AbortSignal;
+	onProgress?: (fraction: number) => void;
+}
+
+async function nativeUpload(
+	url: string,
+	body: Blob,
+	target: 'submission' | 'blob',
+	headers: Record<string, string>,
+	opts?: UploadOptions
+): Promise<Response> {
+	opts?.signal?.throwIfAborted();
+	const id = await invoke<string>('upload_begin', {
+		req: { url, target, size: body.size, headers }
+	});
+	const abort = () => void invoke('upload_abort', { id });
+	opts?.signal?.addEventListener('abort', abort, { once: true });
+	try {
+		for (let off = 0; off < body.size; off += UPLOAD_CHUNK_BYTES) {
+			opts?.signal?.throwIfAborted();
+			const chunk = new Uint8Array(await body.slice(off, off + UPLOAD_CHUNK_BYTES).arrayBuffer());
+			await invoke('upload_chunk', chunk, { headers: { 'x-upload-id': id } });
+			opts?.onProgress?.(Math.min(off + chunk.length, body.size) / Math.max(body.size, 1));
+		}
+		opts?.signal?.throwIfAborted();
+		const res = await invoke<NativeResponse>('upload_finish', { id });
+		opts?.onProgress?.(1);
+		return new Response(res.body === null ? null : new Uint8Array(res.body), {
+			status: res.status,
+			headers: res.headers
+		});
+	} catch (err) {
+		abort();
+		if (opts?.signal?.aborted) throw new DOMException('aborted', 'AbortError');
+		throw err;
+	} finally {
+		opts?.signal?.removeEventListener('abort', abort);
+	}
+}
+
+function nativeBlobPut(
 	url: string,
 	body: Blob,
 	contentType?: string,
-	opts?: { signal?: AbortSignal; onProgress?: (fraction: number) => void }
+	opts?: UploadOptions
 ): Promise<Response> {
-	opts?.signal?.throwIfAborted();
-	const bytes = Array.from(new Uint8Array(await body.arrayBuffer()));
-	const status = await invoke<number>('blob_put', {
-		args: { url, bytes, contentType: contentType ?? body.type ?? null }
-	});
-	opts?.onProgress?.(1);
-	return new Response(null, { status });
+	const type = contentType ?? body.type;
+	return nativeUpload(url, body, 'blob', type ? { 'Content-Type': type } : {}, opts);
+}
+
+function nativeSubmissionUpload(
+	url: string,
+	body: Blob,
+	headers: Record<string, string>,
+	opts?: UploadOptions
+): Promise<Response> {
+	return nativeUpload(url, body, 'submission', { ...headers, 'X-Client': 'desktop' }, opts);
 }
 
 async function nativeBlobFetch(url: string): Promise<Response> {
@@ -447,6 +494,7 @@ export const platform = {
 	updates,
 	blobFetch: nativeBlobFetch,
 	blobPut: nativeBlobPut,
+	submissionUpload: nativeSubmissionUpload,
 	returnOrigin: () => env.PUBLIC_APP_URL || 'https://app.thelemail.com',
 	openExternal: (url: string) => {
 		void invoke('open_external', { url });
