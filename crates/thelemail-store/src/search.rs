@@ -200,6 +200,7 @@ pub struct SearchHit {
     pub starred: bool,
     pub attachment_count: i64,
     pub thread_root_id: Option<String>,
+    pub folder_id: Option<String>,
 }
 
 pub fn search_messages(
@@ -216,7 +217,7 @@ pub fn search_messages(
     let mut sql = String::from(
         "SELECT m.id, m.subject, m.sender_display, m.sender_address, m.snippet, \
                 m.stored_at, m.mailbox_state, m.direction, m.read, m.starred, \
-                m.attachment_count, m.thread_root_id, ",
+                m.attachment_count, m.thread_root_id, m.folder_id, ",
     );
 
     if parsed.fts.is_some() {
@@ -287,7 +288,8 @@ pub fn search_messages(
             starred: row.get::<_, i64>(9)? != 0,
             attachment_count: row.get(10)?,
             thread_root_id: row.get(11)?,
-            excerpt: row.get(12)?,
+            folder_id: row.get(12)?,
+            excerpt: row.get(13)?,
         })
     })?;
 

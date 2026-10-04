@@ -20,6 +20,7 @@ pub struct MirrorRow {
     pub starred: bool,
     pub attachment_count: i64,
     pub thread_root_id: Option<String>,
+    pub folder_id: Option<String>,
     pub labels_json: String,
 }
 
@@ -27,38 +28,44 @@ pub fn list_mailbox(
     conn: &Connection,
     mailbox: &str,
     direction: Option<&str>,
+    folder_id: Option<&str>,
     limit: usize,
 ) -> Result<Vec<MirrorRow>, StoreError> {
     let mut stmt = conn.prepare(
         "SELECT id, direction, mailbox_state, subject, sender_display, sender_address, \
                 recipients_json, snippet, display_date, stored_at, read, starred, \
-                attachment_count, thread_root_id, labels_json \
+                attachment_count, thread_root_id, labels_json, folder_id \
          FROM messages \
          WHERE deleted = 0 AND mailbox_state = ?1 \
            AND (?2 IS NULL OR direction = ?2) \
+           AND (?4 IS NULL OR folder_id = ?4) \
          ORDER BY stored_at DESC, id DESC \
          LIMIT ?3",
     )?;
 
-    let rows = stmt.query_map(rusqlite::params![mailbox, direction, limit as i64], |row| {
-        Ok(MirrorRow {
-            id: row.get(0)?,
-            direction: row.get(1)?,
-            mailbox_state: row.get(2)?,
-            subject: row.get(3)?,
-            sender_display: row.get(4)?,
-            sender_address: row.get(5)?,
-            recipients_json: row.get(6)?,
-            snippet: row.get(7)?,
-            display_date: row.get(8)?,
-            stored_at: row.get(9)?,
-            read: row.get::<_, i64>(10)? != 0,
-            starred: row.get::<_, i64>(11)? != 0,
-            attachment_count: row.get(12)?,
-            thread_root_id: row.get(13)?,
-            labels_json: row.get(14)?,
-        })
-    })?;
+    let rows = stmt.query_map(
+        rusqlite::params![mailbox, direction, limit as i64, folder_id],
+        |row| {
+            Ok(MirrorRow {
+                id: row.get(0)?,
+                direction: row.get(1)?,
+                mailbox_state: row.get(2)?,
+                subject: row.get(3)?,
+                sender_display: row.get(4)?,
+                sender_address: row.get(5)?,
+                recipients_json: row.get(6)?,
+                snippet: row.get(7)?,
+                display_date: row.get(8)?,
+                stored_at: row.get(9)?,
+                read: row.get::<_, i64>(10)? != 0,
+                starred: row.get::<_, i64>(11)? != 0,
+                attachment_count: row.get(12)?,
+                thread_root_id: row.get(13)?,
+                labels_json: row.get(14)?,
+                folder_id: row.get(15)?,
+            })
+        },
+    )?;
 
     let mut out = Vec::new();
     for row in rows {
@@ -91,6 +98,7 @@ pub struct MirrorMessage {
     pub read: bool,
     pub starred: bool,
     pub thread_root_id: Option<String>,
+    pub folder_id: Option<String>,
     pub external_message_id: Option<String>,
     pub in_reply_to: Option<String>,
     pub labels_json: String,
@@ -114,7 +122,7 @@ const MESSAGE_COLUMNS: &str = "m.rowid, m.id, m.direction, m.source, m.mailbox_s
      m.read, m.starred, m.thread_root_id, m.external_message_id, m.in_reply_to, m.labels_json, \
      m.signature_status, m.subject, m.sender_display, m.sender_address, m.recipients_json, \
      m.snippet, m.display_date, m.attachment_count, b.mime, m.delivered_to, \
-     m.signer_key_fingerprint, m.signer_delegation_id, m.encrypted";
+     m.signer_key_fingerprint, m.signer_delegation_id, m.encrypted, m.folder_id";
 
 fn read_message(row: &rusqlite::Row<'_>) -> rusqlite::Result<(i64, MirrorMessage)> {
     let mime: Option<Vec<u8>> = row.get(20)?;
@@ -129,6 +137,7 @@ fn read_message(row: &rusqlite::Row<'_>) -> rusqlite::Result<(i64, MirrorMessage
             read: row.get::<_, i64>(6)? != 0,
             starred: row.get::<_, i64>(7)? != 0,
             thread_root_id: row.get(8)?,
+            folder_id: row.get(25)?,
             external_message_id: row.get(9)?,
             in_reply_to: row.get(10)?,
             labels_json: row.get(11)?,
