@@ -15,7 +15,7 @@ use tokio::sync::Notify;
 
 use crate::keychain;
 
-const SCOPES: &[&str] = &["inbox", "archive", "spam", "trash"];
+const SCOPES: &[&str] = &["inbox", "archive", "folder", "spam", "trash"];
 const PAGE_LIMIT: u32 = 100;
 const BODY_CONCURRENCY: usize = 4;
 
@@ -72,6 +72,10 @@ pub struct MessageListItem {
     attachment_count: i64,
     #[serde(default, rename = "threadRootId")]
     thread_root_id: Option<String>,
+    #[serde(default)]
+    folder_id: Option<String>,
+    #[serde(default)]
+    label_ids: Vec<String>,
     #[serde(default, rename = "encryptedPreview")]
     encrypted_preview: Option<String>,
     #[serde(default)]
@@ -420,14 +424,17 @@ fn upsert_message(
             .collect::<Vec<_>>(),
     )
     .unwrap_or_else(|_| "[]".to_owned());
+    let labels_json = serde_json::to_string(&item.label_ids).unwrap_or_else(|_| "[]".to_owned());
     let now = now_iso();
 
     conn.execute(
         "INSERT INTO messages (id, direction, source, mailbox_state, starred, read, stored_at, \
           body_size_bytes, attachment_count, thread_root_id, subject, sender_display, \
           sender_address, recipients_json, snippet, display_date, preview_state, synced_at, \
-          delivered_to, encrypted, signature_status, signer_key_fingerprint, signer_delegation_id) \
-         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23) \
+          delivered_to, encrypted, signature_status, signer_key_fingerprint, signer_delegation_id, \
+          folder_id, labels_json) \
+         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23, \
+          ?24,?25) \
          ON CONFLICT(id) DO UPDATE SET \
           mailbox_state=excluded.mailbox_state, starred=excluded.starred, read=excluded.read, \
           attachment_count=excluded.attachment_count, thread_root_id=excluded.thread_root_id, \
@@ -438,7 +445,8 @@ fn upsert_message(
           delivered_to=excluded.delivered_to, encrypted=excluded.encrypted, \
           signature_status=excluded.signature_status, \
           signer_key_fingerprint=excluded.signer_key_fingerprint, \
-          signer_delegation_id=excluded.signer_delegation_id \
+          signer_delegation_id=excluded.signer_delegation_id, \
+          folder_id=excluded.folder_id, labels_json=excluded.labels_json \
          WHERE messages.dirty = 0",
         params![
             item.id,
@@ -464,6 +472,8 @@ fn upsert_message(
             item.signature_status,
             item.signer_key_fingerprint,
             item.signer_delegation_id,
+            item.folder_id,
+            labels_json,
         ],
     )?;
 
@@ -980,6 +990,60 @@ mod tests {
     }
 
     #[test]
+    fn folder_and_labels_reach_the_offline_mirror() {
+        let conn = Connection::open_in_memory().expect("db");
+        thelemail_store::migrations::migrate(&conn).expect("migrate");
+        let preview: MessagePreview =
+            serde_json::from_str(r#"{"subject":"Invoice","recipients":[]}"#).expect("preview");
+        let filed: MessageListItem = serde_json::from_value(serde_json::json!({
+            "id": "m1",
+            "direction": "received",
+            "mailboxState": "folder",
+            "folderId": "7d1f4c1e-3b2a-4c55-9a51-1f0e2d3c4b5a",
+            "labelIds": ["0b8a6c2d-9e1f-4a3b-8c7d-6e5f4a3b2c1d"],
+            "storedAt": "2026-10-05T09:00:00Z"
+        }))
+        .expect("item");
+
+        upsert_message(&conn, &filed, &preview, true).expect("upsert");
+
+        let rows = thelemail_store::list::list_mailbox(
+            &conn,
+            "folder",
+            None,
+            Some("7d1f4c1e-3b2a-4c55-9a51-1f0e2d3c4b5a"),
+            10,
+        )
+        .expect("list");
+        assert_eq!(rows.len(), 1);
+        assert_eq!(
+            rows[0].labels_json,
+            r#"["0b8a6c2d-9e1f-4a3b-8c7d-6e5f4a3b2c1d"]"#
+        );
+
+        let archived: MessageListItem = serde_json::from_value(serde_json::json!({
+            "id": "m1",
+            "direction": "received",
+            "mailboxState": "archive",
+            "storedAt": "2026-10-05T09:00:00Z"
+        }))
+        .expect("item");
+        upsert_message(&conn, &archived, &preview, true).expect("upsert");
+        let got = thelemail_store::list::get_message(&conn, "m1", "now")
+            .expect("query")
+            .expect("message");
+        assert_eq!(got.mailbox_state, "archive");
+        assert_eq!(
+            got.folder_id, None,
+            "leaving a folder must clear it in the mirror"
+        );
+        assert_eq!(
+            got.labels_json, "[]",
+            "removed labels must not linger offline"
+        );
+    }
+
+    #[test]
     fn notifications_stay_silent_until_the_first_backfill_finishes() {
         let mirror = Mirror::default();
         assert!(
@@ -1078,6 +1142,8 @@ mod tests {
             body_size_bytes: 0,
             attachment_count: 0,
             thread_root_id: None,
+            folder_id: None,
+            label_ids: Vec::new(),
             encrypted_preview: None,
             encrypted: false,
             signature_status: None,

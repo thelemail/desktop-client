@@ -269,7 +269,7 @@ fn a_mirrored_mailbox_lists_newest_first_and_survives_being_offline() {
     )
     .expect("insert archived");
 
-    let rows = list_mailbox(&conn, "inbox", None, 50).expect("list");
+    let rows = list_mailbox(&conn, "inbox", None, None, 50).expect("list");
     assert_eq!(
         rows.len(),
         3,
@@ -282,7 +282,7 @@ fn a_mirrored_mailbox_lists_newest_first_and_survives_being_offline() {
 
     conn.execute("UPDATE messages SET deleted = 1 WHERE id = 'm3'", [])
         .expect("tombstone");
-    let rows = list_mailbox(&conn, "inbox", None, 50).expect("list");
+    let rows = list_mailbox(&conn, "inbox", None, None, 50).expect("list");
     assert_eq!(rows.len(), 2, "tombstoned rows must not be listed");
 }
 
@@ -304,7 +304,7 @@ fn the_inbox_listing_separates_sent_copies_from_received_ones() {
         .expect("insert");
     }
 
-    let received = list_mailbox(&conn, "inbox", Some("received"), 50).expect("list");
+    let received = list_mailbox(&conn, "inbox", Some("received"), None, 50).expect("list");
     assert_eq!(
         received.len(),
         1,
@@ -312,12 +312,56 @@ fn the_inbox_listing_separates_sent_copies_from_received_ones() {
     );
     assert_eq!(received[0].subject, "From Alice");
 
-    let sent = list_mailbox(&conn, "inbox", Some("sent"), 50).expect("list");
+    let sent = list_mailbox(&conn, "inbox", Some("sent"), None, 50).expect("list");
     assert_eq!(sent.len(), 1, "sent is a direction, not a mailbox state");
     assert_eq!(sent[0].subject, "To Alice");
 
-    let both = list_mailbox(&conn, "inbox", None, 50).expect("list");
+    let both = list_mailbox(&conn, "inbox", None, None, 50).expect("list");
     assert_eq!(both.len(), 2, "an unfiltered listing keeps both directions");
+}
+
+#[test]
+fn a_custom_folder_listing_holds_only_that_folder() {
+    use thelemail_store::list::list_mailbox;
+
+    let (_dir, path) = temp_db();
+    let key = generate_db_key();
+    let conn = open_account_db(&path, &key, ACCOUNT).expect("open");
+
+    for (id, folder, subject) in [
+        ("m1", "f-acme", "Acme invoice"),
+        ("m2", "f-home", "Water bill"),
+    ] {
+        conn.execute(
+            "INSERT INTO messages (id, direction, mailbox_state, folder_id, labels_json, stored_at, \
+             subject, synced_at) \
+             VALUES (?1,'received','folder',?2,'[\"l-tax\"]','2026-08-31T10:00:00Z',?3,'t')",
+            params![id, folder, subject],
+        )
+        .expect("insert");
+    }
+    conn.execute(
+        "INSERT INTO messages (id, direction, mailbox_state, stored_at, subject, synced_at) \
+         VALUES ('m3','received','inbox','2026-08-31T11:00:00Z','Inbox mail','t')",
+        [],
+    )
+    .expect("insert inbox");
+
+    let acme = list_mailbox(&conn, "folder", None, Some("f-acme"), 50).expect("list");
+    assert_eq!(
+        acme.len(),
+        1,
+        "one folder must not show another folder's mail"
+    );
+    assert_eq!(acme[0].subject, "Acme invoice");
+    assert_eq!(acme[0].folder_id.as_deref(), Some("f-acme"));
+    assert_eq!(acme[0].labels_json, "[\"l-tax\"]");
+
+    let all = list_mailbox(&conn, "folder", None, None, 50).expect("list");
+    assert_eq!(all.len(), 2, "the folder scope covers every custom folder");
+
+    let inbox = list_mailbox(&conn, "inbox", None, None, 50).expect("list");
+    assert_eq!(inbox.len(), 1, "filed mail must not leak into the inbox");
 }
 
 const HOSTILE_IDS: &[&str] = &[
@@ -561,7 +605,7 @@ fn a_tombstone_removes_a_message_from_the_list_and_the_index() {
         1
     );
     assert_eq!(
-        thelemail_store::list::list_mailbox(&conn, "inbox", None, 50)
+        thelemail_store::list::list_mailbox(&conn, "inbox", None, None, 50)
             .expect("list")
             .len(),
         1
@@ -582,7 +626,7 @@ fn a_tombstone_removes_a_message_from_the_list_and_the_index() {
         "a tombstoned message must leave the search index"
     );
     assert_eq!(
-        thelemail_store::list::list_mailbox(&conn, "inbox", None, 50)
+        thelemail_store::list::list_mailbox(&conn, "inbox", None, None, 50)
             .expect("list")
             .len(),
         0,

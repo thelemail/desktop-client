@@ -366,8 +366,13 @@ const mirror = {
 	stopWatch: (accountId: string) => invoke<void>('mirror_stop_watch', { args: { accountId } }),
 	search: (accountId: string, query: string, limit?: number) =>
 		invoke<unknown[]>('mirror_search', { args: { accountId, query, limit } }),
-	list: (accountId: string, mailbox: string, direction?: string, limit?: number) =>
-		invoke<unknown[]>('mirror_list', { args: { accountId, mailbox, direction, limit } }),
+	list: (
+		accountId: string,
+		mailbox: string,
+		direction?: string,
+		limit?: number,
+		folderId?: string
+	) => invoke<unknown[]>('mirror_list', { args: { accountId, mailbox, direction, folderId, limit } }),
 	scope: (accountId: string) => invoke<string | null>('mirror_scope', { args: { accountId } }),
 	setScope: (accountId: string, dateFloor: string | null) =>
 		invoke<void>('mirror_set_scope', { args: { accountId, dateFloor } }),

@@ -47,6 +47,8 @@ pub struct ListArgs {
     #[serde(default)]
     pub direction: Option<String>,
     #[serde(default)]
+    pub folder_id: Option<String>,
+    #[serde(default)]
     pub limit: Option<usize>,
 }
 
@@ -58,6 +60,7 @@ pub fn mirror_list(mirror: State<'_, Mirror>, args: ListArgs) -> Result<Vec<Mirr
             conn,
             &args.mailbox,
             args.direction.as_deref(),
+            args.folder_id.as_deref(),
             args.limit.unwrap_or(200),
         )
         .map_err(|e| e.to_string())

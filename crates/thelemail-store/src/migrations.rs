@@ -24,6 +24,11 @@ pub static MIGRATIONS: &[Migration] = &[
         name: "signature_facts",
         up: m0003_signature_facts,
     },
+    Migration {
+        version: 4,
+        name: "custom_folders",
+        up: m0004_custom_folders,
+    },
 ];
 
 pub fn migrate(conn: &Connection) -> Result<(), StoreError> {
@@ -48,6 +53,14 @@ pub fn migrate(conn: &Connection) -> Result<(), StoreError> {
 
 fn m0002_delivered_to(tx: &Transaction) -> rusqlite::Result<()> {
     tx.execute_batch("ALTER TABLE messages ADD COLUMN delivered_to TEXT NOT NULL DEFAULT '';")
+}
+
+fn m0004_custom_folders(tx: &Transaction) -> rusqlite::Result<()> {
+    tx.execute_batch(
+        "ALTER TABLE messages ADD COLUMN folder_id TEXT;
+         CREATE INDEX ix_msg_folder_time ON messages(folder_id, stored_at DESC, id DESC) \
+           WHERE folder_id IS NOT NULL AND deleted = 0;",
+    )
 }
 
 fn m0003_signature_facts(tx: &Transaction) -> rusqlite::Result<()> {
