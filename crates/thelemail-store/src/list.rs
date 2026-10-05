@@ -21,6 +21,7 @@ pub struct MirrorRow {
     pub attachment_count: i64,
     pub thread_root_id: Option<String>,
     pub folder_id: Option<String>,
+    pub returns_to_archive: bool,
     pub labels_json: String,
 }
 
@@ -34,7 +35,7 @@ pub fn list_mailbox(
     let mut stmt = conn.prepare(
         "SELECT id, direction, mailbox_state, subject, sender_display, sender_address, \
                 recipients_json, snippet, display_date, stored_at, read, starred, \
-                attachment_count, thread_root_id, labels_json, folder_id \
+                attachment_count, thread_root_id, labels_json, folder_id, returns_to_archive \
          FROM messages \
          WHERE deleted = 0 AND mailbox_state = ?1 \
            AND (?2 IS NULL OR direction = ?2) \
@@ -63,6 +64,7 @@ pub fn list_mailbox(
                 thread_root_id: row.get(13)?,
                 labels_json: row.get(14)?,
                 folder_id: row.get(15)?,
+                returns_to_archive: row.get::<_, i64>(16)? != 0,
             })
         },
     )?;
@@ -99,6 +101,7 @@ pub struct MirrorMessage {
     pub starred: bool,
     pub thread_root_id: Option<String>,
     pub folder_id: Option<String>,
+    pub returns_to_archive: bool,
     pub external_message_id: Option<String>,
     pub in_reply_to: Option<String>,
     pub labels_json: String,
@@ -122,7 +125,8 @@ const MESSAGE_COLUMNS: &str = "m.rowid, m.id, m.direction, m.source, m.mailbox_s
      m.read, m.starred, m.thread_root_id, m.external_message_id, m.in_reply_to, m.labels_json, \
      m.signature_status, m.subject, m.sender_display, m.sender_address, m.recipients_json, \
      m.snippet, m.display_date, m.attachment_count, b.mime, m.delivered_to, \
-     m.signer_key_fingerprint, m.signer_delegation_id, m.encrypted, m.folder_id";
+     m.signer_key_fingerprint, m.signer_delegation_id, m.encrypted, m.folder_id, \
+     m.returns_to_archive";
 
 fn read_message(row: &rusqlite::Row<'_>) -> rusqlite::Result<(i64, MirrorMessage)> {
     let mime: Option<Vec<u8>> = row.get(20)?;
@@ -138,6 +142,7 @@ fn read_message(row: &rusqlite::Row<'_>) -> rusqlite::Result<(i64, MirrorMessage
             starred: row.get::<_, i64>(7)? != 0,
             thread_root_id: row.get(8)?,
             folder_id: row.get(25)?,
+            returns_to_archive: row.get::<_, i64>(26)? != 0,
             external_message_id: row.get(9)?,
             in_reply_to: row.get(10)?,
             labels_json: row.get(11)?,

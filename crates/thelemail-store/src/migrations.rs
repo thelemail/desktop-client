@@ -29,6 +29,11 @@ pub static MIGRATIONS: &[Migration] = &[
         name: "custom_folders",
         up: m0004_custom_folders,
     },
+    Migration {
+        version: 5,
+        name: "returns_to_archive",
+        up: m0005_returns_to_archive,
+    },
 ];
 
 pub fn migrate(conn: &Connection) -> Result<(), StoreError> {
@@ -60,6 +65,12 @@ fn m0004_custom_folders(tx: &Transaction) -> rusqlite::Result<()> {
         "ALTER TABLE messages ADD COLUMN folder_id TEXT;
          CREATE INDEX ix_msg_folder_time ON messages(folder_id, stored_at DESC, id DESC) \
            WHERE folder_id IS NOT NULL AND deleted = 0;",
+    )
+}
+
+fn m0005_returns_to_archive(tx: &Transaction) -> rusqlite::Result<()> {
+    tx.execute_batch(
+        "ALTER TABLE messages ADD COLUMN returns_to_archive INTEGER NOT NULL DEFAULT 0;",
     )
 }
 

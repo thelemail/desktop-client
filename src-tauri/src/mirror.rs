@@ -75,6 +75,8 @@ pub struct MessageListItem {
     #[serde(default)]
     folder_id: Option<String>,
     #[serde(default)]
+    returns_to_archive: bool,
+    #[serde(default)]
     label_ids: Vec<String>,
     #[serde(default, rename = "encryptedPreview")]
     encrypted_preview: Option<String>,
@@ -432,9 +434,9 @@ fn upsert_message(
           body_size_bytes, attachment_count, thread_root_id, subject, sender_display, \
           sender_address, recipients_json, snippet, display_date, preview_state, synced_at, \
           delivered_to, encrypted, signature_status, signer_key_fingerprint, signer_delegation_id, \
-          folder_id, labels_json) \
+          folder_id, labels_json, returns_to_archive) \
          VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23, \
-          ?24,?25) \
+          ?24,?25,?26) \
          ON CONFLICT(id) DO UPDATE SET \
           mailbox_state=excluded.mailbox_state, starred=excluded.starred, read=excluded.read, \
           attachment_count=excluded.attachment_count, thread_root_id=excluded.thread_root_id, \
@@ -446,7 +448,8 @@ fn upsert_message(
           signature_status=excluded.signature_status, \
           signer_key_fingerprint=excluded.signer_key_fingerprint, \
           signer_delegation_id=excluded.signer_delegation_id, \
-          folder_id=excluded.folder_id, labels_json=excluded.labels_json \
+          folder_id=excluded.folder_id, labels_json=excluded.labels_json, \
+          returns_to_archive=excluded.returns_to_archive \
          WHERE messages.dirty = 0",
         params![
             item.id,
@@ -474,6 +477,7 @@ fn upsert_message(
             item.signer_delegation_id,
             item.folder_id,
             labels_json,
+            item.returns_to_archive as i64,
         ],
     )?;
 
@@ -1041,6 +1045,23 @@ mod tests {
             got.labels_json, "[]",
             "removed labels must not linger offline"
         );
+        assert!(!got.returns_to_archive);
+
+        let trashed: MessageListItem = serde_json::from_value(serde_json::json!({
+            "id": "m1",
+            "direction": "received",
+            "mailboxState": "trash",
+            "returnsToArchive": true,
+            "storedAt": "2026-10-05T09:00:00Z"
+        }))
+        .expect("item");
+        upsert_message(&conn, &trashed, &preview, true).expect("upsert");
+        let rows =
+            thelemail_store::list::list_mailbox(&conn, "trash", None, None, 10).expect("list");
+        assert!(
+            rows[0].returns_to_archive,
+            "the mirror must know trashed mail goes back to the archive"
+        );
     }
 
     #[test]
@@ -1143,6 +1164,7 @@ mod tests {
             attachment_count: 0,
             thread_root_id: None,
             folder_id: None,
+            returns_to_archive: false,
             label_ids: Vec::new(),
             encrypted_preview: None,
             encrypted: false,
