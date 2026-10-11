@@ -1,6 +1,6 @@
 use sha2::{Digest, Sha256};
 use tauri::State;
-use thelemail_api::Net;
+use thelemail_api::{ApiRequest, Net};
 
 use crate::keychain;
 
@@ -29,6 +29,35 @@ fn find_refresh_cookie(cookies: &[(String, String)], account_id: &str) -> Option
                 .find(|(cookie_name, _)| *cookie_name == legacy)
         })
         .map(|(_, value)| value.to_owned())
+}
+
+pub fn auth_account(req: &ApiRequest) -> Option<String> {
+    let url = url::Url::parse(&req.url).ok()?;
+    if !url.path().contains("/v1/auth/") {
+        return None;
+    }
+    let (_, id) = req
+        .headers
+        .iter()
+        .find(|(name, _)| name.eq_ignore_ascii_case("x-account-id"))?;
+    crate::ids::account_id(id).ok().map(str::to_owned)
+}
+
+fn changed_cookie<'a>(saved: &str, current: Option<&'a str>) -> Option<&'a str> {
+    current.filter(|value| !value.is_empty() && *value != saved)
+}
+
+pub fn sync_persisted(net: &Net, account_id: &str) {
+    let keychain::Read::Found(saved) = keychain::refresh_cookie(account_id) else {
+        return;
+    };
+    let current = find_refresh_cookie(&net.export_cookies(), account_id);
+    let Some(value) = changed_cookie(&saved, current.as_deref()) else {
+        return;
+    };
+    if let Err(err) = keychain::put_refresh_cookie(account_id, value) {
+        eprintln!("session: could not update the saved sign-in: {err}");
+    }
 }
 
 #[derive(Debug, serde::Deserialize)]
@@ -144,6 +173,54 @@ mod tests {
         let other = "99999999-2222-3333-4444-555555555555";
         let cookies = jar(&[(&refresh_cookie_name(other), "theirs")]);
         assert_eq!(super::find_refresh_cookie(&cookies, id), None);
+    }
+
+    fn request(url: &str, account: Option<&str>) -> thelemail_api::ApiRequest {
+        let mut headers = std::collections::HashMap::new();
+        if let Some(id) = account {
+            headers.insert("X-Account-Id".to_owned(), id.to_owned());
+        }
+        thelemail_api::ApiRequest {
+            url: url.to_owned(),
+            method: "POST".to_owned(),
+            headers,
+            body: None,
+        }
+    }
+
+    #[test]
+    fn only_auth_calls_for_a_named_account_are_synced() {
+        let id = "11111111-2222-3333-4444-555555555555";
+        assert_eq!(
+            super::auth_account(&request(
+                "https://api.thelemail.com/v1/auth/refresh",
+                Some(id)
+            )),
+            Some(id.to_owned())
+        );
+        assert_eq!(
+            super::auth_account(&request("https://api.thelemail.com/v1/me", Some(id))),
+            None
+        );
+        assert_eq!(
+            super::auth_account(&request("https://api.thelemail.com/v1/auth/refresh", None)),
+            None
+        );
+        assert_eq!(
+            super::auth_account(&request(
+                "https://api.thelemail.com/v1/auth/refresh",
+                Some("../etc/passwd")
+            )),
+            None
+        );
+    }
+
+    #[test]
+    fn the_saved_cookie_is_replaced_only_when_the_jar_moved_on() {
+        assert_eq!(super::changed_cookie("old", Some("new")), Some("new"));
+        assert_eq!(super::changed_cookie("same", Some("same")), None);
+        assert_eq!(super::changed_cookie("old", None), None);
+        assert_eq!(super::changed_cookie("old", Some("")), None);
     }
 
     #[test]
