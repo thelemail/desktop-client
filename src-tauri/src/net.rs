@@ -7,7 +7,12 @@ pub async fn api_request(
     net: State<'_, Net>,
     req: ApiRequest,
 ) -> Result<ApiResponse, TransportError> {
-    net.request(req).await
+    let account = crate::session::auth_account(&req);
+    let resp = net.request(req).await;
+    if let Some(account_id) = account {
+        crate::session::sync_persisted(&net, &account_id);
+    }
+    resp
 }
 
 #[tauri::command]
