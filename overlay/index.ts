@@ -142,11 +142,10 @@ async function nativeUpload(
 function nativeBlobPut(
 	url: string,
 	body: Blob,
-	contentType?: string,
+	headers?: Record<string, string>,
 	opts?: UploadOptions
 ): Promise<Response> {
-	const type = contentType ?? body.type;
-	return nativeUpload(url, body, 'blob', type ? { 'Content-Type': type } : {}, opts);
+	return nativeUpload(url, body, 'blob', headers ?? {}, opts);
 }
 
 function nativeSubmissionUpload(

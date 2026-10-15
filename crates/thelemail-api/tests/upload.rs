@@ -191,3 +191,38 @@ async fn abort_cancels_the_request() {
     assert!(net.upload_chunk(&id, vec![7; 10]).await.is_err());
     assert!(nothing_delivered(rx).await, "an aborted upload completed");
 }
+
+#[tokio::test]
+async fn forwards_the_signed_headers_of_a_blob_grant() {
+    let (base, rx) = server().await;
+    let net = Net::new(ApiConfig {
+        api_base: Url::parse("http://127.0.0.1:1").expect("url"),
+        submission_base: Url::parse("http://127.0.0.1:9").expect("url"),
+        blob_origin: Url::parse(&base).expect("url"),
+        web_origin: "http://localhost:5175".to_owned(),
+    })
+    .expect("net");
+    let payload = b"sealed-bytes".to_vec();
+    let sum = "9f0ad4c1bd1d4f0b1e4b0c4f3d8a6c2e1f7b5a3c9d0e2f4a6b8c0d2e4f6a8b0c";
+    let id = net
+        .upload_begin(UploadBegin {
+            url: format!("{base}/thelemail/avatar-uploads/a/b"),
+            target: UploadTarget::Blob,
+            size: payload.len() as u64,
+            headers: HashMap::from([
+                ("content-type".to_owned(), "image/png".to_owned()),
+                ("x-amz-content-sha256".to_owned(), sum.to_owned()),
+            ]),
+        })
+        .expect("begin");
+    net.upload_chunk(&id, payload.clone()).await.expect("chunk");
+    net.upload_finish(&id).await.expect("finish");
+
+    let got = rx.await.expect("server").expect("request");
+    assert_eq!(got.body, payload);
+    let head = got.head.to_ascii_lowercase();
+    assert!(head.contains(&format!("x-amz-content-sha256: {sum}")));
+    assert!(head.contains("content-type: image/png"));
+    assert!(head.contains(&format!("content-length: {}", payload.len())));
+    assert!(!head.contains("origin:"), "a blob upload carried an origin");
+}
