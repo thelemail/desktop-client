@@ -1,8 +1,18 @@
+use std::sync::{Mutex, MutexGuard};
+
 use sha2::{Digest, Sha256};
 use tauri::State;
 use thelemail_api::{ApiRequest, Net};
 
 use crate::keychain;
+
+static SAVED_SESSION: Mutex<()> = Mutex::new(());
+
+fn saved_session_lock() -> MutexGuard<'static, ()> {
+    SAVED_SESSION
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
 
 fn refresh_cookie_suffix(account_id: &str) -> String {
     let digest = Sha256::digest(account_id.as_bytes());
@@ -48,6 +58,7 @@ fn changed_cookie<'a>(saved: &str, current: Option<&'a str>) -> Option<&'a str> 
 }
 
 pub fn sync_persisted(net: &Net, account_id: &str) {
+    let _guard = saved_session_lock();
     let keychain::Read::Found(saved) = keychain::refresh_cookie(account_id) else {
         return;
     };
@@ -69,6 +80,7 @@ pub struct SessionArgs {
 #[tauri::command]
 pub fn session_persist(net: State<'_, Net>, args: SessionArgs) -> Result<bool, String> {
     crate::ids::account_id(&args.account_id)?;
+    let _guard = saved_session_lock();
     let Some(value) = find_refresh_cookie(&net.export_cookies(), &args.account_id) else {
         return Ok(false);
     };
@@ -97,6 +109,7 @@ pub fn session_forget(
     args: SessionArgs,
 ) -> Result<(), String> {
     crate::ids::account_id(&args.account_id)?;
+    let _guard = saved_session_lock();
     net.forget_cookie(&refresh_cookie_name(&args.account_id));
     net.forget_cookie(&legacy_refresh_cookie_name(&args.account_id));
     crate::keystore::forget_persisted(&args.account_id);
@@ -234,5 +247,15 @@ mod tests {
             legacy_refresh_cookie_name(id),
             format!("refresh_token_{suffix}")
         );
+    }
+
+    #[test]
+    fn a_panic_while_saving_does_not_block_later_saves() {
+        let _ = std::thread::spawn(|| {
+            let _guard = super::saved_session_lock();
+            panic!("keychain write failed");
+        })
+        .join();
+        drop(super::saved_session_lock());
     }
 }
