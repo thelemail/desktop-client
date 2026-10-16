@@ -8,7 +8,6 @@ fn net() -> Net {
             "THELEMAIL_DESKTOP_SUBMISSION_BASE_URL",
             "http://localhost:8181",
         );
-        std::env::set_var("THELEMAIL_DESKTOP_BLOB_ORIGIN", "http://127.0.0.1:9002");
         std::env::set_var("THELEMAIL_DESKTOP_WEB_ORIGIN", "http://localhost:5175");
     }
     Net::new(ApiConfig::from_env().expect("config")).expect("net")
@@ -106,7 +105,12 @@ async fn the_submission_command_refuses_the_api_origin() {
 async fn neither_command_reaches_an_unrelated_host() {
     assert!(net().request(post("https://evil.example/x")).await.is_err());
     assert!(net().submit(post("https://evil.example/x")).await.is_err());
-    assert!(net().blob_get("https://evil.example/x").await.is_err());
+    assert!(
+        net()
+            .fetch_blob(get("https://evil.example/x"))
+            .await
+            .is_err()
+    );
 }
 
 #[tokio::test]

@@ -13,7 +13,7 @@ The webview never holds a private key. Every cryptographic operation — OPAQUE 
 | `crates/thelemail-keystore/` | Unlocked vaults, alias keys, and the operations the UI is allowed to ask for |
 | `crates/thelemail-store/` | The encrypted per-account mirror and its full-text index |
 | `crates/thelemail-mime/` | MIME extraction and PGP/MIME assembly |
-| `crates/thelemail-api/` | HTTP transport, restricted to the configured API, submission and object storage origins |
+| `crates/thelemail-api/` | HTTP transport, restricted to the configured API and submission origins |
 | `overlay/` | The desktop implementation of the web client's `$platform` seam |
 
 The web client is written against a small platform interface rather than the browser directly. `overlay/` supplies the desktop implementation of it, so every request, keystore call, blob fetch and file save is routed through Rust instead of `fetch` and the DOM. Nothing in the UI reaches the network on its own.
@@ -59,13 +59,12 @@ cargo clippy --workspace --all-targets
 
 ## Configuration
 
-A release build needs no configuration: the API, submission and object storage origins are compiled in, and the trust roots come from the pinned web client. For development the following override them at runtime.
+A release build needs no configuration: the API and submission origins are compiled in, and the trust roots come from the pinned web client. For development the following override them at runtime.
 
 | Variable | Meaning |
 | --- | --- |
 | `THELEMAIL_DESKTOP_API_BASE_URL` | Base URL of the Thelemail API |
 | `THELEMAIL_DESKTOP_SUBMISSION_BASE_URL` | Base URL of the mail submission service |
-| `THELEMAIL_DESKTOP_BLOB_ORIGIN` | Origin of the object storage the API issues presigned URLs for |
 | `THELEMAIL_DESKTOP_WEB_ORIGIN` | Origin the app hands off to for billing, and the `Origin` it presents to the API |
 
 Requests to any other host are refused by the transport rather than merely discouraged.

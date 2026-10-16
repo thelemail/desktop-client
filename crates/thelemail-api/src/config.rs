@@ -10,7 +10,6 @@ pub enum ConfigError {
 pub struct ApiConfig {
     pub api_base: Url,
     pub submission_base: Url,
-    pub blob_origin: Url,
     pub web_origin: String,
 }
 
@@ -21,14 +20,12 @@ impl ApiConfig {
             "THELEMAIL_DESKTOP_SUBMISSION_BASE_URL",
             default_submission_base(),
         )?;
-        let blob_origin = parse("THELEMAIL_DESKTOP_BLOB_ORIGIN", default_blob_origin())?;
         let web_origin = std::env::var("THELEMAIL_DESKTOP_WEB_ORIGIN")
             .unwrap_or_else(|_| default_web_origin().to_owned());
 
         Ok(Self {
             api_base,
             submission_base,
-            blob_origin,
             web_origin,
         })
     }
@@ -39,10 +36,6 @@ impl ApiConfig {
 
     pub fn allows_submission_host(&self, url: &Url) -> bool {
         same_origin(url, &self.submission_base)
-    }
-
-    pub fn allows_blob_host(&self, url: &Url) -> bool {
-        same_origin(url, &self.blob_origin)
     }
 }
 
@@ -68,13 +61,6 @@ const fn default_submission_base() -> &'static str {
     match option_env!("THELEMAIL_SUBMISSION_BASE_URL") {
         Some(v) => v,
         None => "https://submission.thelemail.com",
-    }
-}
-
-const fn default_blob_origin() -> &'static str {
-    match option_env!("THELEMAIL_BLOB_ORIGIN") {
-        Some(v) => v,
-        None => "https://fsn1.your-objectstorage.com",
     }
 }
 
