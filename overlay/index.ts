@@ -517,6 +517,9 @@ export const platform = {
 	openExternal: (url: string) => {
 		void invoke('open_external', { url });
 	},
+	openLink: (url: string) => {
+		void invoke('open_external', { url });
+	},
 	saveBlob: async (blob: Blob, filename: string) => {
 		const bytes = Array.from(new Uint8Array(await blob.arrayBuffer()));
 		await invoke<boolean>('save_bytes', { args: { filename, bytes } });
