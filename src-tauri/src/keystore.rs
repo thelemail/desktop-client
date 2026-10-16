@@ -1,8 +1,10 @@
+use std::collections::HashMap;
+
 use base64::Engine as _;
 use rand::RngCore;
 use serde::{Deserialize, Serialize};
 use tauri::State;
-use thelemail_api::Net;
+use thelemail_api::{ApiRequest, Net};
 use thelemail_crypto::amk::{device_unwrap, device_wrap};
 use thelemail_crypto::attframe::{self, DecryptedAttachmentHeader};
 use thelemail_keystore::*;
@@ -19,6 +21,8 @@ pub struct AttachmentArgs {
     pub url: String,
     #[serde(default)]
     pub attachment_id: Option<String>,
+    #[serde(default)]
+    pub headers: HashMap<String, String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -51,11 +55,21 @@ pub enum AttachmentBytesResponse {
 async fn fetch_and_decrypt(
     net: &Net,
     ks: &Keystore,
-    account_id: &str,
-    url: &str,
+    args: &AttachmentArgs,
 ) -> Result<Vec<u8>, &'static str> {
-    let ciphertext = net.blob_get(url).await.map_err(|_| "network")?;
-    ks.decrypt_bytes(account_id, &ciphertext)
+    let resp = net
+        .fetch_blob(ApiRequest {
+            url: args.url.clone(),
+            method: "GET".to_owned(),
+            headers: args.headers.clone(),
+            body: None,
+        })
+        .await
+        .map_err(|_| "network")?;
+    if !(200..300).contains(&resp.status) {
+        return Err("network");
+    }
+    ks.decrypt_bytes(&args.account_id, &resp.body.unwrap_or_default())
 }
 
 #[tauri::command]
@@ -64,7 +78,7 @@ pub async fn keystore_attachment_header(
     ks: State<'_, Keystore>,
     args: AttachmentArgs,
 ) -> Result<AttachmentHeaderResponse, KeystoreError> {
-    let plain = match fetch_and_decrypt(&net, &ks, &args.account_id, &args.url).await {
+    let plain = match fetch_and_decrypt(&net, &ks, &args).await {
         Ok(p) => p,
         Err(code) => return Ok(AttachmentHeaderResponse::Err { ok: false, code }),
     };
@@ -104,7 +118,7 @@ pub async fn keystore_attachment_bytes(
         }
     }
 
-    let plain = match fetch_and_decrypt(&net, &ks, &args.account_id, &args.url).await {
+    let plain = match fetch_and_decrypt(&net, &ks, &args).await {
         Ok(p) => p,
         Err(code) => return Ok(AttachmentBytesResponse::Err { ok: false, code }),
     };
