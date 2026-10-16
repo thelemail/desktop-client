@@ -70,6 +70,20 @@ interface NativeResponse {
 	body: number[] | null;
 }
 
+const BLOB_ROUTES = [
+	/^\/v1\/messages\/[^/]+\/body$/,
+	/^\/v1\/drafts\/[^/]+\/(body|attachments-bundle)$/,
+	/^\/v1\/attachments\/[^/]+$/,
+	/^\/v1\/avatars\/[^/]+\/[^/]+$/,
+	/^\/v1\/me\/signature-images\/content$/
+];
+
+function isBlobRead(url: string, method: string): boolean {
+	if (method !== 'GET') return false;
+	const path = new URL(url).pathname;
+	return BLOB_ROUTES.some((route) => route.test(path));
+}
+
 async function nativeRequest(
 	url: string,
 	init: RequestInit,
@@ -81,11 +95,17 @@ async function nativeRequest(
 		for (const [k, v] of Object.entries(source)) headers[k] = v;
 	}
 	headers['X-Client'] = 'desktop';
-	const command = kind === 'submission' ? 'submission_request' : 'api_request';
+	const method = init.method ?? 'GET';
+	const command =
+		kind === 'submission'
+			? 'submission_request'
+			: isBlobRead(url, method)
+				? 'api_blob_request'
+				: 'api_request';
 	const res = await invoke<NativeResponse>(command, {
 		req: {
 			url,
-			method: init.method ?? 'GET',
+			method,
 			headers,
 			body: typeof init.body === 'string' ? init.body : null
 		}
@@ -106,7 +126,7 @@ interface UploadOptions {
 async function nativeUpload(
 	url: string,
 	body: Blob,
-	target: 'submission' | 'blob',
+	target: 'submission' | 'api',
 	headers: Record<string, string>,
 	opts?: UploadOptions
 ): Promise<Response> {
@@ -145,7 +165,7 @@ function nativeBlobPut(
 	headers?: Record<string, string>,
 	opts?: UploadOptions
 ): Promise<Response> {
-	return nativeUpload(url, body, 'blob', headers ?? {}, opts);
+	return nativeUpload(url, body, 'api', { ...headers, 'X-Client': 'desktop' }, opts);
 }
 
 function nativeSubmissionUpload(
@@ -155,11 +175,6 @@ function nativeSubmissionUpload(
 	opts?: UploadOptions
 ): Promise<Response> {
 	return nativeUpload(url, body, 'submission', { ...headers, 'X-Client': 'desktop' }, opts);
-}
-
-async function nativeBlobFetch(url: string): Promise<Response> {
-	const bytes = await invoke<number[]>('blob_get', { url });
-	return new Response(new Uint8Array(bytes), { status: 200 });
 }
 
 const KEYSTORE_COMMANDS: Record<string, string> = {
@@ -496,11 +511,13 @@ export const platform = {
 	openEventSource,
 	notifications,
 	updates,
-	blobFetch: nativeBlobFetch,
 	blobPut: nativeBlobPut,
 	submissionUpload: nativeSubmissionUpload,
 	returnOrigin: () => env.PUBLIC_APP_URL || 'https://app.thelemail.com',
 	openExternal: (url: string) => {
+		void invoke('open_external', { url });
+	},
+	openLink: (url: string) => {
 		void invoke('open_external', { url });
 	},
 	saveBlob: async (blob: Blob, filename: string) => {

@@ -101,7 +101,6 @@ fn backfills_a_real_mailbox_and_searches_it_offline() {
             "THELEMAIL_DESKTOP_SUBMISSION_BASE_URL",
             "http://localhost:8181",
         );
-        std::env::set_var("THELEMAIL_DESKTOP_BLOB_ORIGIN", "http://127.0.0.1:9002");
         std::env::set_var("THELEMAIL_DESKTOP_WEB_ORIGIN", "http://localhost:5175");
     }
     let net = Net::new(ApiConfig::from_env().expect("config")).expect("net");

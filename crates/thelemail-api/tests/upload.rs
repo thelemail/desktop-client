@@ -73,7 +73,6 @@ fn net(submission: &str) -> Net {
     Net::new(ApiConfig {
         api_base: Url::parse("http://127.0.0.1:1").expect("url"),
         submission_base: Url::parse(submission).expect("url"),
-        blob_origin: Url::parse("http://127.0.0.1:2").expect("url"),
         web_origin: "http://localhost:5175".to_owned(),
     })
     .expect("net")
@@ -128,10 +127,16 @@ async fn refuses_hosts_outside_the_submission_origin() {
         .upload_begin(begin("http://evil.test/upload", 10))
         .expect_err("begin");
     assert!(matches!(err, TransportError::HostNotAllowed));
-    let mut blob = begin("http://127.0.0.1:9/upload", 10);
-    blob.target = UploadTarget::Blob;
+    let mut api = begin("http://127.0.0.1:9/upload", 10);
+    api.target = UploadTarget::Api;
     assert!(matches!(
-        net.upload_begin(blob).expect_err("blob target"),
+        net.upload_begin(api).expect_err("api target"),
+        TransportError::HostNotAllowed
+    ));
+    let mut store = begin("https://fsn1.your-objectstorage.com/thelemail/x", 10);
+    store.target = UploadTarget::Api;
+    assert!(matches!(
+        net.upload_begin(store).expect_err("object store"),
         TransportError::HostNotAllowed
     ));
 }
@@ -193,25 +198,25 @@ async fn abort_cancels_the_request() {
 }
 
 #[tokio::test]
-async fn forwards_the_signed_headers_of_a_blob_grant() {
+async fn api_uploads_carry_auth_and_origin() {
     let (base, rx) = server().await;
     let net = Net::new(ApiConfig {
-        api_base: Url::parse("http://127.0.0.1:1").expect("url"),
+        api_base: Url::parse(&base).expect("url"),
         submission_base: Url::parse("http://127.0.0.1:9").expect("url"),
-        blob_origin: Url::parse(&base).expect("url"),
         web_origin: "http://localhost:5175".to_owned(),
     })
     .expect("net");
     let payload = b"sealed-bytes".to_vec();
-    let sum = "9f0ad4c1bd1d4f0b1e4b0c4f3d8a6c2e1f7b5a3c9d0e2f4a6b8c0d2e4f6a8b0c";
     let id = net
         .upload_begin(UploadBegin {
-            url: format!("{base}/thelemail/avatar-uploads/a/b"),
-            target: UploadTarget::Blob,
+            url: format!("{base}/v1/me/avatar/uploads/u-1"),
+            target: UploadTarget::Api,
             size: payload.len() as u64,
             headers: HashMap::from([
-                ("content-type".to_owned(), "image/png".to_owned()),
-                ("x-amz-content-sha256".to_owned(), sum.to_owned()),
+                ("Authorization".to_owned(), "Bearer t".to_owned()),
+                ("X-Account-Id".to_owned(), "acc-1".to_owned()),
+                ("X-Device-Id".to_owned(), "dev-1".to_owned()),
+                ("Origin".to_owned(), "http://evil.test".to_owned()),
             ]),
         })
         .expect("begin");
@@ -221,8 +226,14 @@ async fn forwards_the_signed_headers_of_a_blob_grant() {
     let got = rx.await.expect("server").expect("request");
     assert_eq!(got.body, payload);
     let head = got.head.to_ascii_lowercase();
-    assert!(head.contains(&format!("x-amz-content-sha256: {sum}")));
-    assert!(head.contains("content-type: image/png"));
+    assert!(head.starts_with("put /v1/me/avatar/uploads/u-1 http/1.1"));
+    assert!(head.contains("authorization: bearer t"));
+    assert!(head.contains("x-account-id: acc-1"));
+    assert!(head.contains("x-device-id: dev-1"));
+    assert!(head.contains("origin: http://localhost:5175"));
+    assert!(
+        !head.contains("evil.test"),
+        "the caller's origin was forwarded"
+    );
     assert!(head.contains(&format!("content-length: {}", payload.len())));
-    assert!(!head.contains("origin:"), "a blob upload carried an origin");
 }

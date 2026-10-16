@@ -26,7 +26,7 @@ const MAX_OPEN_UPLOADS: usize = 8;
 #[serde(rename_all = "lowercase")]
 pub enum UploadTarget {
     Submission,
-    Blob,
+    Api,
 }
 
 #[derive(Debug, Deserialize)]
@@ -70,7 +70,7 @@ impl Uploads {
         let url = Url::parse(&req.url).map_err(|_| TransportError::InvalidRequest)?;
         let permitted = match req.target {
             UploadTarget::Submission => config.allows_submission_host(&url),
-            UploadTarget::Blob => config.allows_blob_host(&url),
+            UploadTarget::Api => config.allows_api_host(&url),
         };
         if !permitted {
             return Err(TransportError::HostNotAllowed);
@@ -89,13 +89,11 @@ impl Uploads {
             let v = HeaderValue::from_str(value).map_err(|_| TransportError::InvalidRequest)?;
             headers.insert(n, v);
         }
-        if req.target == UploadTarget::Submission {
-            headers.insert(
-                ORIGIN,
-                HeaderValue::from_str(&config.web_origin)
-                    .map_err(|_| TransportError::InvalidRequest)?,
-            );
-        }
+        headers.insert(
+            ORIGIN,
+            HeaderValue::from_str(&config.web_origin)
+                .map_err(|_| TransportError::InvalidRequest)?,
+        );
         headers.insert(CONTENT_LENGTH, HeaderValue::from(req.size));
 
         let mut sessions = self.sessions.lock().expect("upload sessions");

@@ -24,8 +24,11 @@ pub async fn submission_request(
 }
 
 #[tauri::command]
-pub async fn blob_get(net: State<'_, Net>, url: String) -> Result<Vec<u8>, TransportError> {
-    net.blob_get(&url).await
+pub async fn api_blob_request(
+    net: State<'_, Net>,
+    req: ApiRequest,
+) -> Result<ApiResponse, TransportError> {
+    net.fetch_blob(req).await
 }
 
 #[derive(Debug, serde::Deserialize)]

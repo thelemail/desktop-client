@@ -90,7 +90,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             net::api_request,
             net::submission_request,
-            net::blob_get,
+            net::api_blob_request,
             net::upload_begin,
             net::upload_chunk,
             net::upload_finish,
