@@ -1280,22 +1280,19 @@ mod tests {
 }
 
 const BODY_BATCH: usize = 16;
-const PRESIGN_MARGIN_SECS: i64 = 10;
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct MessageDetailResponse {
-    body: PresignedPointer,
+    body: BlobPointer,
     #[serde(default)]
     attachments: Vec<AttachmentDetailResponse>,
 }
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct PresignedPointer {
-    url: String,
-    #[serde(default)]
-    expires_at: Option<String>,
+struct BlobPointer {
+    path: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -1313,14 +1310,6 @@ struct FetchedBody {
     mime: Vec<u8>,
     extracted: thelemail_mime::Extracted,
     attachment_ids: Vec<(String, i64, bool)>,
-}
-
-fn expires_too_soon(expires_at: &Option<String>) -> bool {
-    let Some(raw) = expires_at else { return false };
-    let Ok(when) = chrono_parse(raw) else {
-        return false;
-    };
-    when - now_unix() < PRESIGN_MARGIN_SECS
 }
 
 fn now_unix() -> i64 {
@@ -1377,7 +1366,7 @@ pub async fn prefetch_bodies(
                 fetch_one_body(net, ks, account_id, access_token, *rowid, message_id)
             })
             .collect();
-        let results: Vec<Result<Option<FetchedBody>, String>> = stream::iter(pending)
+        let results: Vec<Result<FetchedBody, String>> = stream::iter(pending)
             .buffer_unordered(BODY_CONCURRENCY)
             .collect()
             .await;
@@ -1385,8 +1374,7 @@ pub async fn prefetch_bodies(
         let mut fetched = Vec::with_capacity(chunk.len());
         for result in results {
             match result {
-                Ok(Some(body)) => fetched.push(body),
-                Ok(None) => {}
+                Ok(body) => fetched.push(body),
                 Err(err) if err == "session expired" => return Err(err),
                 Err(_) => {}
             }
@@ -1441,40 +1429,53 @@ async fn fetch_one_body(
     access_token: &str,
     rowid: i64,
     message_id: &str,
-) -> Result<Option<FetchedBody>, String> {
-    for attempt in 0..2 {
-        let detail = match get_detail(net, account_id, access_token, message_id).await {
-            Ok(detail) => detail,
-            Err(err) => return Err(err),
-        };
-        if expires_too_soon(&detail.body.expires_at) && attempt == 0 {
-            continue;
-        }
-
-        let ciphertext = match net.blob_get(&detail.body.url).await {
-            Ok(bytes) => bytes,
-            Err(_) if attempt == 0 => continue,
-            Err(e) => return Err(e.to_string()),
-        };
-
-        let plain = ks
-            .decrypt_bytes(account_id, &ciphertext)
-            .map_err(|code| code.to_owned())?;
-        let mime = unwrap_pgp_layers(ks, account_id, plain)?;
-        let extracted = thelemail_mime::extract(&mime, thelemail_mime::DEFAULT_MAX_TEXT_BYTES);
-
-        return Ok(Some(FetchedBody {
-            rowid,
-            mime,
-            extracted,
-            attachment_ids: detail
-                .attachments
-                .into_iter()
-                .map(|a| (a.id, a.ordinal, a.is_inline))
-                .collect(),
-        }));
+) -> Result<FetchedBody, String> {
+    let detail = get_detail(net, account_id, access_token, message_id).await?;
+    let url = net
+        .config()
+        .api_base
+        .join(&detail.body.path)
+        .map_err(|e| e.to_string())?;
+    let resp = net
+        .fetch_blob(ApiRequest {
+            url: url.to_string(),
+            method: "GET".to_owned(),
+            headers: auth_headers(account_id, access_token),
+            body: None,
+        })
+        .await
+        .map_err(|e| e.to_string())?;
+    if resp.status == 401 {
+        return Err("session expired".to_owned());
     }
-    Ok(None)
+    if resp.status != 200 {
+        return Err(format!("message body returned {}", resp.status));
+    }
+
+    let plain = ks
+        .decrypt_bytes(account_id, &resp.body.unwrap_or_default())
+        .map_err(|code| code.to_owned())?;
+    let mime = unwrap_pgp_layers(ks, account_id, plain)?;
+    let extracted = thelemail_mime::extract(&mime, thelemail_mime::DEFAULT_MAX_TEXT_BYTES);
+
+    Ok(FetchedBody {
+        rowid,
+        mime,
+        extracted,
+        attachment_ids: detail
+            .attachments
+            .into_iter()
+            .map(|a| (a.id, a.ordinal, a.is_inline))
+            .collect(),
+    })
+}
+
+fn auth_headers(account_id: &str, access_token: &str) -> HashMap<String, String> {
+    let mut headers = HashMap::new();
+    headers.insert("Authorization".to_owned(), format!("Bearer {access_token}"));
+    headers.insert("X-Account-Id".to_owned(), account_id.to_owned());
+    headers.insert("X-Client".to_owned(), "desktop".to_owned());
+    headers
 }
 
 async fn get_detail(
@@ -1483,16 +1484,11 @@ async fn get_detail(
     access_token: &str,
     message_id: &str,
 ) -> Result<MessageDetailResponse, String> {
-    let mut headers = HashMap::new();
-    headers.insert("Authorization".to_owned(), format!("Bearer {access_token}"));
-    headers.insert("X-Account-Id".to_owned(), account_id.to_owned());
-    headers.insert("X-Client".to_owned(), "desktop".to_owned());
-
     let resp = net
         .request(ApiRequest {
             url: format!("{}v1/messages/{message_id}", net.config().api_base),
             method: "GET".to_owned(),
-            headers,
+            headers: auth_headers(account_id, access_token),
             body: None,
         })
         .await
