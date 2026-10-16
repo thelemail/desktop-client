@@ -11,7 +11,7 @@ use url::Url;
 use crate::config::ApiConfig;
 use crate::upload::{UploadBegin, Uploads};
 
-const MAX_BLOB_BYTES: usize = 64 * 1024 * 1024;
+const MAX_BLOB_BYTES: usize = 128 * 1024 * 1024;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Audience {
@@ -130,17 +130,24 @@ impl Net {
     }
 
     pub async fn request(&self, req: ApiRequest) -> Result<ApiResponse, TransportError> {
-        self.send(req, Audience::Api).await
+        self.send(req, Audience::Api, &self.api, None).await
     }
 
     pub async fn submit(&self, req: ApiRequest) -> Result<ApiResponse, TransportError> {
-        self.send(req, Audience::Submission).await
+        self.send(req, Audience::Submission, &self.api, None).await
+    }
+
+    pub async fn fetch_blob(&self, req: ApiRequest) -> Result<ApiResponse, TransportError> {
+        self.send(req, Audience::Api, &self.blob, Some(MAX_BLOB_BYTES))
+            .await
     }
 
     async fn send(
         &self,
         req: ApiRequest,
         audience: Audience,
+        client: &Client,
+        limit: Option<usize>,
     ) -> Result<ApiResponse, TransportError> {
         let url = Url::parse(&req.url).map_err(|_| TransportError::InvalidRequest)?;
         let permitted = match audience {
@@ -169,7 +176,7 @@ impl Net {
                 .map_err(|_| TransportError::InvalidRequest)?,
         );
 
-        let mut builder = self.api.request(method, url).headers(headers);
+        let mut builder = client.request(method, url).headers(headers);
         if let Some(body) = req.body {
             builder = builder.body(body);
         }
@@ -188,7 +195,7 @@ impl Net {
             }
         }
 
-        let bytes = resp.bytes().await.map_err(|_| TransportError::Network)?;
+        let bytes = read_body(resp, limit).await?;
         Ok(ApiResponse {
             status,
             headers: out_headers,
@@ -269,32 +276,32 @@ impl Net {
     pub fn upload_abort(&self, id: &str) {
         self.uploads.abort(id);
     }
+}
 
-    pub async fn blob_get(&self, raw_url: &str) -> Result<Vec<u8>, TransportError> {
-        let url = Url::parse(raw_url).map_err(|_| TransportError::InvalidRequest)?;
-        if !self.config.allows_blob_host(&url) {
-            return Err(TransportError::HostNotAllowed);
-        }
-        let resp = self
-            .blob
-            .get(url)
-            .send()
+async fn read_body(
+    mut resp: reqwest::Response,
+    limit: Option<usize>,
+) -> Result<Vec<u8>, TransportError> {
+    let Some(limit) = limit else {
+        return Ok(resp
+            .bytes()
             .await
-            .map_err(|_| TransportError::Network)?;
-        if !resp.status().is_success() {
-            return Err(TransportError::Network);
-        }
-        if let Some(len) = resp.content_length()
-            && len as usize > MAX_BLOB_BYTES
-        {
-            return Err(TransportError::ResponseTooLarge);
-        }
-        let bytes = resp.bytes().await.map_err(|_| TransportError::Network)?;
-        if bytes.len() > MAX_BLOB_BYTES {
-            return Err(TransportError::ResponseTooLarge);
-        }
-        Ok(bytes.to_vec())
+            .map_err(|_| TransportError::Network)?
+            .to_vec());
+    };
+    if let Some(len) = resp.content_length()
+        && len > limit as u64
+    {
+        return Err(TransportError::ResponseTooLarge);
     }
+    let mut out = Vec::new();
+    while let Some(chunk) = resp.chunk().await.map_err(|_| TransportError::Network)? {
+        if out.len() + chunk.len() > limit {
+            return Err(TransportError::ResponseTooLarge);
+        }
+        out.extend_from_slice(&chunk);
+    }
+    Ok(out)
 }
 
 fn user_agent() -> String {
