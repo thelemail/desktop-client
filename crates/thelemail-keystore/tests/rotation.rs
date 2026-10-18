@@ -396,6 +396,77 @@ fn an_alias_grant_wrapped_to_the_retired_key_still_unwraps() {
 }
 
 #[test]
+fn an_alias_grant_for_a_key_loaded_later_opens_once_that_key_arrives() {
+    let a = account();
+    let retired = generate(&a.amk, &[EMAIL]);
+    let created = serde_json::to_value(a.ks.create_alias_key(
+        CreateAliasKeyArgs {
+            account_id: ACCOUNT.to_owned(),
+            email: "team@thelemail.test".to_owned(),
+            display_name: "Team".to_owned(),
+            recipients: vec![CreateAliasKeyRecipient {
+                account_id: ACCOUNT.to_owned(),
+                public_key_armored: retired.public_key_armored.clone(),
+            }],
+        },
+        0,
+    ))
+    .unwrap();
+    assert_eq!(created["ok"], true, "{created}");
+    let alias_fp = created["keyFingerprintHex"].as_str().unwrap().to_owned();
+    let alias_public = created["publicKeyArmored"].as_str().unwrap().to_owned();
+    let grant = || AliasKeyGrantInput {
+        alias_id: "alias-1".to_owned(),
+        key_version: 1,
+        alias_key_fingerprint_hex: alias_fp.clone(),
+        wrapped_private_key_armored: created["grants"][0]["wrappedPrivateKeyArmored"]
+            .as_str()
+            .unwrap()
+            .to_owned(),
+        member_key_fingerprint_hex: Some(retired.fingerprint_hex.clone()),
+    };
+
+    let early = serde_json::to_value(a.ks.load_alias_keys(LoadAliasKeysArgs {
+        account_id: ACCOUNT.to_owned(),
+        grants: vec![grant()],
+    }))
+    .unwrap();
+    assert_eq!(early["loaded"], serde_json::json!([]));
+    assert_eq!(early["failed"][0]["aliasId"], "alias-1");
+    let alias_mail = encrypt_to(&a.ks, &alias_public, b"to the team");
+    assert_eq!(decrypt(&a.ks, &alias_mail, None)["code"], "no_matching_key");
+
+    load(&a.ks, vec![input(2, &a.first), input(1, &retired)]);
+    assert_eq!(
+        decrypt(&a.ks, &alias_mail, Some(&alias_fp))["plaintext"],
+        "to the team"
+    );
+
+    a.ks.unload_alias_keys(ACCOUNT);
+    let fresh = Account {
+        ks: Keystore::new(),
+        amk: a.amk,
+        first: a.first,
+    };
+    assert!(
+        fresh
+            .ks
+            .adopt_persisted(ACCOUNT, persisted_for(&fresh.amk, &fresh.first))
+    );
+    fresh.ks.load_alias_keys(LoadAliasKeysArgs {
+        account_id: ACCOUNT.to_owned(),
+        grants: vec![grant()],
+    });
+    fresh.ks.unload_alias_keys(ACCOUNT);
+    load(&fresh.ks, vec![input(2, &fresh.first), input(1, &retired)]);
+    assert_eq!(
+        decrypt(&fresh.ks, &alias_mail, None)["code"],
+        "no_matching_key",
+        "unloading alias keys also drops the grants waiting for a key"
+    );
+}
+
+#[test]
 fn a_persisted_vault_written_before_rotation_still_restores() {
     let amk = Amk::generate();
     let key = generate(&amk, &[EMAIL]);

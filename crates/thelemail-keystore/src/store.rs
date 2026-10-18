@@ -102,6 +102,7 @@ struct Vault {
     public_key_armored: String,
     history: Vec<AccountKey>,
     alias_keys: HashMap<String, AliasKey>,
+    unopened_grants: Vec<AliasKeyGrantInput>,
     pending_rotation: Option<PendingRotation>,
     amk: Amk,
 }
@@ -125,6 +126,7 @@ impl Vault {
             public_key_armored,
             history: Vec::new(),
             alias_keys: HashMap::new(),
+            unopened_grants: Vec::new(),
             pending_rotation: None,
             amk,
         }
@@ -167,6 +169,47 @@ impl Vault {
 
     fn sort_history(&mut self) {
         self.history.sort_by_key(|k| std::cmp::Reverse(k.version));
+    }
+
+    fn unwrap_grant(&self, grant: &AliasKeyGrantInput) -> Option<UnlockedKey> {
+        let wrapped = grant.wrapped_private_key_armored.as_bytes();
+        let hinted = grant
+            .member_key_fingerprint_hex
+            .as_deref()
+            .and_then(|hint| self.account_key(&hint.to_lowercase()));
+        hinted
+            .and_then(|key| key.decrypt(wrapped).ok())
+            .or_else(|| decrypt_with(&self.account_keys(), wrapped).ok())
+            .and_then(|bytes| String::from_utf8(bytes).ok())
+            .and_then(|armored| UnlockedKey::open_unlocked(&armored).ok())
+    }
+
+    fn adopt_grant(&mut self, grant: AliasKeyGrantInput, key: UnlockedKey) {
+        let fingerprint = key.fingerprint_hex();
+        self.unopened_grants
+            .retain(|g| g.alias_key_fingerprint_hex.to_lowercase() != fingerprint);
+        self.alias_keys.insert(
+            fingerprint,
+            AliasKey {
+                key,
+                alias_id: grant.alias_id,
+                key_version: grant.key_version,
+            },
+        );
+    }
+
+    fn open_unopened_grants(&mut self) {
+        for grant in std::mem::take(&mut self.unopened_grants) {
+            let want = grant.alias_key_fingerprint_hex.to_lowercase();
+            if self.alias_keys.contains_key(&want) {
+                continue;
+            }
+            match self.unwrap_grant(&grant) {
+                Some(key) if key.fingerprint_hex() == want => self.adopt_grant(grant, key),
+                Some(_) => {}
+                None => self.unopened_grants.push(grant),
+            }
+        }
     }
 
     fn keys_changed(&self, current_changed: bool) -> Broadcast {
@@ -1208,33 +1251,25 @@ impl Keystore {
                 continue;
             }
 
-            let wrapped = grant.wrapped_private_key_armored.as_bytes();
-            let hinted = grant
-                .member_key_fingerprint_hex
-                .as_deref()
-                .and_then(|hint| vault.account_key(&hint.to_lowercase()));
-            let unwrapped = hinted
-                .and_then(|key| key.decrypt(wrapped).ok())
-                .or_else(|| decrypt_with(&vault.account_keys(), wrapped).ok())
-                .and_then(|bytes| String::from_utf8(bytes).ok())
-                .and_then(|armored| UnlockedKey::open_unlocked(&armored).ok());
-
-            match unwrapped {
+            match vault.unwrap_grant(&grant) {
                 Some(key) if key.fingerprint_hex() == want => {
-                    vault.alias_keys.insert(
-                        want.clone(),
-                        AliasKey {
-                            key,
-                            alias_id: grant.alias_id,
-                            key_version: grant.key_version,
-                        },
-                    );
+                    vault.adopt_grant(grant, key);
                     loaded.push(want);
                 }
-                _ => failed.push(FailedGrant {
+                Some(_) => failed.push(FailedGrant {
                     alias_id: grant.alias_id,
                     key_version: grant.key_version,
                 }),
+                None => {
+                    failed.push(FailedGrant {
+                        alias_id: grant.alias_id.clone(),
+                        key_version: grant.key_version,
+                    });
+                    vault
+                        .unopened_grants
+                        .retain(|g| g.alias_key_fingerprint_hex.to_lowercase() != want);
+                    vault.unopened_grants.push(grant);
+                }
             }
         }
 
@@ -1253,6 +1288,7 @@ impl Keystore {
             .get_mut(account_id)
         {
             vault.alias_keys.clear();
+            vault.unopened_grants.clear();
         }
     }
 
@@ -1507,6 +1543,9 @@ impl Keystore {
             vault.history.push(entry);
         }
         vault.sort_history();
+        if !added.is_empty() {
+            vault.open_unopened_grants();
+        }
 
         let mut current_changed = false;
         if vault.key_version > 0
