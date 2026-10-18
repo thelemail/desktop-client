@@ -67,6 +67,12 @@ struct OpenpgpJsFixture {
     transitions: Vec<TransitionCase>,
 }
 
+#[derive(Deserialize)]
+struct RevocationFixture {
+    schema: String,
+    transitions: Vec<TransitionCase>,
+}
+
 fn b64(value: &str) -> Vec<u8> {
     base64::engine::general_purpose::STANDARD
         .decode(value)
@@ -158,6 +164,25 @@ fn endorsements_inside_valid_golden_statements_verify() {
         checked >= 5,
         "only {checked} statement endorsements were checked"
     );
+}
+
+#[test]
+fn revoked_previous_keys_get_the_verdict_go_gives_them() {
+    let raw = std::fs::read_to_string(format!("{FIXTURES}/revocations.json")).expect("revocations");
+    let fixture: RevocationFixture = serde_json::from_str(&raw).expect("parse revocations");
+    assert_eq!(fixture.schema, "thelemail-the168-revocations/v1");
+    assert!(fixture.transitions.iter().any(|c| c.valid));
+    assert!(fixture.transitions.iter().any(|c| !c.valid));
+    for case in &fixture.transitions {
+        match (case.valid, outcome(case)) {
+            (true, Ok(())) => {}
+            (false, Err(err)) => {
+                assert_eq!(Some(err.code()), case.error.as_deref(), "{}", case.name)
+            }
+            (true, Err(err)) => panic!("{} should verify, got {err:?}", case.name),
+            (false, Ok(())) => panic!("{} should be rejected", case.name),
+        }
+    }
 }
 
 #[test]

@@ -1,6 +1,6 @@
 use pgp::composed::{Deserializable, DetachedSignature, SignedPublicKey};
 use pgp::crypto::hash::HashAlgorithm;
-use pgp::packet::{Signature, SignatureType, SignatureVersion};
+use pgp::packet::{RevocationCode, Signature, SignatureType, SignatureVersion};
 use pgp::types::{KeyDetails, KeyVersion, Tag};
 use serde::Deserialize;
 
@@ -251,9 +251,27 @@ fn check_valid_at(key: &SignedPublicKey, at_secs: u32) -> Result<(), TransitionE
         .details
         .revocation_signatures
         .iter()
-        .any(|s| s.verify_key(primary).is_ok())
+        .any(|s| s.verify_key(primary).is_ok() && revokes_at(s, at_secs))
     {
         return Err(TransitionError::Expired);
     }
     Ok(())
+}
+
+fn revokes_at(revocation: &Signature, at_secs: u32) -> bool {
+    if revocation.revocation_reason_code() == Some(&RevocationCode::KeyCompromised) {
+        return true;
+    }
+    let Some(created) = revocation.created().map(|c| c.as_secs()) else {
+        return true;
+    };
+    if created > at_secs {
+        return false;
+    }
+    match revocation.signature_expiration_time().map(|d| d.as_secs()) {
+        Some(lifetime) if lifetime > 0 => {
+            u64::from(at_secs) <= u64::from(created) + u64::from(lifetime)
+        }
+        _ => true,
+    }
 }
