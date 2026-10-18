@@ -424,6 +424,16 @@ impl Mirror {
             .remove(account_id)
     }
 
+    fn defer_retry(&self, account_id: &str) {
+        self.want_retry(account_id);
+        self.release(account_id);
+    }
+
+    fn release_wanting_retry(&self, account_id: &str) -> bool {
+        self.release(account_id);
+        self.retry_pending(account_id)
+    }
+
     fn release(&self, account_id: &str) {
         self.running
             .lock()
@@ -607,23 +617,32 @@ pub async fn retry_undecryptable(app: AppHandle, account_id: String) {
         return;
     }
     while mirror.take_retry(&account_id) {
-        retry_pass(&app, &account_id).await;
+        if retry_pass(&app, &account_id).await == RetryPass::Deferred {
+            mirror.defer_retry(&account_id);
+            return;
+        }
     }
     release_and_hand_off(&app, &account_id);
 }
 
-async fn retry_pass(app: &AppHandle, account_id: &str) {
+#[derive(PartialEq, Eq)]
+enum RetryPass {
+    Done,
+    Deferred,
+}
+
+async fn retry_pass(app: &AppHandle, account_id: &str) -> RetryPass {
     let net = app.state::<Net>();
     let ks = app.state::<Keystore>();
     let mirror = app.state::<Mirror>();
     let Some(token) = mirror.token(account_id) else {
-        return;
+        return RetryPass::Deferred;
     };
     let Ok(ids) = mirror.with_conn(account_id, undecryptable_messages) else {
-        return;
+        return RetryPass::Deferred;
     };
     if ids.is_empty() {
-        return;
+        return RetryPass::Done;
     }
 
     let mut recovered = 0usize;
@@ -663,17 +682,17 @@ async fn retry_pass(app: &AppHandle, account_id: &str) {
                 Ok(false) => {}
                 Err(err) => {
                     eprintln!("mirror: storing a recovered preview for {account_id} failed: {err}");
-                    return;
+                    return RetryPass::Done;
                 }
             }
         }
         if expired {
-            return;
+            return RetryPass::Deferred;
         }
     }
 
     if recovered == 0 {
-        return;
+        return RetryPass::Done;
     }
     eprintln!("mirror: recovered {recovered} preview(s) for {account_id} after a key change");
     let _ = app.emit(
@@ -683,6 +702,7 @@ async fn retry_pass(app: &AppHandle, account_id: &str) {
     if let Err(err) = prefetch_bodies(&net, &ks, &mirror, account_id, &token, |_, _| {}).await {
         eprintln!("mirror: fetching recovered bodies for {account_id} failed: {err}");
     }
+    RetryPass::Done
 }
 
 pub fn now_iso() -> String {
@@ -792,8 +812,7 @@ pub async fn backfill(app: AppHandle, account_id: String, access_token: String) 
 
 fn release_and_hand_off(app: &AppHandle, account_id: &str) {
     let mirror = app.state::<Mirror>();
-    mirror.release(account_id);
-    if mirror.retry_pending(account_id) {
+    if mirror.release_wanting_retry(account_id) {
         tauri::async_runtime::spawn(retry_undecryptable(app.clone(), account_id.to_owned()));
     }
 }
@@ -1381,6 +1400,32 @@ mod tests {
         assert!(mirror.retry_pending(account));
         assert!(mirror.take_retry(account));
         assert!(!mirror.take_retry(account), "one request runs one pass");
+    }
+
+    #[test]
+    fn a_retry_with_no_session_yet_is_kept_for_the_next_sync() {
+        let mirror = Mirror::default();
+        let account = "0d0d0d0d-0d0d-4d0d-8d0d-0d0d0d0d0d0d";
+        mirror.want_retry(account);
+        assert!(mirror.claim(account));
+        assert!(mirror.take_retry(account));
+        mirror.defer_retry(account);
+
+        assert!(
+            mirror.retry_pending(account),
+            "the request survives the pass"
+        );
+        assert!(
+            mirror.claim(account),
+            "the deferred pass releases the account"
+        );
+        assert!(
+            mirror.release_wanting_retry(account),
+            "the sync that follows hands the retry on"
+        );
+        assert!(mirror.claim(account));
+        assert!(mirror.take_retry(account));
+        assert!(!mirror.release_wanting_retry(account));
     }
 
     #[tokio::test]
