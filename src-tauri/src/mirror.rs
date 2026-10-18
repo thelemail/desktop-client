@@ -811,7 +811,7 @@ fn decrypt_preview(ks: &Keystore, account_id: &str, encrypted_b64: &str) -> (Mes
     let Ok(ciphertext) = base64::engine::general_purpose::STANDARD.decode(encrypted_b64) else {
         return (MessagePreview::default(), false);
     };
-    match ks.decrypt_bytes(account_id, &ciphertext) {
+    match ks.decrypt_bytes(account_id, &ciphertext, None) {
         Ok(plain) => match serde_json::from_slice::<MessagePreview>(&plain) {
             Ok(preview) => (preview, true),
             Err(_) => (MessagePreview::default(), false),
@@ -1453,7 +1453,7 @@ async fn fetch_one_body(
     }
 
     let plain = ks
-        .decrypt_bytes(account_id, &resp.body.unwrap_or_default())
+        .decrypt_bytes(account_id, &resp.body.unwrap_or_default(), None)
         .map_err(|code| code.to_owned())?;
     let mime = unwrap_pgp_layers(ks, account_id, plain)?;
     let extracted = thelemail_mime::extract(&mime, thelemail_mime::DEFAULT_MAX_TEXT_BYTES);
@@ -1516,7 +1516,7 @@ fn unwrap_pgp_layers(ks: &Keystore, account_id: &str, outer: Vec<u8>) -> Result<
             return Err("missing PGP payload".to_owned());
         };
         current = ks
-            .decrypt_bytes(account_id, armor.as_bytes())
+            .decrypt_bytes(account_id, armor.as_bytes(), None)
             .map_err(|code| code.to_owned())?;
     }
     Ok(current)

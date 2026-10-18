@@ -23,6 +23,8 @@ pub struct AttachmentArgs {
     pub attachment_id: Option<String>,
     #[serde(default)]
     pub headers: HashMap<String, String>,
+    #[serde(default)]
+    pub key_fingerprint_hex: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -69,7 +71,11 @@ async fn fetch_and_decrypt(
     if !(200..300).contains(&resp.status) {
         return Err("network");
     }
-    ks.decrypt_bytes(&args.account_id, &resp.body.unwrap_or_default())
+    ks.decrypt_bytes(
+        &args.account_id,
+        &resp.body.unwrap_or_default(),
+        args.key_fingerprint_hex.as_deref(),
+    )
 }
 
 #[tauri::command]
