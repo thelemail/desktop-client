@@ -3,7 +3,7 @@ use serde::Deserialize;
 use thelemail_crypto::keytransition::{self, TransitionError};
 use thelemail_crypto::openpgp::UnlockedKey;
 
-const FIXTURES: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../fixtures/the168");
+const FIXTURES: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../fixtures/rotation");
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -80,7 +80,8 @@ fn b64(value: &str) -> Vec<u8> {
 }
 
 fn vectors() -> Vectors {
-    let raw = std::fs::read_to_string(format!("{FIXTURES}/the168-vectors.json")).expect("vectors");
+    let raw =
+        std::fs::read_to_string(format!("{FIXTURES}/rotation-vectors.json")).expect("vectors");
     serde_json::from_str(&raw).expect("parse vectors")
 }
 
@@ -101,7 +102,7 @@ fn outcome(case: &TransitionCase) -> Result<(), TransitionError> {
 #[test]
 fn the_payload_matches_the_golden_bytes() {
     let v = vectors();
-    assert_eq!(v.schema, "thelemail-the168-vectors/v1");
+    assert_eq!(v.schema, "thelemail-rotation-vectors/v1");
     for case in &v.transitions {
         let rebuilt = keytransition::payload(
             &case.account_id,
@@ -170,7 +171,7 @@ fn endorsements_inside_valid_golden_statements_verify() {
 fn revoked_previous_keys_get_the_verdict_go_gives_them() {
     let raw = std::fs::read_to_string(format!("{FIXTURES}/revocations.json")).expect("revocations");
     let fixture: RevocationFixture = serde_json::from_str(&raw).expect("parse revocations");
-    assert_eq!(fixture.schema, "thelemail-the168-revocations/v1");
+    assert_eq!(fixture.schema, "thelemail-rotation-revocations/v1");
     assert!(fixture.transitions.iter().any(|c| c.valid));
     assert!(fixture.transitions.iter().any(|c| !c.valid));
     for case in &fixture.transitions {

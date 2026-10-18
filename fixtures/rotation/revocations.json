@@ -1,5 +1,5 @@
 {
-  "schema": "thelemail-the168-revocations/v1",
+  "schema": "thelemail-rotation-revocations/v1",
   "transitions": [
     {
       "name": "v6-superseded-after",
