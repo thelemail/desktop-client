@@ -9,7 +9,7 @@ use thelemail_api::{ApiRequest, Net};
 use thelemail_crypto::amk::{device_unwrap, device_wrap};
 use thelemail_crypto::attframe::{self, DecryptedAttachmentHeader};
 use thelemail_keystore::*;
-use zeroize::{Zeroize, Zeroizing};
+use zeroize::Zeroizing;
 
 fn b64() -> base64::engine::GeneralPurpose {
     base64::engine::general_purpose::STANDARD
@@ -274,26 +274,55 @@ fn vault_path(account_id: &str) -> Result<std::path::PathBuf, String> {
     Ok(dir.join("vault.bin"))
 }
 
-pub(crate) fn forget_persisted(account_id: &str) {
-    if let Ok(path) = vault_path(account_id) {
-        let _ = std::fs::remove_file(path);
+pub(crate) fn forget_persisted(halves: &PersistentHalves, account_id: &str) {
+    halves.discard(
+        &Keychain,
+        vault_path(account_id).ok().as_deref(),
+        account_id,
+    );
+}
+
+pub(crate) trait LocalHalfStore {
+    fn read(&self, account_id: &str) -> Option<Zeroizing<Vec<u8>>>;
+    fn write(&self, account_id: &str, local_half: &[u8]) -> bool;
+    fn forget(&self, account_id: &str);
+}
+
+struct Keychain;
+
+impl LocalHalfStore for Keychain {
+    fn read(&self, account_id: &str) -> Option<Zeroizing<Vec<u8>>> {
+        match crate::keychain::local_half(account_id) {
+            crate::keychain::Read::Found(encoded) => b64().decode(encoded).ok().map(Zeroizing::new),
+            _ => None,
+        }
     }
-    let _ = crate::keychain::forget_local_half(account_id);
+
+    fn write(&self, account_id: &str, local_half: &[u8]) -> bool {
+        crate::keychain::put_local_half(account_id, &b64().encode(local_half)).is_ok()
+    }
+
+    fn forget(&self, account_id: &str) {
+        let _ = crate::keychain::forget_local_half(account_id);
+    }
 }
 
 #[derive(Default)]
-pub struct PersistentHalves(Mutex<HashMap<String, Zeroizing<Vec<u8>>>>);
+pub struct PersistentHalves {
+    server_halves: Mutex<HashMap<String, Zeroizing<Vec<u8>>>>,
+    files: Mutex<()>,
+}
 
 impl PersistentHalves {
     fn remember(&self, account_id: &str, server_half: &[u8]) {
-        self.0
+        self.server_halves
             .lock()
             .expect("persistent halves")
             .insert(account_id.to_owned(), Zeroizing::new(server_half.to_vec()));
     }
 
     fn get(&self, account_id: &str) -> Option<Zeroizing<Vec<u8>>> {
-        self.0
+        self.server_halves
             .lock()
             .expect("persistent halves")
             .get(account_id)
@@ -301,23 +330,88 @@ impl PersistentHalves {
     }
 
     fn forget(&self, account_id: &str) {
-        self.0.lock().expect("persistent halves").remove(account_id);
+        self.server_halves
+            .lock()
+            .expect("persistent halves")
+            .remove(account_id);
     }
 
     fn forget_all(&self) {
-        self.0.lock().expect("persistent halves").clear();
+        self.server_halves
+            .lock()
+            .expect("persistent halves")
+            .clear();
+    }
+
+    fn enroll(
+        &self,
+        store: &impl LocalHalfStore,
+        path: &std::path::Path,
+        account_id: &str,
+        persisted: impl FnOnce() -> Option<PersistedVault>,
+        server_half: &[u8],
+    ) -> bool {
+        let _files = self.files.lock().expect("persistent files");
+        let Some(persisted) = persisted() else {
+            return false;
+        };
+        let mut local_half = Zeroizing::new([0u8; 32]);
+        rand::rngs::OsRng.fill_bytes(local_half.as_mut());
+        if write_vault_file(path, &persisted, local_half.as_ref(), server_half).is_err() {
+            return false;
+        }
+        if !store.write(account_id, local_half.as_ref()) {
+            let _ = std::fs::remove_file(path);
+            return false;
+        }
+        self.remember(account_id, server_half);
+        true
+    }
+
+    fn rewrap(
+        &self,
+        store: &impl LocalHalfStore,
+        path: &std::path::Path,
+        account_id: &str,
+        persisted: impl FnOnce() -> Option<PersistedVault>,
+    ) -> bool {
+        let _files = self.files.lock().expect("persistent files");
+        if !path.exists() {
+            return false;
+        }
+        let (Some(server_half), Some(local_half)) = (self.get(account_id), store.read(account_id))
+        else {
+            return false;
+        };
+        let Some(persisted) = persisted() else {
+            return false;
+        };
+        write_vault_file(path, &persisted, &local_half, &server_half).is_ok()
+    }
+
+    fn discard(
+        &self,
+        store: &impl LocalHalfStore,
+        path: Option<&std::path::Path>,
+        account_id: &str,
+    ) {
+        let _files = self.files.lock().expect("persistent files");
+        self.forget(account_id);
+        if let Some(path) = path {
+            let _ = std::fs::remove_file(path);
+        }
+        store.forget(account_id);
     }
 }
 
 fn write_vault_file(
-    account_id: &str,
+    path: &std::path::Path,
     persisted: &PersistedVault,
     local_half: &[u8],
     server_half: &[u8],
-) -> Result<std::path::PathBuf, ()> {
+) -> Result<(), ()> {
     let payload = Zeroizing::new(serde_json::to_vec(persisted).map_err(|_| ())?);
     let wrapped = device_wrap(local_half, server_half, &payload);
-    let path = vault_path(account_id).map_err(|_| ())?;
     let file = VaultFile {
         email: persisted.email.clone(),
         wrapped: b64().encode(&wrapped),
@@ -325,31 +419,31 @@ fn write_vault_file(
     let encoded = serde_json::to_vec(&file).map_err(|_| ())?;
     let staged = path.with_extension("bin.tmp");
     std::fs::write(&staged, encoded).map_err(|_| ())?;
-    std::fs::rename(&staged, &path).map_err(|_| {
+    std::fs::rename(&staged, path).map_err(|_| {
         let _ = std::fs::remove_file(&staged);
-    })?;
-    Ok(path)
+    })
+}
+
+fn read_vault_file(
+    path: &std::path::Path,
+    local_half: &[u8],
+    server_half: &[u8],
+) -> Result<PersistedVault, &'static str> {
+    let raw = std::fs::read(path).map_err(|_| "no_persistent")?;
+    let file = serde_json::from_slice::<VaultFile>(&raw).map_err(|_| "no_persistent")?;
+    let wrapped = b64().decode(&file.wrapped).map_err(|_| "no_persistent")?;
+    let payload = Zeroizing::new(
+        device_unwrap(local_half, server_half, &wrapped).map_err(|_| "unwrap_failed")?,
+    );
+    serde_json::from_slice::<PersistedVault>(&payload).map_err(|_| "unwrap_failed")
 }
 
 pub(crate) fn rewrap_persisted(ks: &Keystore, halves: &PersistentHalves, account_id: &str) {
     let Ok(path) = vault_path(account_id) else {
         return;
     };
-    if !path.exists() {
-        return;
-    }
-    let Some(server_half) = halves.get(account_id) else {
-        return;
-    };
-    let crate::keychain::Read::Found(local_half) = crate::keychain::local_half(account_id) else {
-        return;
-    };
-    let (Ok(local_half), Some(persisted)) = (b64().decode(&local_half), ks.persistable(account_id))
-    else {
-        return;
-    };
-    let local_half = Zeroizing::new(local_half);
-    if write_vault_file(account_id, &persisted, &local_half, &server_half).is_err() {
+    if path.exists() && !halves.rewrap(&Keychain, &path, account_id, || ks.persistable(account_id))
+    {
         eprintln!("keystore: rewriting the saved vault for {account_id} failed");
     }
 }
@@ -363,25 +457,20 @@ pub fn keystore_enroll_persistent(
     let Some(server_half) = args.server_half else {
         return;
     };
-    let Some(persisted) = ks.persistable(&args.account_id) else {
-        return;
-    };
     let Ok(server_half) = b64().decode(&server_half) else {
         return;
     };
     let server_half = Zeroizing::new(server_half);
-
-    let mut local_half = [0u8; 32];
-    rand::rngs::OsRng.fill_bytes(&mut local_half);
-    let written = write_vault_file(&args.account_id, &persisted, &local_half, &server_half);
-    if let Ok(path) = written {
-        if crate::keychain::put_local_half(&args.account_id, &b64().encode(local_half)).is_err() {
-            let _ = std::fs::remove_file(path);
-        } else {
-            halves.remember(&args.account_id, &server_half);
-        }
-    }
-    local_half.zeroize();
+    let Ok(path) = vault_path(&args.account_id) else {
+        return;
+    };
+    halves.enroll(
+        &Keychain,
+        &path,
+        &args.account_id,
+        || ks.persistable(&args.account_id),
+        &server_half,
+    );
 }
 
 #[tauri::command]
@@ -389,8 +478,7 @@ pub fn keystore_invalidate_persisted_vault(
     halves: State<'_, PersistentHalves>,
     args: AccountScopedArgs,
 ) {
-    halves.forget(&args.account_id);
-    forget_persisted(&args.account_id);
+    forget_persisted(&halves, &args.account_id);
 }
 
 #[tauri::command]
@@ -407,30 +495,18 @@ pub fn keystore_try_restore_from_persistent(
     let Some(server_half) = args.server_half.as_deref() else {
         return RestoreResponse::failed("server_half_unavailable");
     };
-    let (Ok(server_half), crate::keychain::Read::Found(local_half)) = (
-        b64().decode(server_half),
-        crate::keychain::local_half(&args.account_id),
-    ) else {
-        return RestoreResponse::failed("no_persistent");
-    };
-    let (Ok(local_half), Ok(path)) = (b64().decode(&local_half), vault_path(&args.account_id))
+    let (Ok(server_half), Some(local_half)) =
+        (b64().decode(server_half), Keychain.read(&args.account_id))
     else {
         return RestoreResponse::failed("no_persistent");
     };
-    let Ok(raw) = std::fs::read(&path) else {
+    let server_half = Zeroizing::new(server_half);
+    let Ok(path) = vault_path(&args.account_id) else {
         return RestoreResponse::failed("no_persistent");
     };
-    let (Ok(file), _) = (serde_json::from_slice::<VaultFile>(&raw), ()) else {
-        return RestoreResponse::failed("no_persistent");
-    };
-    let Ok(wrapped) = b64().decode(&file.wrapped) else {
-        return RestoreResponse::failed("no_persistent");
-    };
-    let Ok(payload) = device_unwrap(&local_half, &server_half, &wrapped) else {
-        return RestoreResponse::failed("unwrap_failed");
-    };
-    let Ok(persisted) = serde_json::from_slice::<PersistedVault>(&payload) else {
-        return RestoreResponse::failed("unwrap_failed");
+    let persisted = match read_vault_file(&path, &local_half, &server_half) {
+        Ok(persisted) => persisted,
+        Err(reason) => return RestoreResponse::failed(reason),
     };
 
     let email = persisted.email.clone();
@@ -449,8 +525,7 @@ pub fn keystore_try_restore_from_persistent(
 
 #[tauri::command]
 pub fn keystore_disable_persistent(halves: State<'_, PersistentHalves>, args: AccountScopedArgs) {
-    halves.forget(&args.account_id);
-    forget_persisted(&args.account_id);
+    forget_persisted(&halves, &args.account_id);
 }
 
 #[tauri::command]
@@ -661,4 +736,149 @@ pub fn keystore_get_public_key(
     args: AccountScopedArgs,
 ) -> GetPublicKeyResponse {
     ks.get_public_key(&args.account_id)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::Arc;
+
+    const ACCOUNT: &str = "0c0c0c0c-0c0c-4c0c-8c0c-0c0c0c0c0c0c";
+
+    #[derive(Default)]
+    struct MemoryHalves(Mutex<HashMap<String, Vec<u8>>>);
+
+    impl LocalHalfStore for MemoryHalves {
+        fn read(&self, account_id: &str) -> Option<Zeroizing<Vec<u8>>> {
+            self.0
+                .lock()
+                .unwrap()
+                .get(account_id)
+                .cloned()
+                .map(Zeroizing::new)
+        }
+
+        fn write(&self, account_id: &str, local_half: &[u8]) -> bool {
+            self.0
+                .lock()
+                .unwrap()
+                .insert(account_id.to_owned(), local_half.to_vec());
+            true
+        }
+
+        fn forget(&self, account_id: &str) {
+            self.0.lock().unwrap().remove(account_id);
+        }
+    }
+
+    fn vault(key_version: i64) -> PersistedVault {
+        PersistedVault {
+            email: "nora@thelemail.test".to_owned(),
+            auth_scheme: AuthScheme::OpaqueV1,
+            secret_key_armored: format!("secret-{key_version}"),
+            amk: "amk".to_owned(),
+            key_version,
+            history: (1..key_version)
+                .map(|v| PersistedAccountKey {
+                    key_version: v,
+                    secret_key_armored: format!("secret-{v}"),
+                })
+                .collect(),
+        }
+    }
+
+    fn opened(store: &MemoryHalves, path: &std::path::Path, server_half: &[u8]) -> PersistedVault {
+        let local_half = store.read(ACCOUNT).expect("local half");
+        read_vault_file(path, &local_half, server_half).expect("the saved vault opens")
+    }
+
+    #[test]
+    fn a_key_change_rewrites_the_saved_vault_under_the_same_halves() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("vault.bin");
+        let halves = PersistentHalves::default();
+        let store = MemoryHalves::default();
+        let server_half = [7u8; 32];
+
+        assert!(halves.enroll(&store, &path, ACCOUNT, || Some(vault(1)), &server_half));
+        assert_eq!(opened(&store, &path, &server_half).key_version, 1);
+        let local_before = store.read(ACCOUNT).unwrap();
+
+        assert!(halves.rewrap(&store, &path, ACCOUNT, || Some(vault(3))));
+        let reopened = opened(&store, &path, &server_half);
+        assert_eq!(reopened.key_version, 3);
+        assert_eq!(reopened.history.len(), 2);
+        assert_eq!(*store.read(ACCOUNT).unwrap(), *local_before);
+        assert!(!path.with_extension("bin.tmp").exists());
+    }
+
+    #[test]
+    fn a_rewrite_without_a_saved_vault_or_server_half_does_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("vault.bin");
+        let halves = PersistentHalves::default();
+        let store = MemoryHalves::default();
+
+        assert!(!halves.rewrap(&store, &path, ACCOUNT, || Some(vault(2))));
+        assert!(!path.exists());
+
+        assert!(halves.enroll(&store, &path, ACCOUNT, || Some(vault(1)), &[1u8; 32]));
+        halves.forget(ACCOUNT);
+        assert!(!halves.rewrap(&store, &path, ACCOUNT, || Some(vault(2))));
+        assert_eq!(opened(&store, &path, &[1u8; 32]).key_version, 1);
+    }
+
+    #[test]
+    fn a_discarded_vault_is_not_brought_back_by_a_rewrite() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("vault.bin");
+        let halves = PersistentHalves::default();
+        let store = MemoryHalves::default();
+
+        assert!(halves.enroll(&store, &path, ACCOUNT, || Some(vault(1)), &[2u8; 32]));
+        halves.discard(&store, Some(&path), ACCOUNT);
+        assert!(!halves.rewrap(&store, &path, ACCOUNT, || Some(vault(2))));
+        assert!(!path.exists());
+        assert!(store.read(ACCOUNT).is_none());
+    }
+
+    #[test]
+    fn enrolling_while_keys_change_always_leaves_a_vault_that_opens() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = Arc::new(dir.path().join("vault.bin"));
+        let halves = Arc::new(PersistentHalves::default());
+        let store = Arc::new(MemoryHalves::default());
+        let server_half = [9u8; 32];
+        assert!(halves.enroll(&*store, &path, ACCOUNT, || Some(vault(1)), &server_half));
+
+        let enroller = {
+            let (halves, store, path) = (halves.clone(), store.clone(), path.clone());
+            std::thread::spawn(move || {
+                for _ in 0..200 {
+                    assert!(halves.enroll(
+                        &*store,
+                        &path,
+                        ACCOUNT,
+                        || Some(vault(1)),
+                        &server_half
+                    ));
+                }
+            })
+        };
+        let rewriter = {
+            let (halves, store, path) = (halves.clone(), store.clone(), path.clone());
+            std::thread::spawn(move || {
+                for version in 2..202 {
+                    halves.rewrap(&*store, &path, ACCOUNT, || Some(vault(version)));
+                    let _files = halves.files.lock().unwrap();
+                    let local_half = store.read(ACCOUNT).unwrap();
+                    read_vault_file(&path, &local_half, &server_half)
+                        .expect("the file always matches the stored local half");
+                }
+            })
+        };
+        enroller.join().unwrap();
+        rewriter.join().unwrap();
+        opened(&store, &path, &server_half);
+    }
 }

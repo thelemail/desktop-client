@@ -197,13 +197,22 @@ pub fn run() {
             let handle = app.handle().clone();
             let mut events = app.state::<Keystore>().subscribe();
             tauri::async_runtime::spawn(async move {
-                while let Ok(event) = events.recv().await {
+                loop {
+                    let event = match events.recv().await {
+                        Ok(event) => event,
+                        Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
+                        Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+                    };
                     if let Broadcast::AccountKeysChanged { account_id, .. } = &event {
-                        keystore::rewrap_persisted(
-                            &handle.state::<Keystore>(),
-                            &handle.state::<keystore::PersistentHalves>(),
-                            account_id,
-                        );
+                        let app = handle.clone();
+                        let id = account_id.clone();
+                        tauri::async_runtime::spawn_blocking(move || {
+                            keystore::rewrap_persisted(
+                                &app.state::<Keystore>(),
+                                &app.state::<keystore::PersistentHalves>(),
+                                &id,
+                            );
+                        });
                         tauri::async_runtime::spawn(mirror::retry_undecryptable(
                             handle.clone(),
                             account_id.clone(),

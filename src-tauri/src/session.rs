@@ -106,13 +106,14 @@ pub fn session_restore(net: State<'_, Net>, args: SessionArgs) -> Result<bool, S
 pub fn session_forget(
     net: State<'_, Net>,
     mirror: State<'_, crate::mirror::Mirror>,
+    halves: State<'_, crate::keystore::PersistentHalves>,
     args: SessionArgs,
 ) -> Result<(), String> {
     crate::ids::account_id(&args.account_id)?;
     let _guard = saved_session_lock();
     net.forget_cookie(&refresh_cookie_name(&args.account_id));
     net.forget_cookie(&legacy_refresh_cookie_name(&args.account_id));
-    crate::keystore::forget_persisted(&args.account_id);
+    crate::keystore::forget_persisted(&halves, &args.account_id);
     let purged = mirror.purge(&args.account_id);
     let cookie = keychain::forget_refresh_cookie(&args.account_id);
     let db_key = keychain::forget_db_key(&args.account_id);
