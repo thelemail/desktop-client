@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
@@ -1473,107 +1473,114 @@ impl Keystore {
     }
 
     pub fn load_account_keys(&self, args: LoadAccountKeysArgs) -> LoadAccountKeysResponse {
-        let (amk, known) = {
+        let Some(listed) = valid_key_list(&args) else {
             let vaults = self.vaults.lock().expect("keystore vaults");
-            let Some(vault) = vaults.get(&args.account_id) else {
-                return LoadAccountKeysResponse::Err {
-                    ok: false,
-                    code: "locked",
-                };
+            return match vaults.get(&args.account_id) {
+                None => LoadAccountKeysResponse::err("locked"),
+                Some(vault) if vault.auth_scheme != AuthScheme::OpaqueV1 => {
+                    LoadAccountKeysResponse::err("not_opaque")
+                }
+                Some(_) => LoadAccountKeysResponse::err("key_list_invalid"),
             };
-            if vault.auth_scheme != AuthScheme::OpaqueV1 {
-                return LoadAccountKeysResponse::Err {
-                    ok: false,
-                    code: "not_opaque",
-                };
-            }
-            (vault.amk.clone(), vault.account_fingerprints())
         };
 
-        let mut failed = Vec::new();
-        let mut candidates = Vec::new();
-        for input in &args.keys {
-            if input.key_version < 1 {
-                failed.push(input.key_version);
-            } else if !known.contains(&input.fingerprint_hex.to_lowercase()) {
-                candidates.push(input);
-            }
-        }
+        let (amk, to_open) = {
+            let vaults = self.vaults.lock().expect("keystore vaults");
+            let vault = match loadable_vault(vaults.get(&args.account_id), &listed) {
+                Ok(vault) => vault,
+                Err(code) => return LoadAccountKeysResponse::err(code),
+            };
+            let to_open: Vec<&AccountKeyInput> = listed
+                .iter()
+                .filter(|k| !vault.knows_account_key(&k.fingerprint_hex))
+                .map(|k| k.input)
+                .collect();
+            (vault.amk.clone(), to_open)
+        };
+
         let passphrase = derive_pgp_passphrase(&amk);
-        let mut opened = Vec::new();
-        for (input, key) in candidates
+        let mut opened: HashMap<String, UnlockedKey> = to_open
             .iter()
-            .zip(open_account_keys(&candidates, passphrase.expose()))
-        {
-            match key {
-                Some(key) => opened.push(AccountKey {
-                    key,
-                    version: input.key_version,
-                }),
-                None => failed.push(input.key_version),
-            }
-        }
+            .zip(open_account_keys(&to_open, passphrase.expose()))
+            .filter_map(|(input, key)| key.map(|key| (input.fingerprint_hex.to_lowercase(), key)))
+            .collect();
 
         let mut vaults = self.vaults.lock().expect("keystore vaults");
-        let Some(vault) = vaults.get_mut(&args.account_id) else {
-            return LoadAccountKeysResponse::Err {
-                ok: false,
-                code: "locked",
-            };
+        let vault = match loadable_vault(vaults.get(&args.account_id), &listed) {
+            Ok(_) => vaults.get_mut(&args.account_id).expect("keystore vault"),
+            Err(code) => return LoadAccountKeysResponse::err(code),
         };
 
-        let current_fp = vault.key.fingerprint_hex();
-        let before_version = vault.key_version;
+        let start_fp = vault.key.fingerprint_hex();
         if vault.key_version == 0
-            && let Some(input) = args
-                .keys
-                .iter()
-                .find(|k| k.key_version > 0 && k.fingerprint_hex.to_lowercase() == current_fp)
+            && let Some(same) = listed.iter().find(|k| k.fingerprint_hex == start_fp)
         {
-            vault.key_version = input.key_version;
+            vault.key_version = same.version;
         }
 
-        let mut added = Vec::new();
-        for entry in opened {
-            let fp = entry.key.fingerprint_hex();
-            if vault.knows_account_key(&fp) {
+        let mut loaded = Vec::new();
+        let mut failed = Vec::new();
+        let mut candidates = BTreeMap::new();
+        for k in &listed {
+            if vault.knows_account_key(&k.fingerprint_hex) {
+                loaded.push(k.fingerprint_hex.clone());
                 continue;
             }
-            added.push(fp);
-            vault.history.push(entry);
-        }
-        vault.sort_history();
-        if !added.is_empty() {
-            vault.open_unopened_grants();
-        }
-
-        let mut current_changed = false;
-        if vault.key_version > 0
-            && vault
-                .history
-                .first()
-                .is_some_and(|newest| newest.version > vault.key_version)
-        {
-            let newest = vault.history.remove(0);
-            match newest.key.public_key_armored() {
-                Ok(public_key_armored) => {
-                    let retired = std::mem::replace(&mut vault.key, newest.key);
-                    vault.history.push(AccountKey {
-                        key: retired,
-                        version: vault.key_version,
-                    });
-                    vault.key_version = newest.version;
-                    vault.public_key_armored = public_key_armored;
-                    vault.sort_history();
-                    current_changed = true;
+            match opened.remove(&k.fingerprint_hex) {
+                Some(key) => {
+                    candidates.insert(k.version, key);
                 }
-                Err(_) => {
-                    failed.push(newest.version);
-                    vault.history.insert(0, newest);
-                }
+                None => failed.push(k.version),
             }
         }
 
+        let mut chain: Vec<(AccountKey, String)> = Vec::new();
+        for version in vault.key_version + 1..=listed.len() as i64 {
+            let endorser = chain.last().map_or(&vault.key, |(k, _)| &k.key);
+            let Some(next) = candidates.get(&version) else {
+                break;
+            };
+            let Ok(public_key_armored) = next.public_key_armored() else {
+                break;
+            };
+            if !endorsed_by(&vault.account_id, &listed[version as usize - 1], endorser) {
+                break;
+            }
+            let key = candidates.remove(&version).expect("candidate");
+            loaded.push(key.fingerprint_hex());
+            chain.push((AccountKey { key, version }, public_key_armored));
+        }
+        let trusted_version = chain.last().map_or(vault.key_version, |(k, _)| k.version);
+
+        let mut unverified = Vec::new();
+        let mut added = !chain.is_empty();
+        for (version, key) in candidates {
+            if version < trusted_version {
+                loaded.push(key.fingerprint_hex());
+                vault.history.push(AccountKey { key, version });
+                added = true;
+            } else {
+                unverified.push(version);
+            }
+        }
+
+        let current_changed = !chain.is_empty();
+        if let Some((newest, public_key_armored)) = chain.pop() {
+            let retired = std::mem::replace(&mut vault.key, newest.key);
+            vault.history.push(AccountKey {
+                key: retired,
+                version: vault.key_version,
+            });
+            vault
+                .history
+                .extend(chain.into_iter().map(|(entry, _)| entry));
+            vault.key_version = newest.version;
+            vault.public_key_armored = public_key_armored;
+        }
+        vault.sort_history();
+        if added {
+            vault.open_unopened_grants();
+        }
         if vault
             .pending_rotation
             .as_ref()
@@ -1582,27 +1589,19 @@ impl Keystore {
             vault.pending_rotation = None;
         }
 
-        let changed = !added.is_empty() || current_changed || before_version != vault.key_version;
-        let loaded = args
-            .keys
-            .iter()
-            .map(|k| k.fingerprint_hex.to_lowercase())
-            .filter(|fp| vault.knows_account_key(fp))
-            .collect();
         let response = LoadAccountKeysResponse::Ok {
             ok: true,
             loaded,
             failed,
+            unverified,
             current_fingerprint_hex: vault.key.fingerprint_hex(),
             key_version: vault.key_version,
             current_changed,
         };
-        let event = changed.then(|| vault.keys_changed(current_changed));
+        let event = vault.keys_changed(current_changed);
         drop(vaults);
 
-        if let Some(event) = event {
-            self.emit(event);
-        }
+        self.emit(event);
         response
     }
 
@@ -1778,6 +1777,118 @@ fn rotation_ready(vault: &Vault, args: &PrepareKeyRotationArgs) -> Result<(), &'
         return Err("key_history_incomplete");
     }
     Ok(())
+}
+
+struct ListedKey<'a> {
+    input: &'a AccountKeyInput,
+    version: i64,
+    fingerprint_hex: String,
+    transitions: Vec<(String, &'a [u8])>,
+}
+
+fn is_fingerprint_hex(value: &str) -> bool {
+    matches!(value.len(), 40 | 64)
+        && value
+            .bytes()
+            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+}
+
+fn valid_key_list(args: &LoadAccountKeysArgs) -> Option<Vec<ListedKey<'_>>> {
+    let count = usize::try_from(args.current_version)
+        .ok()
+        .filter(|count| *count >= 1)?;
+    if args.keys.len() != count {
+        return None;
+    }
+    let mut listed: Vec<Option<ListedKey<'_>>> = (0..count).map(|_| None).collect();
+    let mut seen = HashSet::new();
+    for input in &args.keys {
+        let slot = usize::try_from(input.key_version)
+            .ok()
+            .filter(|version| (1..=count).contains(version))?
+            - 1;
+        if listed[slot].is_some() || input.is_current != (slot + 1 == count) {
+            return None;
+        }
+        let fingerprint_hex = input.fingerprint_hex.to_lowercase();
+        if !is_fingerprint_hex(&fingerprint_hex) || !seen.insert(fingerprint_hex.clone()) {
+            return None;
+        }
+        if input.transitions.len() > MAX_ENDORSING_KEYS {
+            return None;
+        }
+        let mut transitions = Vec::with_capacity(input.transitions.len());
+        for transition in &input.transitions {
+            let previous = transition.previous_key_fingerprint_hex.to_lowercase();
+            if !is_fingerprint_hex(&previous) || previous == fingerprint_hex {
+                return None;
+            }
+            transitions.push((previous, transition.signature.as_slice()));
+        }
+        listed[slot] = Some(ListedKey {
+            input,
+            version: input.key_version,
+            fingerprint_hex,
+            transitions,
+        });
+    }
+    listed.into_iter().collect()
+}
+
+fn loadable_vault<'v>(
+    vault: Option<&'v Vault>,
+    listed: &[ListedKey<'_>],
+) -> Result<&'v Vault, &'static str> {
+    let vault = vault.ok_or("locked")?;
+    if vault.auth_scheme != AuthScheme::OpaqueV1 {
+        return Err("not_opaque");
+    }
+    if list_agrees_with_vault(vault, listed) {
+        Ok(vault)
+    } else {
+        Err("key_list_invalid")
+    }
+}
+
+fn list_agrees_with_vault(vault: &Vault, listed: &[ListedKey<'_>]) -> bool {
+    let agrees = |fingerprint_hex: &str, version: i64| {
+        if listed
+            .iter()
+            .any(|k| k.fingerprint_hex == fingerprint_hex && k.version != version)
+        {
+            return false;
+        }
+        usize::try_from(version)
+            .ok()
+            .and_then(|version| version.checked_sub(1))
+            .and_then(|slot| listed.get(slot))
+            .is_none_or(|k| k.fingerprint_hex == fingerprint_hex)
+    };
+    let current = vault.key.fingerprint_hex();
+    let current_agrees = if vault.key_version == 0 {
+        listed.iter().any(|k| k.fingerprint_hex == current)
+    } else {
+        agrees(&current, vault.key_version)
+    };
+    current_agrees
+        && vault
+            .history
+            .iter()
+            .all(|k| agrees(&k.key.fingerprint_hex(), k.version))
+}
+
+fn endorsed_by(account_id: &str, key: &ListedKey<'_>, previous: &UnlockedKey) -> bool {
+    let previous_fp = previous.fingerprint_hex();
+    let Some((_, signature)) = key.transitions.iter().find(|(fp, _)| *fp == previous_fp) else {
+        return false;
+    };
+    let Ok(message) = keytransition::payload(account_id, &key.fingerprint_hex, &previous_fp) else {
+        return false;
+    };
+    let Ok(public_key_armored) = previous.public_key_armored() else {
+        return false;
+    };
+    keytransition::verify(message.as_bytes(), signature, &public_key_armored).is_ok()
 }
 
 fn open_account_keys(inputs: &[&AccountKeyInput], passphrase: &str) -> Vec<Option<UnlockedKey>> {

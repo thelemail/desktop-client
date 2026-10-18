@@ -662,16 +662,29 @@ pub struct PersistedVault {
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct AccountKeyTransitionInput {
+    pub previous_key_fingerprint_hex: String,
+    pub signature: Vec<u8>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct AccountKeyInput {
     pub key_version: i64,
     pub fingerprint_hex: String,
     pub encrypted_private_key_armored: String,
+    #[serde(default)]
+    pub is_current: bool,
+    #[serde(default)]
+    pub transitions: Vec<AccountKeyTransitionInput>,
 }
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LoadAccountKeysArgs {
     pub account_id: String,
+    #[serde(default)]
+    pub current_version: i64,
     pub keys: Vec<AccountKeyInput>,
 }
 
@@ -682,6 +695,7 @@ pub enum LoadAccountKeysResponse {
         ok: bool,
         loaded: Vec<String>,
         failed: Vec<i64>,
+        unverified: Vec<i64>,
         #[serde(rename = "currentFingerprintHex")]
         current_fingerprint_hex: String,
         #[serde(rename = "keyVersion")]
@@ -693,6 +707,12 @@ pub enum LoadAccountKeysResponse {
         ok: bool,
         code: &'static str,
     },
+}
+
+impl LoadAccountKeysResponse {
+    pub fn err(code: &'static str) -> Self {
+        Self::Err { ok: false, code }
+    }
 }
 
 #[derive(Debug, Serialize)]
