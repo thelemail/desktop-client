@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::sync::Mutex;
 
 use base64::Engine as _;
 use rand::RngCore;
@@ -8,7 +9,7 @@ use thelemail_api::{ApiRequest, Net};
 use thelemail_crypto::amk::{device_unwrap, device_wrap};
 use thelemail_crypto::attframe::{self, DecryptedAttachmentHeader};
 use thelemail_keystore::*;
-use zeroize::Zeroize;
+use zeroize::{Zeroize, Zeroizing};
 
 fn b64() -> base64::engine::GeneralPurpose {
     base64::engine::general_purpose::STANDARD
@@ -280,8 +281,88 @@ pub(crate) fn forget_persisted(account_id: &str) {
     let _ = crate::keychain::forget_local_half(account_id);
 }
 
+#[derive(Default)]
+pub struct PersistentHalves(Mutex<HashMap<String, Zeroizing<Vec<u8>>>>);
+
+impl PersistentHalves {
+    fn remember(&self, account_id: &str, server_half: &[u8]) {
+        self.0
+            .lock()
+            .expect("persistent halves")
+            .insert(account_id.to_owned(), Zeroizing::new(server_half.to_vec()));
+    }
+
+    fn get(&self, account_id: &str) -> Option<Zeroizing<Vec<u8>>> {
+        self.0
+            .lock()
+            .expect("persistent halves")
+            .get(account_id)
+            .cloned()
+    }
+
+    fn forget(&self, account_id: &str) {
+        self.0
+            .lock()
+            .expect("persistent halves")
+            .remove(account_id);
+    }
+
+    fn forget_all(&self) {
+        self.0.lock().expect("persistent halves").clear();
+    }
+}
+
+fn write_vault_file(
+    account_id: &str,
+    persisted: &PersistedVault,
+    local_half: &[u8],
+    server_half: &[u8],
+) -> Result<std::path::PathBuf, ()> {
+    let payload = Zeroizing::new(serde_json::to_vec(persisted).map_err(|_| ())?);
+    let wrapped = device_wrap(local_half, server_half, &payload);
+    let path = vault_path(account_id).map_err(|_| ())?;
+    let file = VaultFile {
+        email: persisted.email.clone(),
+        wrapped: b64().encode(&wrapped),
+    };
+    let encoded = serde_json::to_vec(&file).map_err(|_| ())?;
+    let staged = path.with_extension("bin.tmp");
+    std::fs::write(&staged, encoded).map_err(|_| ())?;
+    std::fs::rename(&staged, &path).map_err(|_| {
+        let _ = std::fs::remove_file(&staged);
+    })?;
+    Ok(path)
+}
+
+pub(crate) fn rewrap_persisted(ks: &Keystore, halves: &PersistentHalves, account_id: &str) {
+    let Ok(path) = vault_path(account_id) else {
+        return;
+    };
+    if !path.exists() {
+        return;
+    }
+    let Some(server_half) = halves.get(account_id) else {
+        return;
+    };
+    let crate::keychain::Read::Found(local_half) = crate::keychain::local_half(account_id) else {
+        return;
+    };
+    let (Ok(local_half), Some(persisted)) = (b64().decode(&local_half), ks.persistable(account_id))
+    else {
+        return;
+    };
+    let local_half = Zeroizing::new(local_half);
+    if write_vault_file(account_id, &persisted, &local_half, &server_half).is_err() {
+        eprintln!("keystore: rewriting the saved vault for {account_id} failed");
+    }
+}
+
 #[tauri::command]
-pub fn keystore_enroll_persistent(ks: State<'_, Keystore>, args: EnrollPersistentArgs) {
+pub fn keystore_enroll_persistent(
+    ks: State<'_, Keystore>,
+    halves: State<'_, PersistentHalves>,
+    args: EnrollPersistentArgs,
+) {
     let Some(server_half) = args.server_half else {
         return;
     };
@@ -291,42 +372,34 @@ pub fn keystore_enroll_persistent(ks: State<'_, Keystore>, args: EnrollPersisten
     let Ok(server_half) = b64().decode(&server_half) else {
         return;
     };
-    let email = persisted.email.clone();
-    let Ok(payload) = serde_json::to_vec(&persisted) else {
-        return;
-    };
+    let server_half = Zeroizing::new(server_half);
 
     let mut local_half = [0u8; 32];
     rand::rngs::OsRng.fill_bytes(&mut local_half);
-    let wrapped = device_wrap(&local_half, &server_half, &payload);
-
-    let Ok(path) = vault_path(&args.account_id) else {
-        return;
-    };
-    let file = VaultFile {
-        email,
-        wrapped: b64().encode(&wrapped),
-    };
-    let Ok(encoded) = serde_json::to_vec(&file) else {
-        return;
-    };
-    if std::fs::write(&path, encoded).is_err() {
-        return;
-    }
-    if crate::keychain::put_local_half(&args.account_id, &b64().encode(local_half)).is_err() {
-        let _ = std::fs::remove_file(path);
+    let written = write_vault_file(&args.account_id, &persisted, &local_half, &server_half);
+    if let Ok(path) = written {
+        if crate::keychain::put_local_half(&args.account_id, &b64().encode(local_half)).is_err() {
+            let _ = std::fs::remove_file(path);
+        } else {
+            halves.remember(&args.account_id, &server_half);
+        }
     }
     local_half.zeroize();
 }
 
 #[tauri::command]
-pub fn keystore_invalidate_persisted_vault(_ks: State<'_, Keystore>, args: AccountScopedArgs) {
+pub fn keystore_invalidate_persisted_vault(
+    halves: State<'_, PersistentHalves>,
+    args: AccountScopedArgs,
+) {
+    halves.forget(&args.account_id);
     forget_persisted(&args.account_id);
 }
 
 #[tauri::command]
 pub fn keystore_try_restore_from_persistent(
     ks: State<'_, Keystore>,
+    halves: State<'_, PersistentHalves>,
     args: TryRestoreArgs,
 ) -> RestoreResponse {
     let restored = ks.try_restore_from_persistent(&args.account_id);
@@ -365,6 +438,7 @@ pub fn keystore_try_restore_from_persistent(
 
     let email = persisted.email.clone();
     if ks.adopt_persisted(&args.account_id, persisted) {
+        halves.remember(&args.account_id, &server_half);
         RestoreResponse {
             ok: true,
             account_id: Some(args.account_id),
@@ -377,22 +451,34 @@ pub fn keystore_try_restore_from_persistent(
 }
 
 #[tauri::command]
-pub fn keystore_disable_persistent(_ks: State<'_, Keystore>, args: AccountScopedArgs) {
+pub fn keystore_disable_persistent(halves: State<'_, PersistentHalves>, args: AccountScopedArgs) {
+    halves.forget(&args.account_id);
     forget_persisted(&args.account_id);
 }
 
 #[tauri::command]
-pub fn keystore_clear(ks: State<'_, Keystore>, args: AccountScopedArgs) {
+pub fn keystore_clear(
+    ks: State<'_, Keystore>,
+    halves: State<'_, PersistentHalves>,
+    args: AccountScopedArgs,
+) {
+    halves.forget(&args.account_id);
     ks.clear(&args.account_id);
 }
 
 #[tauri::command]
-pub fn keystore_lock(ks: State<'_, Keystore>, args: AccountScopedArgs) {
+pub fn keystore_lock(
+    ks: State<'_, Keystore>,
+    halves: State<'_, PersistentHalves>,
+    args: AccountScopedArgs,
+) {
+    halves.forget(&args.account_id);
     ks.lock(&args.account_id);
 }
 
 #[tauri::command]
-pub fn keystore_clear_all(ks: State<'_, Keystore>) {
+pub fn keystore_clear_all(ks: State<'_, Keystore>, halves: State<'_, PersistentHalves>) {
+    halves.forget_all();
     ks.clear_all();
 }
 
@@ -532,6 +618,36 @@ pub fn keystore_sign_detached(
     args: SignDetachedArgs,
 ) -> SignDetachedResponse {
     ks.sign_detached(args)
+}
+
+#[tauri::command]
+pub fn keystore_load_account_keys(
+    ks: State<'_, Keystore>,
+    args: LoadAccountKeysArgs,
+) -> LoadAccountKeysResponse {
+    ks.load_account_keys(args)
+}
+
+#[tauri::command]
+pub fn keystore_prepare_key_rotation(
+    ks: State<'_, Keystore>,
+    net: State<'_, Net>,
+    args: PrepareKeyRotationArgs,
+) -> PrepareKeyRotationResponse {
+    ks.prepare_key_rotation(args, net.clock_offset_ms())
+}
+
+#[tauri::command]
+pub fn keystore_commit_key_rotation(
+    ks: State<'_, Keystore>,
+    args: CommitKeyRotationArgs,
+) -> PlainOkResponse {
+    ks.commit_key_rotation(args)
+}
+
+#[tauri::command]
+pub fn keystore_abandon_key_rotation(ks: State<'_, Keystore>, args: AccountScopedArgs) {
+    ks.abandon_key_rotation(&args.account_id);
 }
 
 #[tauri::command]
