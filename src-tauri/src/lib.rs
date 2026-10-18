@@ -203,6 +203,10 @@ pub fn run() {
                             &handle.state::<keystore::PersistentHalves>(),
                             account_id,
                         );
+                        tauri::async_runtime::spawn(mirror::retry_undecryptable(
+                            handle.clone(),
+                            account_id.clone(),
+                        ));
                     }
                     let _ = handle.emit("keystore", event);
                 }
