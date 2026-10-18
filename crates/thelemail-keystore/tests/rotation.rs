@@ -862,3 +862,308 @@ fn an_srp_vault_cannot_rotate() {
     assert_eq!(load(&ks, vec![])["code"], "not_opaque");
     assert_eq!(prepare(&ks)["code"], "not_opaque");
 }
+
+fn copy(transitions: &[AccountKeyTransitionInput]) -> Vec<AccountKeyTransitionInput> {
+    transitions
+        .iter()
+        .map(|t| AccountKeyTransitionInput {
+            previous_key_fingerprint_hex: t.previous_key_fingerprint_hex.clone(),
+            signature: t.signature.clone(),
+        })
+        .collect()
+}
+
+fn current_fingerprint(ks: &Keystore) -> (String, Option<i64>) {
+    let (public, version) = current_public(ks);
+    (
+        thelemail_crypto::openpgp::public_key_fingerprint_hex(&public).unwrap(),
+        version,
+    )
+}
+
+fn assert_refused(ks: &Keystore, current_version: i64, keys: Vec<AccountKeyInput>, why: &str) {
+    let before = current_fingerprint(ks);
+    let listed = serde_json::to_value(ks.list_account_keys(ACCOUNT)).unwrap();
+    let mut events = ks.subscribe();
+    assert_eq!(
+        load_with(ks, current_version, keys),
+        serde_json::json!({ "ok": false, "code": "key_list_invalid" }),
+        "{why}"
+    );
+    assert!(events.try_recv().is_err(), "{why} broadcast");
+    assert_eq!(current_fingerprint(ks), before, "{why}");
+    assert_eq!(
+        serde_json::to_value(ks.list_account_keys(ACCOUNT)).unwrap(),
+        listed,
+        "{why}"
+    );
+}
+
+#[test]
+fn a_fresh_sign_in_never_promotes_a_replayed_retired_key() {
+    let a = account();
+    let second = generate(&a.amk, &[EMAIL]);
+    let third = generate(&a.amk, &[EMAIL]);
+    let real = history(&a.amk, &[&a.first, &second, &third]);
+
+    let device = Keystore::new();
+    assert!(device.adopt_persisted(ACCOUNT, persisted_for(&a.amk, &third)));
+    let mut replayed = vec![input(1, &second), input(2, &third), current(3, &a.first)];
+    replayed[1].transitions = copy(&real[2].transitions);
+    let loaded = load(&device, replayed);
+    assert_eq!(loaded["ok"], true, "{loaded}");
+    assert_eq!(loaded["unverified"], serde_json::json!([3]));
+    assert_eq!(loaded["currentChanged"], false);
+    assert_eq!(
+        loaded["currentFingerprintHex"],
+        third.fingerprint_hex.as_str()
+    );
+    assert_eq!(current_fingerprint(&device).0, third.fingerprint_hex);
+}
+
+#[test]
+fn a_device_never_takes_a_known_key_at_another_version() {
+    let a = account();
+    let second = generate(&a.amk, &[EMAIL]);
+    let third = generate(&a.amk, &[EMAIL]);
+    let filler = generate(&a.amk, &[EMAIL]);
+    let loaded = load(&a.ks, history(&a.amk, &[&a.first, &second, &third]));
+    assert_eq!(loaded["keyVersion"], 3);
+
+    let mut replayed = history(&a.amk, &[&filler, &second, &third, &a.first]);
+    replayed[3].transitions = vec![endorsement(&a.amk, &third, &a.first.fingerprint_hex)];
+    assert_refused(&a.ks, 4, replayed, "v1 replayed at version 4");
+    assert_refused(
+        &a.ks,
+        4,
+        vec![current(4, &a.first)],
+        "v1 alone at version 4",
+    );
+    assert_refused(
+        &a.ks,
+        1,
+        vec![current(1, &third)],
+        "the current key moved to version 1",
+    );
+    assert_eq!(current_fingerprint(&a.ks), (third.fingerprint_hex, Some(3)));
+}
+
+#[test]
+fn an_unknown_key_without_an_endorsement_from_the_key_below_is_unverified() {
+    let a = account();
+    let second = generate(&a.amk, &[EMAIL]);
+    let third = generate(&a.amk, &[EMAIL]);
+    let elsewhere = generate(&a.amk, &[EMAIL]);
+    load(&a.ks, history(&a.amk, &[&a.first, &second]));
+
+    let variants = [
+        ("no endorsement", Vec::new()),
+        (
+            "endorsed only by v1",
+            vec![endorsement(&a.amk, &a.first, &third.fingerprint_hex)],
+        ),
+        (
+            "endorsement for another key",
+            vec![AccountKeyTransitionInput {
+                previous_key_fingerprint_hex: second.fingerprint_hex.clone(),
+                ..endorsement(&a.amk, &second, &elsewhere.fingerprint_hex)
+            }],
+        ),
+        (
+            "endorsement for another account",
+            vec![endorsement_for(
+                "another-account",
+                &a.amk,
+                &second,
+                &third.fingerprint_hex,
+            )],
+        ),
+    ];
+    for (why, transitions) in variants {
+        let mut keys = history(&a.amk, &[&a.first, &second, &third]);
+        keys[2].transitions = transitions;
+        let loaded = load(&a.ks, keys);
+        assert_eq!(loaded["ok"], true, "{why}: {loaded}");
+        assert_eq!(loaded["unverified"], serde_json::json!([3]), "{why}");
+        assert_eq!(loaded["currentChanged"], false, "{why}");
+        assert_eq!(loaded["keyVersion"], 2, "{why}");
+        assert_eq!(
+            current_fingerprint(&a.ks),
+            (second.fingerprint_hex.clone(), Some(2)),
+            "{why}"
+        );
+    }
+
+    let mail = encrypt_to(&a.ks, &third.public_key_armored, b"to an unverified key");
+    assert_eq!(decrypt(&a.ks, &mail, None)["code"], "no_matching_key");
+}
+
+#[test]
+fn a_device_offline_across_two_rotations_follows_the_chain() {
+    let a = account();
+    let second = generate(&a.amk, &[EMAIL]);
+    let third = generate(&a.amk, &[EMAIL]);
+    let fourth = generate(&a.amk, &[EMAIL]);
+    load(&a.ks, history(&a.amk, &[&a.first, &second]));
+
+    let mut events = a.ks.subscribe();
+    let mut keys = history(&a.amk, &[&a.first, &second, &third, &fourth]);
+    keys[3].transitions = vec![endorsement(&a.amk, &third, &fourth.fingerprint_hex)];
+    let loaded = load(&a.ks, keys);
+    assert_eq!(loaded["currentChanged"], true);
+    assert_eq!(loaded["keyVersion"], 4);
+    assert_eq!(loaded["unverified"], serde_json::json!([]));
+    assert_eq!(
+        loaded["loaded"],
+        serde_json::json!([
+            a.first.fingerprint_hex,
+            second.fingerprint_hex,
+            third.fingerprint_hex,
+            fourth.fingerprint_hex
+        ])
+    );
+    match events.try_recv().expect("keys event") {
+        Broadcast::AccountKeysChanged {
+            fingerprints,
+            key_version,
+            current_changed,
+            ..
+        } => {
+            assert_eq!(key_version, 4);
+            assert!(current_changed);
+            assert_eq!(
+                fingerprints,
+                vec![
+                    fourth.fingerprint_hex.clone(),
+                    third.fingerprint_hex.clone(),
+                    second.fingerprint_hex.clone(),
+                    a.first.fingerprint_hex.clone()
+                ]
+            );
+        }
+        other => panic!("unexpected {other:?}"),
+    }
+    assert!(events.try_recv().is_err());
+
+    let mail = encrypt_to(&a.ks, &third.public_key_armored, b"sent while offline");
+    assert_eq!(
+        decrypt(&a.ks, &mail, None)["plaintext"],
+        "sent while offline"
+    );
+    assert_eq!(prepare(&a.ks)["keyVersion"], 5);
+}
+
+#[test]
+fn a_fresh_sign_in_climbs_the_chain_from_the_key_it_was_given() {
+    let a = account();
+    let second = generate(&a.amk, &[EMAIL]);
+    let third = generate(&a.amk, &[EMAIL]);
+    let keys = || history(&a.amk, &[&a.first, &second, &third]);
+
+    let loaded = load(&a.ks, keys());
+    assert_eq!(loaded["currentChanged"], true);
+    assert_eq!(loaded["keyVersion"], 3);
+    assert_eq!(
+        loaded["currentFingerprintHex"],
+        third.fingerprint_hex.as_str()
+    );
+
+    let device = Keystore::new();
+    assert!(device.adopt_persisted(ACCOUNT, persisted_for(&a.amk, &second)));
+    assert_eq!(current_public(&device).1, None);
+    let loaded = load(&device, keys());
+    assert_eq!(loaded["keyVersion"], 3);
+    assert_eq!(
+        current_fingerprint(&device),
+        (third.fingerprint_hex.clone(), Some(3))
+    );
+    let listed = serde_json::to_value(device.list_account_keys(ACCOUNT)).unwrap();
+    assert_eq!(
+        listed["keys"][1]["fingerprintHex"],
+        second.fingerprint_hex.as_str()
+    );
+    assert_eq!(listed["keys"][1]["keyVersion"], 2);
+
+    let device = Keystore::new();
+    assert!(device.adopt_persisted(ACCOUNT, persisted_for(&a.amk, &third)));
+    let loaded = load(&device, keys());
+    assert_eq!(loaded["currentChanged"], false);
+    assert_eq!(loaded["keyVersion"], 3);
+}
+
+#[test]
+fn malformed_key_lists_are_refused_without_changing_anything() {
+    let a = account();
+    let second = generate(&a.amk, &[EMAIL]);
+    let third = generate(&a.amk, &[EMAIL]);
+    load(&a.ks, history(&a.amk, &[&a.first, &second]));
+    let full = || history(&a.amk, &[&a.first, &second, &third]);
+
+    let mut gap = full();
+    gap.remove(1);
+    assert_refused(&a.ks, 2, gap, "a gap at version 2");
+
+    let mut two_current = full();
+    two_current[1].is_current = true;
+    assert_refused(&a.ks, 3, two_current, "two current keys");
+
+    let mut none_current = full();
+    none_current[2].is_current = false;
+    assert_refused(&a.ks, 3, none_current, "no current key");
+
+    let mut repeated = full();
+    repeated[1].key_version = 3;
+    assert_refused(&a.ks, 3, repeated, "a repeated version");
+
+    assert_refused(&a.ks, 4, full(), "more versions than keys");
+    assert_refused(&a.ks, 2, full(), "fewer versions than keys");
+    assert_refused(&a.ks, 0, Vec::new(), "an empty list");
+
+    let mut stale_current = full();
+    stale_current[2].is_current = false;
+    stale_current[0].is_current = true;
+    assert_refused(&a.ks, 3, stale_current, "the current key is not the newest");
+
+    let mut duplicate = full();
+    duplicate[2].fingerprint_hex = second.fingerprint_hex.clone();
+    assert_refused(&a.ks, 3, duplicate, "a duplicate fingerprint");
+
+    let mut not_hex = full();
+    not_hex[2].fingerprint_hex = "zz".repeat(20);
+    assert_refused(&a.ks, 3, not_hex, "a malformed fingerprint");
+
+    let mut self_endorsed = full();
+    self_endorsed[2].transitions[0].previous_key_fingerprint_hex = third.fingerprint_hex.clone();
+    assert_refused(&a.ks, 3, self_endorsed, "a key endorsing itself");
+
+    let mut flooded = full();
+    let endorsement = endorsement(&a.amk, &second, &third.fingerprint_hex);
+    flooded[2].transitions = (0..17)
+        .map(|_| AccountKeyTransitionInput {
+            previous_key_fingerprint_hex: endorsement.previous_key_fingerprint_hex.clone(),
+            signature: endorsement.signature.clone(),
+        })
+        .collect();
+    assert_refused(&a.ks, 3, flooded, "more than sixteen endorsements");
+
+    let loaded = load(&a.ks, full());
+    assert_eq!(loaded["keyVersion"], 3);
+}
+
+#[test]
+fn every_accepted_key_list_is_announced_once() {
+    let a = account();
+    load(&a.ks, vec![current(1, &a.first)]);
+    let mut events = a.ks.subscribe();
+    let loaded = load(&a.ks, vec![current(1, &a.first)]);
+    assert_eq!(loaded["currentChanged"], false);
+    assert!(matches!(
+        events.try_recv().expect("keys event"),
+        Broadcast::AccountKeysChanged {
+            current_changed: false,
+            key_version: 1,
+            ..
+        }
+    ));
+    assert!(events.try_recv().is_err());
+}
