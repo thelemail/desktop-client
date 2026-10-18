@@ -225,7 +225,7 @@ pub struct SignatureCheck {
 
 impl UnlockedKey {
     pub fn decrypt(&self, ciphertext: &[u8]) -> Result<Vec<u8>, PgpError> {
-        Ok(self.decrypt_verified(ciphertext, &[])?.0)
+        decrypt_with(&[self], ciphertext)
     }
 
     pub fn decrypt_verified(
@@ -233,37 +233,56 @@ impl UnlockedKey {
         ciphertext: &[u8],
         verification_keys_armored: &[String],
     ) -> Result<(Vec<u8>, Option<SignatureCheck>), PgpError> {
-        let message = if ciphertext.starts_with(ARMOR_PREFIX) {
-            Message::from_armor(std::io::Cursor::new(ciphertext))
-                .map_err(|_| PgpError::InvalidCiphertext)?
-                .0
-        } else {
-            Message::from_bytes(ciphertext).map_err(|_| PgpError::InvalidCiphertext)?
-        };
-
-        let mut decrypted = message
-            .decrypt(&Password::empty(), &self.key)
-            .map_err(|_| PgpError::DecryptFailed)?;
-        let plaintext = decrypted
-            .as_data_vec()
-            .map_err(|_| PgpError::DecryptFailed)?;
-
-        if verification_keys_armored.is_empty() {
-            return Ok((plaintext, None));
-        }
-
-        let mut keys = Vec::with_capacity(verification_keys_armored.len());
-        for armored in verification_keys_armored {
-            if let Ok((key, _)) = SignedPublicKey::from_string(armored) {
-                keys.push(key);
-            }
-        }
-
-        Ok((plaintext, Some(verdict_for(&decrypted, &keys))))
+        decrypt_verified_with(&[self], ciphertext, verification_keys_armored)
     }
 }
 
-fn hex_encode(bytes: &[u8]) -> String {
+pub fn decrypt_with(keys: &[&UnlockedKey], ciphertext: &[u8]) -> Result<Vec<u8>, PgpError> {
+    Ok(decrypt_verified_with(keys, ciphertext, &[])?.0)
+}
+
+pub fn decrypt_verified_with(
+    keys: &[&UnlockedKey],
+    ciphertext: &[u8],
+    verification_keys_armored: &[String],
+) -> Result<(Vec<u8>, Option<SignatureCheck>), PgpError> {
+    if keys.is_empty() {
+        return Err(PgpError::NoMatchingKey);
+    }
+    let message = if ciphertext.starts_with(ARMOR_PREFIX) {
+        Message::from_armor(std::io::Cursor::new(ciphertext))
+            .map_err(|_| PgpError::InvalidCiphertext)?
+            .0
+    } else {
+        Message::from_bytes(ciphertext).map_err(|_| PgpError::InvalidCiphertext)?
+    };
+
+    let password = Password::empty();
+    let mut decrypted = message
+        .decrypt_with_keys(vec![&password], keys.iter().map(|k| &k.key).collect())
+        .map_err(|err| match err {
+            pgp::errors::Error::MissingKey => PgpError::NoMatchingKey,
+            _ => PgpError::DecryptFailed,
+        })?;
+    let plaintext = decrypted
+        .as_data_vec()
+        .map_err(|_| PgpError::DecryptFailed)?;
+
+    if verification_keys_armored.is_empty() {
+        return Ok((plaintext, None));
+    }
+
+    let mut verifiers = Vec::with_capacity(verification_keys_armored.len());
+    for armored in verification_keys_armored {
+        if let Ok((key, _)) = SignedPublicKey::from_string(armored) {
+            verifiers.push(key);
+        }
+    }
+
+    Ok((plaintext, Some(verdict_for(&decrypted, &verifiers))))
+}
+
+pub(crate) fn hex_encode(bytes: &[u8]) -> String {
     let mut out = String::with_capacity(bytes.len() * 2);
     for b in bytes {
         out.push_str(&format!("{b:02x}"));
@@ -319,13 +338,13 @@ pub fn inspect_wire_shape(ciphertext: &[u8]) -> Result<WireShape, PgpError> {
     })
 }
 
-struct PacketHeader {
-    tag: u8,
-    body_start: usize,
-    body_len: Option<usize>,
+pub(crate) struct PacketHeader {
+    pub(crate) tag: u8,
+    pub(crate) body_start: usize,
+    pub(crate) body_len: Option<usize>,
 }
 
-fn read_packet_header(buf: &[u8], at: usize) -> Result<PacketHeader, PgpError> {
+pub(crate) fn read_packet_header(buf: &[u8], at: usize) -> Result<PacketHeader, PgpError> {
     let first = *buf.get(at).ok_or(PgpError::InvalidCiphertext)?;
     if first & 0x80 == 0 {
         return Err(PgpError::InvalidCiphertext);
@@ -420,13 +439,47 @@ fn key_creation_time(clock_offset_ms: i64) -> pgp::types::Timestamp {
     pgp::types::Timestamp::from_secs(u32::try_from(stamped).unwrap_or(0))
 }
 
+fn user_id(display_name: &str, email: &str) -> String {
+    if display_name.is_empty() {
+        format!("<{email}>")
+    } else {
+        format!("{display_name} <{email}>")
+    }
+}
+
 pub fn generate_account_key(
     display_name: &str,
     email: &str,
     passphrase: &str,
     clock_offset_ms: i64,
 ) -> Result<GeneratedKey, PgpError> {
-    generate_key(display_name, email, Some(passphrase), clock_offset_ms)
+    generate_key(
+        &[user_id(display_name, email)],
+        Some(passphrase),
+        clock_offset_ms,
+    )
+}
+
+pub fn generate_account_key_for(
+    emails: &[String],
+    passphrase: &str,
+    clock_offset_ms: i64,
+) -> Result<GeneratedKey, PgpError> {
+    let mut user_ids: Vec<String> = Vec::with_capacity(emails.len());
+    for email in emails {
+        let email = email.trim().to_lowercase();
+        if email.is_empty() {
+            continue;
+        }
+        let uid = user_id("", &email);
+        if !user_ids.contains(&uid) {
+            user_ids.push(uid);
+        }
+    }
+    if user_ids.is_empty() {
+        return Err(PgpError::InvalidKey);
+    }
+    generate_key(&user_ids, Some(passphrase), clock_offset_ms)
 }
 
 pub fn generate_alias_key(
@@ -434,7 +487,7 @@ pub fn generate_alias_key(
     email: &str,
     clock_offset_ms: i64,
 ) -> Result<GeneratedKey, PgpError> {
-    generate_key(display_name, email, None, clock_offset_ms)
+    generate_key(&[user_id(display_name, email)], None, clock_offset_ms)
 }
 
 fn key_protection() -> pgp::types::S2kParams {
@@ -455,8 +508,7 @@ fn key_protection() -> pgp::types::S2kParams {
 }
 
 fn generate_key(
-    display_name: &str,
-    email: &str,
+    user_ids: &[String],
     passphrase: Option<&str>,
     clock_offset_ms: i64,
 ) -> Result<GeneratedKey, PgpError> {
@@ -465,11 +517,8 @@ fn generate_key(
     use pgp::types::KeyVersion;
     use rand::rngs::OsRng;
 
-    let user_id = if display_name.is_empty() {
-        format!("<{email}>")
-    } else {
-        format!("{display_name} <{email}>")
-    };
+    let (primary_user_id, other_user_ids) =
+        user_ids.split_first().ok_or(PgpError::InvalidKey)?;
     let created_at = key_creation_time(clock_offset_ms);
 
     let subkey = SubkeyParamsBuilder::default()
@@ -482,7 +531,11 @@ fn generate_key(
         .build()
         .map_err(|_| PgpError::InvalidKey)?;
 
-    let params = SecretKeyParamsBuilder::default()
+    let mut builder = SecretKeyParamsBuilder::default();
+    for uid in other_user_ids {
+        builder.user_id(uid.clone());
+    }
+    let params = builder
         .version(KeyVersion::V6)
         .key_type(KeyType::Ed25519)
         .can_sign(true)
@@ -501,7 +554,7 @@ fn generate_key(
             ]
             .into(),
         )
-        .primary_user_id(user_id)
+        .primary_user_id(primary_user_id.clone())
         .created_at(created_at)
         .passphrase(passphrase.map(str::to_owned))
         .s2k(passphrase.map(|_| key_protection()))
