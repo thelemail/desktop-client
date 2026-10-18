@@ -203,7 +203,12 @@ pub fn run() {
                         Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
                         Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
                     };
-                    if let Broadcast::AccountKeysChanged { account_id, .. } = &event {
+                    if let Broadcast::AccountKeysChanged {
+                        account_id,
+                        changed: true,
+                        ..
+                    } = &event
+                    {
                         let app = handle.clone();
                         let id = account_id.clone();
                         tauri::async_runtime::spawn_blocking(move || {
