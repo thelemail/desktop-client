@@ -89,6 +89,7 @@ struct PendingRotation {
     key: UnlockedKey,
     public_key_armored: String,
     fingerprint_hex: String,
+    key_version: i64,
     expires_at: Instant,
 }
 
@@ -166,6 +167,16 @@ impl Vault {
 
     fn sort_history(&mut self) {
         self.history.sort_by_key(|k| std::cmp::Reverse(k.version));
+    }
+
+    fn keys_changed(&self, current_changed: bool) -> Broadcast {
+        Broadcast::AccountKeysChanged {
+            account_id: self.account_id.clone(),
+            fingerprints: self.account_fingerprints(),
+            current_fingerprint_hex: self.key.fingerprint_hex(),
+            key_version: self.key_version,
+            current_changed,
+        }
     }
 }
 
@@ -1447,7 +1458,7 @@ impl Keystore {
         let mut opened = Vec::new();
         let mut failed = Vec::new();
         for input in &args.keys {
-            let want = input.key_fingerprint.to_lowercase();
+            let want = input.fingerprint_hex.to_lowercase();
             if input.key_version < 1 {
                 failed.push(input.key_version);
                 continue;
@@ -1455,7 +1466,7 @@ impl Keystore {
             if known.contains(&want) {
                 continue;
             }
-            match UnlockedKey::open(&input.encrypted_private_key, passphrase.expose()) {
+            match UnlockedKey::open(&input.encrypted_private_key_armored, passphrase.expose()) {
                 Ok(key) if key.fingerprint_hex() == want => opened.push(AccountKey {
                     key,
                     version: input.key_version,
@@ -1478,7 +1489,7 @@ impl Keystore {
             && let Some(input) = args
                 .keys
                 .iter()
-                .find(|k| k.key_version > 0 && k.key_fingerprint.to_lowercase() == current_fp)
+                .find(|k| k.key_version > 0 && k.fingerprint_hex.to_lowercase() == current_fp)
         {
             vault.key_version = input.key_version;
         }
@@ -1530,19 +1541,21 @@ impl Keystore {
         }
 
         let changed = !added.is_empty() || current_changed || before_version != vault.key_version;
+        let loaded = args
+            .keys
+            .iter()
+            .map(|k| k.fingerprint_hex.to_lowercase())
+            .filter(|fp| vault.knows_account_key(fp))
+            .collect();
         let response = LoadAccountKeysResponse::Ok {
             ok: true,
-            added,
+            loaded,
             failed,
-            current_changed,
             current_fingerprint_hex: vault.key.fingerprint_hex(),
             key_version: vault.key_version,
-        };
-        let event = changed.then(|| Broadcast::AccountKeysChanged {
-            account_id: vault.account_id.clone(),
-            fingerprints: vault.account_fingerprints(),
             current_changed,
-        });
+        };
+        let event = changed.then(|| vault.keys_changed(current_changed));
         drop(vaults);
 
         if let Some(event) = event {
@@ -1563,6 +1576,15 @@ impl Keystore {
         if vault.auth_scheme != AuthScheme::OpaqueV1 {
             return PrepareKeyRotationResponse::err("not_opaque");
         }
+        if vault.key_version < 1 {
+            return PrepareKeyRotationResponse::err("key_history_incomplete");
+        }
+        if args.expected_key_version != vault.key_version {
+            return PrepareKeyRotationResponse::err("stale_key_version");
+        }
+        if args.emails.iter().all(|e| e.trim().is_empty()) {
+            return PrepareKeyRotationResponse::err("no_emails");
+        }
         if !history_is_complete(vault) {
             return PrepareKeyRotationResponse::err("key_history_incomplete");
         }
@@ -1571,7 +1593,7 @@ impl Keystore {
         let Ok(generated) =
             generate_account_key_for(&args.emails, passphrase.expose(), clock_offset_ms)
         else {
-            return PrepareKeyRotationResponse::err("invalid_emails");
+            return PrepareKeyRotationResponse::err("unknown");
         };
         let Ok(key) = UnlockedKey::open(
             &generated.encrypted_private_key_armored,
@@ -1590,16 +1612,18 @@ impl Keystore {
             else {
                 return PrepareKeyRotationResponse::err("unknown");
             };
-            transitions.push(KeyTransitionEndorsement {
-                previous_key_fingerprint: previous.fingerprint_hex(),
-                signature: b64_std().encode(signature),
+            transitions.push(PreparedKeyTransition {
+                previous_key_fingerprint_hex: previous.fingerprint_hex(),
+                signature,
             });
         }
 
+        let key_version = vault.key_version + 1;
         vault.pending_rotation = Some(PendingRotation {
             key,
             public_key_armored: generated.public_key_armored.clone(),
             fingerprint_hex: generated.fingerprint_hex.clone(),
+            key_version,
             expires_at: Instant::now() + KEY_ROTATION_TTL,
         });
 
@@ -1607,35 +1631,30 @@ impl Keystore {
             ok: true,
             public_key_armored: generated.public_key_armored,
             encrypted_private_key: generated.encrypted_private_key_armored,
-            key_fingerprint_hex: generated.fingerprint_hex,
-            expected_key_version: vault.key_version,
+            fingerprint_hex: generated.fingerprint_hex,
+            key_version,
             transitions,
         }
     }
 
-    pub fn commit_key_rotation(&self, args: CommitKeyRotationArgs) -> PlainOkResponse {
+    pub fn commit_key_rotation(&self, args: CommitKeyRotationArgs) -> CommitKeyRotationResponse {
         let mut vaults = self.vaults.lock().expect("keystore vaults");
         let Some(vault) = vaults.get_mut(&args.account_id) else {
-            return PlainOkResponse::err("locked");
+            return CommitKeyRotationResponse::err("locked");
         };
-        let fresh = vault
-            .pending_rotation
-            .as_ref()
-            .is_some_and(|p| p.expires_at > Instant::now());
-        if !fresh {
-            vault.pending_rotation = None;
-            return PlainOkResponse::err("no_pending_rotation");
-        }
-        let matches = vault
-            .pending_rotation
-            .as_ref()
-            .is_some_and(|p| p.fingerprint_hex == args.key_fingerprint_hex.to_lowercase());
-        if !matches || vault.key_version < 1 || args.key_version <= vault.key_version {
-            return PlainOkResponse::err("invalid");
-        }
         let Some(pending) = vault.pending_rotation.take() else {
-            return PlainOkResponse::err("no_pending_rotation");
+            return CommitKeyRotationResponse::err("no_pending_rotation");
         };
+        if pending.expires_at <= Instant::now()
+            || pending.key_version != vault.key_version + 1
+            || vault.key_version < 1
+        {
+            return CommitKeyRotationResponse::err("no_pending_rotation");
+        }
+        if pending.fingerprint_hex != args.fingerprint_hex.to_lowercase() {
+            vault.pending_rotation = Some(pending);
+            return CommitKeyRotationResponse::err("no_pending_rotation");
+        }
 
         let retired = std::mem::replace(&mut vault.key, pending.key);
         vault.history.push(AccountKey {
@@ -1643,21 +1662,50 @@ impl Keystore {
             version: vault.key_version,
         });
         vault.sort_history();
-        vault.key_version = args.key_version;
+        vault.key_version = pending.key_version;
         vault.public_key_armored = pending.public_key_armored;
 
-        let account_id = vault.account_id.clone();
-        let email = vault.email.clone();
-        let fingerprints = vault.account_fingerprints();
+        let key_version = vault.key_version;
+        let changed = vault.keys_changed(true);
+        let vault_changed = Broadcast::VaultChanged {
+            account_id: vault.account_id.clone(),
+            email: vault.email.clone(),
+        };
         drop(vaults);
 
-        self.emit(Broadcast::AccountKeysChanged {
-            account_id: account_id.clone(),
-            fingerprints,
-            current_changed: true,
-        });
-        self.emit(Broadcast::VaultChanged { account_id, email });
-        PlainOkResponse::ok()
+        self.emit(changed);
+        self.emit(vault_changed);
+        CommitKeyRotationResponse::Ok {
+            ok: true,
+            key_version,
+        }
+    }
+
+    pub fn list_account_keys(&self, account_id: &str) -> ListAccountKeysResponse {
+        let vaults = self.vaults.lock().expect("keystore vaults");
+        let Some(vault) = vaults.get(account_id) else {
+            return ListAccountKeysResponse::Err {
+                ok: false,
+                code: "locked",
+            };
+        };
+        let current = AccountKeySummary {
+            fingerprint_hex: vault.key.fingerprint_hex(),
+            key_version: vault.key_version,
+            is_current: true,
+        };
+        let keys = std::iter::once(current)
+            .chain(vault.history.iter().map(|k| AccountKeySummary {
+                fingerprint_hex: k.key.fingerprint_hex(),
+                key_version: k.version,
+                is_current: false,
+            }))
+            .collect();
+        ListAccountKeysResponse::Ok {
+            ok: true,
+            keys,
+            key_version: vault.key_version,
+        }
     }
 
     pub fn abandon_key_rotation(&self, account_id: &str) {

@@ -204,6 +204,7 @@ const KEYSTORE_COMMANDS: Record<string, string> = {
 	signDetached: 'keystore_sign_detached',
 	getPublicKey: 'keystore_get_public_key',
 	loadAccountKeys: 'keystore_load_account_keys',
+	listAccountKeys: 'keystore_list_account_keys',
 	prepareKeyRotation: 'keystore_prepare_key_rotation',
 	commitKeyRotation: 'keystore_commit_key_rotation',
 	abandonKeyRotation: 'keystore_abandon_key_rotation',
@@ -256,6 +257,8 @@ function bindKeystoreEvents() {
 
 const BYTE_FIELDS = ['ciphertext', 'plaintextBinary', 'fingerprint', 'exportKey', 'sessionKey', 'signature'];
 
+const NESTED_BYTE_LISTS = ['transitions'];
+
 function normalizeBytes<T>(value: T): T {
 	if (!value || typeof value !== 'object' || Array.isArray(value)) return value;
 	const record = value as Record<string, unknown>;
@@ -265,6 +268,13 @@ function normalizeBytes<T>(value: T): T {
 		if (Array.isArray(raw)) {
 			patched ??= { ...record };
 			patched[field] = new Uint8Array(raw as number[]);
+		}
+	}
+	for (const field of NESTED_BYTE_LISTS) {
+		const raw = record[field];
+		if (Array.isArray(raw)) {
+			patched ??= { ...record };
+			patched[field] = raw.map((item) => normalizeBytes(item));
 		}
 	}
 	return (patched ?? value) as T;

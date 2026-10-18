@@ -128,6 +128,7 @@ pub fn run() {
             keystore::keystore_sign_detached,
             keystore::keystore_get_public_key,
             keystore::keystore_load_account_keys,
+            keystore::keystore_list_account_keys,
             keystore::keystore_prepare_key_rotation,
             keystore::keystore_commit_key_rotation,
             keystore::keystore_abandon_key_rotation,

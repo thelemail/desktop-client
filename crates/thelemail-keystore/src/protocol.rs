@@ -204,6 +204,10 @@ pub enum Broadcast {
         #[serde(rename = "accountId")]
         account_id: String,
         fingerprints: Vec<String>,
+        #[serde(rename = "currentFingerprintHex")]
+        current_fingerprint_hex: String,
+        #[serde(rename = "keyVersion")]
+        key_version: i64,
         #[serde(rename = "currentChanged")]
         current_changed: bool,
     },
@@ -660,8 +664,8 @@ pub struct PersistedVault {
 #[serde(rename_all = "camelCase")]
 pub struct AccountKeyInput {
     pub key_version: i64,
-    pub key_fingerprint: String,
-    pub encrypted_private_key: String,
+    pub fingerprint_hex: String,
+    pub encrypted_private_key_armored: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -676,12 +680,35 @@ pub struct LoadAccountKeysArgs {
 pub enum LoadAccountKeysResponse {
     Ok {
         ok: bool,
-        added: Vec<String>,
+        loaded: Vec<String>,
         failed: Vec<i64>,
-        #[serde(rename = "currentChanged")]
-        current_changed: bool,
         #[serde(rename = "currentFingerprintHex")]
         current_fingerprint_hex: String,
+        #[serde(rename = "keyVersion")]
+        key_version: i64,
+        #[serde(rename = "currentChanged")]
+        current_changed: bool,
+    },
+    Err {
+        ok: bool,
+        code: &'static str,
+    },
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AccountKeySummary {
+    pub fingerprint_hex: String,
+    pub key_version: i64,
+    pub is_current: bool,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(untagged)]
+pub enum ListAccountKeysResponse {
+    Ok {
+        ok: bool,
+        keys: Vec<AccountKeySummary>,
         #[serde(rename = "keyVersion")]
         key_version: i64,
     },
@@ -696,13 +723,14 @@ pub enum LoadAccountKeysResponse {
 pub struct PrepareKeyRotationArgs {
     pub account_id: String,
     pub emails: Vec<String>,
+    pub expected_key_version: i64,
 }
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct KeyTransitionEndorsement {
-    pub previous_key_fingerprint: String,
-    pub signature: String,
+pub struct PreparedKeyTransition {
+    pub previous_key_fingerprint_hex: String,
+    pub signature: Vec<u8>,
 }
 
 #[derive(Debug, Serialize)]
@@ -714,11 +742,11 @@ pub enum PrepareKeyRotationResponse {
         public_key_armored: String,
         #[serde(rename = "encryptedPrivateKey")]
         encrypted_private_key: String,
-        #[serde(rename = "keyFingerprintHex")]
-        key_fingerprint_hex: String,
-        #[serde(rename = "expectedKeyVersion")]
-        expected_key_version: i64,
-        transitions: Vec<KeyTransitionEndorsement>,
+        #[serde(rename = "fingerprintHex")]
+        fingerprint_hex: String,
+        #[serde(rename = "keyVersion")]
+        key_version: i64,
+        transitions: Vec<PreparedKeyTransition>,
     },
     Err {
         ok: bool,
@@ -736,6 +764,25 @@ impl PrepareKeyRotationResponse {
 #[serde(rename_all = "camelCase")]
 pub struct CommitKeyRotationArgs {
     pub account_id: String,
-    pub key_fingerprint_hex: String,
-    pub key_version: i64,
+    pub fingerprint_hex: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(untagged)]
+pub enum CommitKeyRotationResponse {
+    Ok {
+        ok: bool,
+        #[serde(rename = "keyVersion")]
+        key_version: i64,
+    },
+    Err {
+        ok: bool,
+        code: &'static str,
+    },
+}
+
+impl CommitKeyRotationResponse {
+    pub fn err(code: &'static str) -> Self {
+        Self::Err { ok: false, code }
+    }
 }

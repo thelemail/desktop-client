@@ -44,8 +44,8 @@ fn account() -> Account {
 fn input(version: i64, key: &GeneratedKey) -> AccountKeyInput {
     AccountKeyInput {
         key_version: version,
-        key_fingerprint: key.fingerprint_hex.clone(),
-        encrypted_private_key: key.encrypted_private_key_armored.clone(),
+        fingerprint_hex: key.fingerprint_hex.clone(),
+        encrypted_private_key_armored: key.encrypted_private_key_armored.clone(),
     }
 }
 
@@ -57,32 +57,55 @@ fn load(ks: &Keystore, keys: Vec<AccountKeyInput>) -> Value {
     .expect("json")
 }
 
-fn prepare(ks: &Keystore) -> Value {
+fn prepare_with(ks: &Keystore, expected_key_version: i64, emails: &[&str]) -> Value {
     serde_json::to_value(ks.prepare_key_rotation(
         PrepareKeyRotationArgs {
             account_id: ACCOUNT.to_owned(),
-            emails: vec![EMAIL.to_owned(), "nora.b@thelemail.test".to_owned()],
+            emails: emails.iter().map(|e| (*e).to_owned()).collect(),
+            expected_key_version,
         },
         0,
     ))
     .expect("json")
 }
 
-fn commit(ks: &Keystore, fingerprint: &str, version: i64) -> Value {
+fn prepare(ks: &Keystore) -> Value {
+    let (_, version) = current_public(ks);
+    prepare_with(ks, version.unwrap_or(1), &[EMAIL, "nora.b@thelemail.test"])
+}
+
+fn commit(ks: &Keystore, fingerprint: &str) -> Value {
     serde_json::to_value(ks.commit_key_rotation(CommitKeyRotationArgs {
         account_id: ACCOUNT.to_owned(),
-        key_fingerprint_hex: fingerprint.to_owned(),
-        key_version: version,
+        fingerprint_hex: fingerprint.to_owned(),
     }))
     .expect("json")
 }
 
-fn rotate(ks: &Keystore, version: i64) -> Value {
+fn rotate(ks: &Keystore) -> Value {
     let prepared = prepare(ks);
     assert_eq!(prepared["ok"], true, "{prepared}");
-    let fp = prepared["keyFingerprintHex"].as_str().unwrap().to_owned();
-    assert_eq!(commit(ks, &fp, version)["ok"], true);
+    let fp = prepared["fingerprintHex"].as_str().unwrap().to_owned();
+    assert_eq!(commit(ks, &fp)["ok"], true);
     prepared
+}
+
+fn signature_bytes(value: &Value) -> Vec<u8> {
+    value
+        .as_array()
+        .expect("signature bytes")
+        .iter()
+        .map(|b| u8::try_from(b.as_u64().expect("byte")).expect("byte"))
+        .collect()
+}
+
+fn endorsers(prepared: &Value) -> Vec<String> {
+    prepared["transitions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|t| t["previousKeyFingerprintHex"].as_str().unwrap().to_owned())
+        .collect()
 }
 
 fn encrypt_to(ks: &Keystore, public_key_armored: &str, plaintext: &[u8]) -> Vec<u8> {
@@ -138,17 +161,18 @@ fn a_rotation_endorses_with_the_retired_key_and_keeps_old_mail_readable() {
     let mut events = a.ks.subscribe();
     let prepared = prepare(&a.ks);
     assert_eq!(prepared["ok"], true, "{prepared}");
-    assert_eq!(prepared["expectedKeyVersion"], 1);
-    let new_fp = prepared["keyFingerprintHex"].as_str().unwrap().to_owned();
+    assert_eq!(prepared["keyVersion"], 2);
+    let new_fp = prepared["fingerprintHex"].as_str().unwrap().to_owned();
     assert_eq!(new_fp.len(), 64);
     assert_ne!(new_fp, first_fp);
 
     let transitions = prepared["transitions"].as_array().unwrap();
     assert_eq!(transitions.len(), 1);
-    assert_eq!(transitions[0]["previousKeyFingerprint"], first_fp.as_str());
-    let signature = base64::engine::general_purpose::STANDARD
-        .decode(transitions[0]["signature"].as_str().unwrap())
-        .unwrap();
+    assert_eq!(
+        transitions[0]["previousKeyFingerprintHex"],
+        first_fp.as_str()
+    );
+    let signature = signature_bytes(&transitions[0]["signature"]);
     let message = keytransition::payload(ACCOUNT, &new_fp, &first_fp).unwrap();
     keytransition::verify(message.as_bytes(), &signature, &a.first.public_key_armored)
         .expect("the endorsement verifies against the retired key");
@@ -163,15 +187,21 @@ fn a_rotation_endorses_with_the_retired_key_and_keeps_old_mail_readable() {
     assert_eq!(reopened.fingerprint_hex(), new_fp);
     assert!(new_public.contains("BEGIN PGP PUBLIC KEY BLOCK"));
 
-    assert_eq!(commit(&a.ks, &new_fp, 2)["ok"], true);
+    let committed = commit(&a.ks, &new_fp);
+    assert_eq!(committed["ok"], true);
+    assert_eq!(committed["keyVersion"], 2);
     match events.try_recv().expect("keys event") {
         Broadcast::AccountKeysChanged {
             account_id,
             fingerprints,
+            current_fingerprint_hex,
+            key_version,
             current_changed,
         } => {
             assert_eq!(account_id, ACCOUNT);
             assert!(current_changed);
+            assert_eq!(current_fingerprint_hex, new_fp);
+            assert_eq!(key_version, 2);
             assert_eq!(fingerprints, vec![new_fp.clone(), first_fp.clone()]);
         }
         other => panic!("unexpected {other:?}"),
@@ -206,14 +236,8 @@ fn a_rotation_endorses_with_the_retired_key_and_keeps_old_mail_readable() {
     );
 
     let second = prepare(&a.ks);
-    let endorsers: Vec<&str> = second["transitions"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .map(|t| t["previousKeyFingerprint"].as_str().unwrap())
-        .collect();
-    assert_eq!(endorsers, vec![new_fp.as_str(), first_fp.as_str()]);
-    assert_eq!(second["expectedKeyVersion"], 2);
+    assert_eq!(endorsers(&second), vec![new_fp.clone(), first_fp.clone()]);
+    assert_eq!(second["keyVersion"], 3);
 }
 
 #[test]
@@ -245,7 +269,10 @@ fn loading_keys_adopts_a_newer_key_and_never_moves_back() {
         newer.fingerprint_hex.as_str()
     );
     assert_eq!(loaded["keyVersion"], 2);
-    assert_eq!(loaded["added"], serde_json::json!([newer.fingerprint_hex]));
+    assert_eq!(
+        loaded["loaded"],
+        serde_json::json!([a.first.fingerprint_hex, newer.fingerprint_hex])
+    );
 
     let again = load(&a.ks, vec![input(1, &a.first)]);
     assert_eq!(again["currentChanged"], false);
@@ -257,7 +284,7 @@ fn loading_keys_adopts_a_newer_key_and_never_moves_back() {
 
     let foreign = generate(&Amk::generate(), &[EMAIL]);
     let mut mislabelled = input(4, &newer);
-    mislabelled.key_fingerprint = a.first.fingerprint_hex.clone();
+    mislabelled.fingerprint_hex = a.first.fingerprint_hex.clone();
     let rejected = load(&a.ks, vec![input(3, &foreign), mislabelled]);
     assert_eq!(rejected["failed"], serde_json::json!([3]));
     assert_eq!(
@@ -277,7 +304,7 @@ fn a_key_list_without_the_current_key_never_replaces_it() {
         loaded["currentFingerprintHex"],
         a.first.fingerprint_hex.as_str()
     );
-    assert_eq!(loaded["added"], serde_json::json!([other.fingerprint_hex]));
+    assert_eq!(loaded["loaded"], serde_json::json!([other.fingerprint_hex]));
 
     let mail = encrypt_to(&a.ks, &other.public_key_armored, b"history only");
     assert_eq!(decrypt(&a.ks, &mail, None)["plaintext"], "history only");
@@ -312,7 +339,7 @@ fn an_alias_grant_wrapped_to_the_retired_key_still_unwraps() {
         a.first.fingerprint_hex.as_str()
     );
 
-    rotate(&a.ks, 2);
+    rotate(&a.ks);
 
     for hint in [Some(a.first.fingerprint_hex.clone()), None] {
         a.ks.unload_alias_keys(ACCOUNT);
@@ -368,7 +395,7 @@ fn a_persisted_vault_carries_the_key_history() {
     let a = account();
     load(&a.ks, vec![input(1, &a.first)]);
     let old_mail = encrypt_to(&a.ks, &a.first.public_key_armored, b"before the rotation");
-    rotate(&a.ks, 2);
+    rotate(&a.ks);
 
     let persisted = a.ks.persistable(ACCOUNT).expect("persistable");
     let encoded = serde_json::to_vec(&persisted).unwrap();
@@ -408,26 +435,232 @@ fn mail_for_a_key_this_vault_never_held_reports_no_matching_key() {
 }
 
 #[test]
-fn a_commit_needs_the_prepared_key_and_a_higher_version() {
+fn a_commit_needs_the_prepared_key_at_the_next_version() {
     let a = account();
     load(&a.ks, vec![input(1, &a.first)]);
     assert_eq!(
-        commit(&a.ks, &a.first.fingerprint_hex, 2)["code"],
+        commit(&a.ks, &a.first.fingerprint_hex)["code"],
         "no_pending_rotation"
     );
 
     let prepared = prepare(&a.ks);
-    let fp = prepared["keyFingerprintHex"].as_str().unwrap().to_owned();
+    let fp = prepared["fingerprintHex"].as_str().unwrap().to_owned();
     assert_eq!(
-        commit(&a.ks, &a.first.fingerprint_hex, 2)["code"],
-        "invalid"
+        commit(&a.ks, &a.first.fingerprint_hex)["code"],
+        "no_pending_rotation"
     );
-    assert_eq!(commit(&a.ks, &fp, 1)["code"], "invalid");
 
     a.ks.abandon_key_rotation(ACCOUNT);
-    assert_eq!(commit(&a.ks, &fp, 2)["code"], "no_pending_rotation");
+    assert_eq!(commit(&a.ks, &fp)["code"], "no_pending_rotation");
     let (_, version) = current_public(&a.ks);
     assert_eq!(version, Some(1));
+}
+
+#[test]
+fn a_rotation_overtaken_by_another_device_is_not_committed() {
+    let a = account();
+    load(&a.ks, vec![input(1, &a.first)]);
+    let prepared = prepare(&a.ks);
+    let fp = prepared["fingerprintHex"].as_str().unwrap().to_owned();
+
+    let elsewhere = generate(&a.amk, &[EMAIL]);
+    let loaded = load(&a.ks, vec![input(1, &a.first), input(2, &elsewhere)]);
+    assert_eq!(loaded["keyVersion"], 2);
+
+    assert_eq!(commit(&a.ks, &fp)["code"], "no_pending_rotation");
+    let (public, version) = current_public(&a.ks);
+    assert_eq!(version, Some(2));
+    assert_eq!(
+        thelemail_crypto::openpgp::public_key_fingerprint_hex(&public).unwrap(),
+        elsewhere.fingerprint_hex
+    );
+}
+
+#[test]
+fn a_rotation_is_refused_for_a_stale_version_or_no_addresses() {
+    let a = account();
+    load(&a.ks, vec![input(1, &a.first)]);
+    assert_eq!(
+        prepare_with(&a.ks, 2, &[EMAIL])["code"],
+        "stale_key_version"
+    );
+    assert_eq!(
+        prepare_with(&a.ks, 0, &[EMAIL])["code"],
+        "stale_key_version"
+    );
+    assert_eq!(prepare_with(&a.ks, 1, &[])["code"], "no_emails");
+    assert_eq!(prepare_with(&a.ks, 1, &["  "])["code"], "no_emails");
+    assert_eq!(prepare_with(&a.ks, 1, &[EMAIL])["ok"], true);
+}
+
+#[test]
+fn only_the_sixteen_newest_keys_endorse_newest_first() {
+    let a = account();
+    let older: Vec<GeneratedKey> = std::thread::scope(|scope| {
+        let workers: Vec<_> = (0..17)
+            .map(|_| scope.spawn(|| generate(&a.amk, &[EMAIL])))
+            .collect();
+        workers.into_iter().map(|w| w.join().unwrap()).collect()
+    });
+    let mut keys = vec![input(18, &a.first)];
+    keys.extend(
+        older
+            .iter()
+            .enumerate()
+            .map(|(i, k)| input(i as i64 + 1, k)),
+    );
+    let loaded = load(&a.ks, keys);
+    assert_eq!(loaded["keyVersion"], 18);
+    assert_eq!(loaded["failed"], serde_json::json!([]));
+
+    let prepared = prepare(&a.ks);
+    assert_eq!(prepared["ok"], true, "{prepared}");
+    assert_eq!(prepared["keyVersion"], 19);
+    let mut expected = vec![a.first.fingerprint_hex.clone()];
+    expected.extend(
+        older
+            .iter()
+            .rev()
+            .take(15)
+            .map(|k| k.fingerprint_hex.clone()),
+    );
+    assert_eq!(endorsers(&prepared), expected);
+
+    let new_fp = prepared["fingerprintHex"].as_str().unwrap().to_owned();
+    let signers = std::iter::once(&a.first).chain(older.iter().rev());
+    for (transition, key) in prepared["transitions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .zip(signers)
+    {
+        let message = keytransition::payload(ACCOUNT, &new_fp, &key.fingerprint_hex).unwrap();
+        keytransition::verify(
+            message.as_bytes(),
+            &signature_bytes(&transition["signature"]),
+            &key.public_key_armored,
+        )
+        .expect("each endorsement verifies against its own key");
+    }
+}
+
+#[test]
+fn the_web_keystore_payloads_deserialize() {
+    let load: LoadAccountKeysArgs = serde_json::from_value(serde_json::json!({
+        "accountId": ACCOUNT,
+        "keys": [{
+            "keyVersion": 2,
+            "fingerprintHex": "ab",
+            "encryptedPrivateKeyArmored": "armored",
+            "isCurrent": true
+        }]
+    }))
+    .expect("loadAccountKeys args");
+    assert_eq!(load.keys[0].key_version, 2);
+    assert_eq!(load.keys[0].fingerprint_hex, "ab");
+    assert_eq!(load.keys[0].encrypted_private_key_armored, "armored");
+
+    let prepare: PrepareKeyRotationArgs = serde_json::from_value(serde_json::json!({
+        "accountId": ACCOUNT,
+        "emails": [EMAIL],
+        "expectedKeyVersion": 3,
+        "serverClockOffsetMs": 120
+    }))
+    .expect("prepareKeyRotation args");
+    assert_eq!(prepare.expected_key_version, 3);
+
+    let commit: CommitKeyRotationArgs = serde_json::from_value(serde_json::json!({
+        "accountId": ACCOUNT,
+        "fingerprintHex": "AB"
+    }))
+    .expect("commitKeyRotation args");
+    assert_eq!(commit.fingerprint_hex, "AB");
+
+    let list: AccountScopedArgs =
+        serde_json::from_value(serde_json::json!({ "accountId": ACCOUNT }))
+            .expect("listAccountKeys args");
+    assert_eq!(list.account_id, ACCOUNT);
+
+    let grant: AliasKeyGrantInput = serde_json::from_value(serde_json::json!({
+        "aliasId": "alias-1",
+        "keyVersion": 1,
+        "aliasKeyFingerprintHex": "cd",
+        "wrappedPrivateKeyArmored": "wrapped",
+        "isCurrent": true,
+        "memberKeyFingerprintHex": "ef"
+    }))
+    .expect("alias grant");
+    assert_eq!(grant.member_key_fingerprint_hex.as_deref(), Some("ef"));
+}
+
+#[test]
+fn the_responses_use_the_web_keystore_field_names() {
+    let a = account();
+    let loaded = load(&a.ks, vec![input(1, &a.first)]);
+    for field in [
+        "ok",
+        "loaded",
+        "failed",
+        "currentFingerprintHex",
+        "keyVersion",
+        "currentChanged",
+    ] {
+        assert!(loaded.get(field).is_some(), "loadAccountKeys lacks {field}");
+    }
+
+    let listed = serde_json::to_value(a.ks.list_account_keys(ACCOUNT)).unwrap();
+    assert_eq!(
+        listed,
+        serde_json::json!({
+            "ok": true,
+            "keys": [{ "fingerprintHex": a.first.fingerprint_hex, "keyVersion": 1, "isCurrent": true }],
+            "keyVersion": 1
+        })
+    );
+
+    let prepared = prepare(&a.ks);
+    for field in [
+        "ok",
+        "publicKeyArmored",
+        "encryptedPrivateKey",
+        "fingerprintHex",
+        "keyVersion",
+        "transitions",
+    ] {
+        assert!(
+            prepared.get(field).is_some(),
+            "prepareKeyRotation lacks {field}"
+        );
+    }
+    assert!(prepared["transitions"][0]["signature"].is_array());
+
+    let mut events = a.ks.subscribe();
+    let fp = prepared["fingerprintHex"].as_str().unwrap().to_owned();
+    assert_eq!(
+        commit(&a.ks, &fp),
+        serde_json::json!({ "ok": true, "keyVersion": 2 })
+    );
+    let event = serde_json::to_value(events.try_recv().unwrap()).unwrap();
+    assert_eq!(
+        event,
+        serde_json::json!({
+            "type": "accountKeysChanged",
+            "accountId": ACCOUNT,
+            "fingerprints": [fp, a.first.fingerprint_hex],
+            "currentFingerprintHex": fp,
+            "keyVersion": 2,
+            "currentChanged": true
+        })
+    );
+
+    let listed = serde_json::to_value(a.ks.list_account_keys(ACCOUNT)).unwrap();
+    assert_eq!(listed["keys"][0]["isCurrent"], true);
+    assert_eq!(listed["keys"][1]["keyVersion"], 1);
+    assert_eq!(listed["keys"][1]["isCurrent"], false);
+    assert_eq!(
+        serde_json::to_value(Keystore::new().list_account_keys(ACCOUNT)).unwrap(),
+        serde_json::json!({ "ok": false, "code": "locked" })
+    );
 }
 
 #[test]
@@ -435,17 +668,17 @@ fn a_key_adopted_after_a_lost_commit_clears_the_pending_rotation() {
     let a = account();
     load(&a.ks, vec![input(1, &a.first)]);
     let prepared = prepare(&a.ks);
-    let fp = prepared["keyFingerprintHex"].as_str().unwrap().to_owned();
+    let fp = prepared["fingerprintHex"].as_str().unwrap().to_owned();
     let served = AccountKeyInput {
         key_version: 2,
-        key_fingerprint: fp.clone(),
-        encrypted_private_key: prepared["encryptedPrivateKey"].as_str().unwrap().to_owned(),
+        fingerprint_hex: fp.clone(),
+        encrypted_private_key_armored: prepared["encryptedPrivateKey"].as_str().unwrap().to_owned(),
     };
 
     let loaded = load(&a.ks, vec![input(1, &a.first), served]);
     assert_eq!(loaded["currentChanged"], true);
     assert_eq!(loaded["currentFingerprintHex"], fp.as_str());
-    assert_eq!(commit(&a.ks, &fp, 2)["code"], "no_pending_rotation");
+    assert_eq!(commit(&a.ks, &fp)["code"], "no_pending_rotation");
 }
 
 #[test]

@@ -638,8 +638,16 @@ pub fn keystore_prepare_key_rotation(
 pub fn keystore_commit_key_rotation(
     ks: State<'_, Keystore>,
     args: CommitKeyRotationArgs,
-) -> PlainOkResponse {
+) -> CommitKeyRotationResponse {
     ks.commit_key_rotation(args)
+}
+
+#[tauri::command]
+pub fn keystore_list_account_keys(
+    ks: State<'_, Keystore>,
+    args: AccountScopedArgs,
+) -> ListAccountKeysResponse {
+    ks.list_account_keys(&args.account_id)
 }
 
 #[tauri::command]
