@@ -4,7 +4,7 @@ use std::sync::Mutex;
 use base64::Engine as _;
 use rand::RngCore;
 use serde::{Deserialize, Serialize};
-use tauri::State;
+use tauri::{AppHandle, Manager, State};
 use thelemail_api::{ApiRequest, Net};
 use thelemail_crypto::amk::{device_unwrap, device_wrap};
 use thelemail_crypto::attframe::{self, DecryptedAttachmentHeader};
@@ -693,20 +693,27 @@ pub fn keystore_sign_detached(
 }
 
 #[tauri::command]
-pub fn keystore_load_account_keys(
-    ks: State<'_, Keystore>,
+pub async fn keystore_load_account_keys(
+    app: AppHandle,
     args: LoadAccountKeysArgs,
-) -> LoadAccountKeysResponse {
-    ks.load_account_keys(args)
+) -> Result<LoadAccountKeysResponse, KeystoreError> {
+    tauri::async_runtime::spawn_blocking(move || app.state::<Keystore>().load_account_keys(args))
+        .await
+        .map_err(|_| KeystoreError::Protocol)
 }
 
 #[tauri::command]
-pub fn keystore_prepare_key_rotation(
-    ks: State<'_, Keystore>,
-    net: State<'_, Net>,
+pub async fn keystore_prepare_key_rotation(
+    app: AppHandle,
     args: PrepareKeyRotationArgs,
-) -> PrepareKeyRotationResponse {
-    ks.prepare_key_rotation(args, net.clock_offset_ms())
+) -> Result<PrepareKeyRotationResponse, KeystoreError> {
+    let clock_offset_ms = app.state::<Net>().clock_offset_ms();
+    tauri::async_runtime::spawn_blocking(move || {
+        app.state::<Keystore>()
+            .prepare_key_rotation(args, clock_offset_ms)
+    })
+    .await
+    .map_err(|_| KeystoreError::Protocol)
 }
 
 #[tauri::command]

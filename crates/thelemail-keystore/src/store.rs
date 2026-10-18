@@ -1454,24 +1454,27 @@ impl Keystore {
             (vault.amk.clone(), vault.account_fingerprints())
         };
 
-        let passphrase = derive_pgp_passphrase(&amk);
-        let mut opened = Vec::new();
         let mut failed = Vec::new();
+        let mut candidates = Vec::new();
         for input in &args.keys {
-            let want = input.fingerprint_hex.to_lowercase();
             if input.key_version < 1 {
                 failed.push(input.key_version);
-                continue;
+            } else if !known.contains(&input.fingerprint_hex.to_lowercase()) {
+                candidates.push(input);
             }
-            if known.contains(&want) {
-                continue;
-            }
-            match UnlockedKey::open(&input.encrypted_private_key_armored, passphrase.expose()) {
-                Ok(key) if key.fingerprint_hex() == want => opened.push(AccountKey {
+        }
+        let passphrase = derive_pgp_passphrase(&amk);
+        let mut opened = Vec::new();
+        for (input, key) in candidates
+            .iter()
+            .zip(open_account_keys(&candidates, passphrase.expose()))
+        {
+            match key {
+                Some(key) => opened.push(AccountKey {
                     key,
                     version: input.key_version,
                 }),
-                _ => failed.push(input.key_version),
+                None => failed.push(input.key_version),
             }
         }
 
@@ -1569,27 +1572,18 @@ impl Keystore {
         args: PrepareKeyRotationArgs,
         clock_offset_ms: i64,
     ) -> PrepareKeyRotationResponse {
-        let mut vaults = self.vaults.lock().expect("keystore vaults");
-        let Some(vault) = vaults.get_mut(&args.account_id) else {
-            return PrepareKeyRotationResponse::err("locked");
+        let amk = {
+            let vaults = self.vaults.lock().expect("keystore vaults");
+            let Some(vault) = vaults.get(&args.account_id) else {
+                return PrepareKeyRotationResponse::err("locked");
+            };
+            if let Err(code) = rotation_ready(vault, &args) {
+                return PrepareKeyRotationResponse::err(code);
+            }
+            vault.amk.clone()
         };
-        if vault.auth_scheme != AuthScheme::OpaqueV1 {
-            return PrepareKeyRotationResponse::err("not_opaque");
-        }
-        if vault.key_version < 1 {
-            return PrepareKeyRotationResponse::err("key_history_incomplete");
-        }
-        if args.expected_key_version != vault.key_version {
-            return PrepareKeyRotationResponse::err("stale_key_version");
-        }
-        if args.emails.iter().all(|e| e.trim().is_empty()) {
-            return PrepareKeyRotationResponse::err("no_emails");
-        }
-        if !history_is_complete(vault) {
-            return PrepareKeyRotationResponse::err("key_history_incomplete");
-        }
 
-        let passphrase = derive_pgp_passphrase(&vault.amk);
+        let passphrase = derive_pgp_passphrase(&amk);
         let Ok(generated) =
             generate_account_key_for(&args.emails, passphrase.expose(), clock_offset_ms)
         else {
@@ -1601,6 +1595,14 @@ impl Keystore {
         ) else {
             return PrepareKeyRotationResponse::err("unknown");
         };
+
+        let mut vaults = self.vaults.lock().expect("keystore vaults");
+        let Some(vault) = vaults.get_mut(&args.account_id) else {
+            return PrepareKeyRotationResponse::err("locked");
+        };
+        if let Err(code) = rotation_ready(vault, &args) {
+            return PrepareKeyRotationResponse::err(code);
+        }
         if vault.knows_account_key(&generated.fingerprint_hex) {
             return PrepareKeyRotationResponse::err("unknown");
         }
@@ -1718,6 +1720,63 @@ impl Keystore {
             vault.pending_rotation = None;
         }
     }
+}
+
+fn rotation_ready(vault: &Vault, args: &PrepareKeyRotationArgs) -> Result<(), &'static str> {
+    if vault.auth_scheme != AuthScheme::OpaqueV1 {
+        return Err("not_opaque");
+    }
+    if vault.key_version < 1 {
+        return Err("key_history_incomplete");
+    }
+    if args.expected_key_version != vault.key_version {
+        return Err("stale_key_version");
+    }
+    if args.emails.iter().all(|e| e.trim().is_empty()) {
+        return Err("no_emails");
+    }
+    if !history_is_complete(vault) {
+        return Err("key_history_incomplete");
+    }
+    Ok(())
+}
+
+fn open_account_keys(inputs: &[&AccountKeyInput], passphrase: &str) -> Vec<Option<UnlockedKey>> {
+    if inputs.is_empty() {
+        return Vec::new();
+    }
+    let workers = std::thread::available_parallelism()
+        .map_or(1, |n| n.get())
+        .clamp(1, inputs.len());
+    let per_worker = inputs.len().div_ceil(workers);
+    std::thread::scope(|scope| {
+        let running: Vec<_> = inputs
+            .chunks(per_worker)
+            .map(|chunk| {
+                let handle = scope.spawn(move || {
+                    chunk
+                        .iter()
+                        .map(|input| {
+                            UnlockedKey::open(&input.encrypted_private_key_armored, passphrase)
+                                .ok()
+                                .filter(|key| {
+                                    key.fingerprint_hex() == input.fingerprint_hex.to_lowercase()
+                                })
+                        })
+                        .collect::<Vec<_>>()
+                });
+                (chunk.len(), handle)
+            })
+            .collect();
+        running
+            .into_iter()
+            .flat_map(|(len, handle)| {
+                handle
+                    .join()
+                    .unwrap_or_else(|_| (0..len).map(|_| None).collect())
+            })
+            .collect()
+    })
 }
 
 fn history_is_complete(vault: &Vault) -> bool {

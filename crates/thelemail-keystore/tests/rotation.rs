@@ -295,6 +295,32 @@ fn loading_keys_adopts_a_newer_key_and_never_moves_back() {
 }
 
 #[test]
+fn keys_that_fail_to_open_are_reported_by_their_own_version() {
+    let a = account();
+    let stranger = generate(&Amk::generate(), &[EMAIL]);
+    let second = generate(&a.amk, &[EMAIL]);
+    let third = generate(&a.amk, &[EMAIL]);
+    let mut wrong_label = input(4, &third);
+    wrong_label.fingerprint_hex = second.fingerprint_hex.clone();
+    let loaded = load(
+        &a.ks,
+        vec![
+            input(1, &a.first),
+            input(2, &stranger),
+            input(3, &second),
+            wrong_label,
+            input(5, &third),
+        ],
+    );
+    assert_eq!(loaded["failed"], serde_json::json!([2, 4]));
+    assert_eq!(loaded["keyVersion"], 5);
+    assert_eq!(
+        loaded["currentFingerprintHex"],
+        third.fingerprint_hex.as_str()
+    );
+}
+
+#[test]
 fn a_key_list_without_the_current_key_never_replaces_it() {
     let a = account();
     let other = generate(&a.amk, &[EMAIL]);
