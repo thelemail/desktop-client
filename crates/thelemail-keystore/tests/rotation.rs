@@ -129,7 +129,11 @@ fn a_rotation_endorses_with_the_retired_key_and_keeps_old_mail_readable() {
     assert_eq!(loaded["keyVersion"], 1);
     assert_eq!(loaded["currentChanged"], false);
 
-    let old_mail = encrypt_to(&a.ks, &a.first.public_key_armored, b"written to the first key");
+    let old_mail = encrypt_to(
+        &a.ks,
+        &a.first.public_key_armored,
+        b"written to the first key",
+    );
 
     let mut events = a.ks.subscribe();
     let prepared = prepare(&a.ks);
@@ -186,7 +190,10 @@ fn a_rotation_endorses_with_the_retired_key_and_keeps_old_mail_readable() {
 
     for hint in [None, Some(first_fp.as_str()), Some(new_fp.as_str())] {
         let out = decrypt(&a.ks, &old_mail, hint);
-        assert_eq!(out["plaintext"], "written to the first key", "hint {hint:?}");
+        assert_eq!(
+            out["plaintext"], "written to the first key",
+            "hint {hint:?}"
+        );
     }
     let new_mail = encrypt_to(&a.ks, &public, b"written to the new key");
     assert_eq!(
@@ -233,13 +240,19 @@ fn loading_keys_adopts_a_newer_key_and_never_moves_back() {
 
     let loaded = load(&a.ks, vec![input(1, &a.first), input(2, &newer)]);
     assert_eq!(loaded["currentChanged"], true);
-    assert_eq!(loaded["currentFingerprintHex"], newer.fingerprint_hex.as_str());
+    assert_eq!(
+        loaded["currentFingerprintHex"],
+        newer.fingerprint_hex.as_str()
+    );
     assert_eq!(loaded["keyVersion"], 2);
     assert_eq!(loaded["added"], serde_json::json!([newer.fingerprint_hex]));
 
     let again = load(&a.ks, vec![input(1, &a.first)]);
     assert_eq!(again["currentChanged"], false);
-    assert_eq!(again["currentFingerprintHex"], newer.fingerprint_hex.as_str());
+    assert_eq!(
+        again["currentFingerprintHex"],
+        newer.fingerprint_hex.as_str()
+    );
     assert_eq!(again["keyVersion"], 2);
 
     let foreign = generate(&Amk::generate(), &[EMAIL]);
@@ -247,7 +260,10 @@ fn loading_keys_adopts_a_newer_key_and_never_moves_back() {
     mislabelled.key_fingerprint = a.first.fingerprint_hex.clone();
     let rejected = load(&a.ks, vec![input(3, &foreign), mislabelled]);
     assert_eq!(rejected["failed"], serde_json::json!([3]));
-    assert_eq!(rejected["currentFingerprintHex"], newer.fingerprint_hex.as_str());
+    assert_eq!(
+        rejected["currentFingerprintHex"],
+        newer.fingerprint_hex.as_str()
+    );
     assert_eq!(rejected["keyVersion"], 2);
 }
 
@@ -257,7 +273,10 @@ fn a_key_list_without_the_current_key_never_replaces_it() {
     let other = generate(&a.amk, &[EMAIL]);
     let loaded = load(&a.ks, vec![input(2, &other)]);
     assert_eq!(loaded["currentChanged"], false);
-    assert_eq!(loaded["currentFingerprintHex"], a.first.fingerprint_hex.as_str());
+    assert_eq!(
+        loaded["currentFingerprintHex"],
+        a.first.fingerprint_hex.as_str()
+    );
     assert_eq!(loaded["added"], serde_json::json!([other.fingerprint_hex]));
 
     let mail = encrypt_to(&a.ks, &other.public_key_armored, b"history only");
@@ -308,7 +327,11 @@ fn an_alias_grant_wrapped_to_the_retired_key_still_unwraps() {
             }],
         }))
         .unwrap();
-        assert_eq!(loaded["loaded"], serde_json::json!([alias_fp]), "hint {hint:?}");
+        assert_eq!(
+            loaded["loaded"],
+            serde_json::json!([alias_fp]),
+            "hint {hint:?}"
+        );
         assert_eq!(loaded["failed"], serde_json::json!([]));
     }
 
@@ -374,7 +397,10 @@ fn mail_for_a_key_this_vault_never_held_reports_no_matching_key() {
         decrypt(&a.ks, &mail, Some(&a.first.fingerprint_hex))["code"],
         "no_matching_key"
     );
-    assert_eq!(a.ks.decrypt_bytes(ACCOUNT, &mail, None), Err("no_matching_key"));
+    assert_eq!(
+        a.ks.decrypt_bytes(ACCOUNT, &mail, None),
+        Err("no_matching_key")
+    );
     assert_eq!(
         a.ks.decrypt_bytes(ACCOUNT, b"not a pgp message", None),
         Err("invalid_ciphertext")
@@ -385,11 +411,17 @@ fn mail_for_a_key_this_vault_never_held_reports_no_matching_key() {
 fn a_commit_needs_the_prepared_key_and_a_higher_version() {
     let a = account();
     load(&a.ks, vec![input(1, &a.first)]);
-    assert_eq!(commit(&a.ks, &a.first.fingerprint_hex, 2)["code"], "no_pending_rotation");
+    assert_eq!(
+        commit(&a.ks, &a.first.fingerprint_hex, 2)["code"],
+        "no_pending_rotation"
+    );
 
     let prepared = prepare(&a.ks);
     let fp = prepared["keyFingerprintHex"].as_str().unwrap().to_owned();
-    assert_eq!(commit(&a.ks, &a.first.fingerprint_hex, 2)["code"], "invalid");
+    assert_eq!(
+        commit(&a.ks, &a.first.fingerprint_hex, 2)["code"],
+        "invalid"
+    );
     assert_eq!(commit(&a.ks, &fp, 1)["code"], "invalid");
 
     a.ks.abandon_key_rotation(ACCOUNT);

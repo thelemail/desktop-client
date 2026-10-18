@@ -301,10 +301,7 @@ impl PersistentHalves {
     }
 
     fn forget(&self, account_id: &str) {
-        self.0
-            .lock()
-            .expect("persistent halves")
-            .remove(account_id);
+        self.0.lock().expect("persistent halves").remove(account_id);
     }
 
     fn forget_all(&self) {

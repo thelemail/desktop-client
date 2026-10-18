@@ -8,15 +8,14 @@ use rand::rngs::OsRng;
 use thelemail_crypto::amk::{
     Amk, derive_master_key_id, derive_pgp_passphrase, unwrap_master_key, wrap_master_key,
 };
+use thelemail_crypto::keytransition;
 use thelemail_crypto::opaque::{
     LoginState, RegistrationState, finish_login, finish_registration, start_login,
     start_registration,
 };
-use thelemail_crypto::keytransition;
 use thelemail_crypto::openpgp::{
     PgpError, SignatureCheck, SignatureState, UnlockedKey, decrypt_verified_with, decrypt_with,
-    generate_account_key, generate_account_key_for, generate_alias_key,
-    public_key_fingerprint_hex,
+    generate_account_key, generate_account_key_for, generate_alias_key, public_key_fingerprint_hex,
 };
 use tokio::sync::{Semaphore, broadcast};
 use uuid::Uuid;
@@ -166,7 +165,7 @@ impl Vault {
     }
 
     fn sort_history(&mut self) {
-        self.history.sort_by(|a, b| b.version.cmp(&a.version));
+        self.history.sort_by_key(|k| std::cmp::Reverse(k.version));
     }
 }
 
@@ -1569,12 +1568,15 @@ impl Keystore {
         }
 
         let passphrase = derive_pgp_passphrase(&vault.amk);
-        let Ok(generated) = generate_account_key_for(&args.emails, passphrase.expose(), clock_offset_ms)
+        let Ok(generated) =
+            generate_account_key_for(&args.emails, passphrase.expose(), clock_offset_ms)
         else {
             return PrepareKeyRotationResponse::err("invalid_emails");
         };
-        let Ok(key) = UnlockedKey::open(&generated.encrypted_private_key_armored, passphrase.expose())
-        else {
+        let Ok(key) = UnlockedKey::open(
+            &generated.encrypted_private_key_armored,
+            passphrase.expose(),
+        ) else {
             return PrepareKeyRotationResponse::err("unknown");
         };
         if vault.knows_account_key(&generated.fingerprint_hex) {

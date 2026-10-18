@@ -154,7 +154,10 @@ fn endorsements_inside_valid_golden_statements_verify() {
             checked += 1;
         }
     }
-    assert!(checked >= 5, "only {checked} statement endorsements were checked");
+    assert!(
+        checked >= 5,
+        "only {checked} statement endorsements were checked"
+    );
 }
 
 #[test]
@@ -198,11 +201,13 @@ fn an_endorsement_made_here_verifies_for_v4_and_v6_previous_keys() {
         assert!(signature.len() <= keytransition::MAX_SIGNATURE_BYTES);
         assert_eq!(signature[0] & 0x3f, 2, "{name}: a single signature packet");
 
-        let other = keytransition::payload(account_id, &previous.fingerprint_hex(), &new_fp)
-            .unwrap();
+        let other =
+            keytransition::payload(account_id, &previous.fingerprint_hex(), &new_fp).unwrap();
         assert_eq!(
             keytransition::verify(
-                other.replace(&new_fp, &previous.fingerprint_hex()).as_bytes(),
+                other
+                    .replace(&new_fp, &previous.fingerprint_hex())
+                    .as_bytes(),
                 &signature,
                 &public
             ),
@@ -216,7 +221,13 @@ fn an_endorsement_made_here_verifies_for_v4_and_v6_previous_keys() {
 fn an_endorsement_checked_against_another_key_names_the_signer() {
     let v = vectors();
     let account_id = "4b1f2c3d-5e6f-4a7b-8c9d-0e1f2a3b4c5d";
-    let new_fp = v.keys.iter().find(|k| k.name == "current").unwrap().fingerprint.clone();
+    let new_fp = v
+        .keys
+        .iter()
+        .find(|k| k.name == "current")
+        .unwrap()
+        .fingerprint
+        .clone();
     let signer = fixture_key("previous-v6-a");
     let other = fixture_key("previous-v6-b");
 

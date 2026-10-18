@@ -517,8 +517,7 @@ fn generate_key(
     use pgp::types::KeyVersion;
     use rand::rngs::OsRng;
 
-    let (primary_user_id, other_user_ids) =
-        user_ids.split_first().ok_or(PgpError::InvalidKey)?;
+    let (primary_user_id, other_user_ids) = user_ids.split_first().ok_or(PgpError::InvalidKey)?;
     let created_at = key_creation_time(clock_offset_ms);
 
     let subkey = SubkeyParamsBuilder::default()

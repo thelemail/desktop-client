@@ -1193,7 +1193,11 @@ mod tests {
         assert_eq!(preview_state(&conn, "m1"), "ok");
         let hits =
             thelemail_store::search::search_messages(&conn, "quarterly", None).expect("search");
-        assert_eq!(hits.len(), 1, "the search index keeps the decrypted preview");
+        assert_eq!(
+            hits.len(),
+            1,
+            "the search index keeps the decrypted preview"
+        );
         assert!(
             undecryptable_messages(&conn).expect("list").is_empty(),
             "a kept preview is not queued for a retry"

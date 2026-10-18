@@ -72,7 +72,9 @@ pub fn payload(
 ) -> Result<String, TransitionError> {
     let new_fp = new_key_fingerprint.to_ascii_lowercase();
     let prev_fp = previous_key_fingerprint.to_ascii_lowercase();
-    if !is_plain_account_id(account_id) || !is_fingerprint_hex(&new_fp) || !is_fingerprint_hex(&prev_fp)
+    if !is_plain_account_id(account_id)
+        || !is_fingerprint_hex(&new_fp)
+        || !is_fingerprint_hex(&prev_fp)
     {
         return Err(TransitionError::Malformed);
     }
@@ -218,9 +220,10 @@ fn self_signature(key: &SignedPublicKey) -> Option<&Signature> {
         .users
         .iter()
         .flat_map(|user| {
-            user.signatures
-                .iter()
-                .filter(move |s| s.verify_certification(primary, Tag::UserId, &user.id).is_ok())
+            user.signatures.iter().filter(move |s| {
+                s.verify_certification(primary, Tag::UserId, &user.id)
+                    .is_ok()
+            })
         })
         .collect::<Vec<_>>();
     let primary_marked = certifications
