@@ -2,6 +2,7 @@
 
 pub mod amk;
 pub mod attframe;
+pub mod keytransition;
 pub mod opaque;
 pub mod openpgp;
 
