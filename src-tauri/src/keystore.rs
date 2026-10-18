@@ -190,11 +190,17 @@ pub async fn keystore_opaque_finish_auth(
 }
 
 #[tauri::command]
-pub fn keystore_opaque_complete_login_unlock(
-    ks: State<'_, Keystore>,
+pub async fn keystore_opaque_complete_login_unlock(
+    app: AppHandle,
     args: OpaqueCompleteLoginUnlockArgs,
-) -> OpaqueCompleteLoginUnlockResponse {
-    ks.opaque_complete_login_unlock(args)
+) -> Result<OpaqueCompleteLoginUnlockResponse, KeystoreError> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let stored = read_key_history(&args.account_id);
+        app.state::<Keystore>()
+            .opaque_complete_login_unlock(args, stored)
+    })
+    .await
+    .map_err(|_| KeystoreError::Protocol)
 }
 
 #[tauri::command]
@@ -272,6 +278,77 @@ fn vault_path(account_id: &str) -> Result<std::path::PathBuf, String> {
     }
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     Ok(dir.join("vault.bin"))
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct KeyHistoryFile {
+    keys: Vec<StoredAccountKey>,
+}
+
+static KEY_HISTORY_WRITES: Mutex<()> = Mutex::new(());
+
+fn key_history_path(account_id: &str) -> Result<std::path::PathBuf, String> {
+    Ok(vault_path(account_id)?.with_file_name("keys.json"))
+}
+
+fn read_key_history_at(path: &std::path::Path) -> Vec<StoredAccountKey> {
+    std::fs::read(path)
+        .ok()
+        .and_then(|raw| serde_json::from_slice::<KeyHistoryFile>(&raw).ok())
+        .map(|file| file.keys)
+        .unwrap_or_default()
+}
+
+fn read_key_history(account_id: &str) -> Vec<StoredAccountKey> {
+    key_history_path(account_id)
+        .map(|path| read_key_history_at(&path))
+        .unwrap_or_default()
+}
+
+fn merged_key_history(
+    mut current: Vec<StoredAccountKey>,
+    saved: Vec<StoredAccountKey>,
+) -> Vec<StoredAccountKey> {
+    for entry in &mut current {
+        if entry.encrypted_private_key_armored.is_none() {
+            entry.encrypted_private_key_armored = saved
+                .iter()
+                .find(|s| {
+                    s.fingerprint_hex
+                        .eq_ignore_ascii_case(&entry.fingerprint_hex)
+                })
+                .and_then(|s| s.encrypted_private_key_armored.clone());
+        }
+    }
+    current.retain(|entry| entry.encrypted_private_key_armored.is_some());
+    current
+}
+
+fn write_key_history_at(path: &std::path::Path, keys: Vec<StoredAccountKey>) -> Result<(), ()> {
+    let _writes = KEY_HISTORY_WRITES.lock().expect("key history writes");
+    let keys = merged_key_history(keys, read_key_history_at(path));
+    if keys.is_empty() {
+        return Ok(());
+    }
+    let encoded = serde_json::to_vec(&KeyHistoryFile { keys }).map_err(|_| ())?;
+    let staged = path.with_extension("json.tmp");
+    std::fs::write(&staged, encoded).map_err(|_| ())?;
+    std::fs::rename(&staged, path).map_err(|_| {
+        let _ = std::fs::remove_file(&staged);
+    })
+}
+
+pub(crate) fn save_key_history(ks: &Keystore, account_id: &str) {
+    let Some(keys) = ks.stored_account_keys(account_id) else {
+        return;
+    };
+    let Ok(path) = key_history_path(account_id) else {
+        return;
+    };
+    if write_key_history_at(&path, keys).is_err() {
+        eprintln!("keystore: saving the key history for {account_id} failed");
+    }
 }
 
 pub(crate) fn forget_persisted(halves: &PersistentHalves, account_id: &str) {
@@ -789,9 +866,48 @@ mod tests {
                 .map(|v| PersistedAccountKey {
                     key_version: v,
                     secret_key_armored: format!("secret-{v}"),
+                    encrypted_private_key_armored: None,
+                    fixed: false,
                 })
                 .collect(),
+            encrypted_private_key_armored: None,
+            key_fixed: false,
         }
+    }
+
+    fn stored(version: i64, encrypted: Option<&str>) -> StoredAccountKey {
+        StoredAccountKey {
+            key_version: version,
+            fingerprint_hex: format!("{version:0>40}"),
+            encrypted_private_key_armored: encrypted.map(str::to_owned),
+            fixed: false,
+        }
+    }
+
+    #[test]
+    fn the_key_history_keeps_saved_keys_the_vault_holds_only_unlocked() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("keys.json");
+
+        write_key_history_at(&path, vec![stored(2, Some("v2")), stored(1, Some("v1"))]).unwrap();
+        write_key_history_at(
+            &path,
+            vec![stored(3, Some("v3")), stored(2, None), stored(1, None)],
+        )
+        .unwrap();
+        let saved = read_key_history_at(&path);
+        let versions: Vec<_> = saved
+            .iter()
+            .map(|k| (k.key_version, k.encrypted_private_key_armored.as_deref()))
+            .collect();
+        assert_eq!(
+            versions,
+            vec![(3, Some("v3")), (2, Some("v2")), (1, Some("v1"))]
+        );
+        assert!(!path.with_extension("json.tmp").exists());
+
+        write_key_history_at(&path, vec![stored(4, None)]).unwrap();
+        assert_eq!(read_key_history_at(&path).len(), 3);
     }
 
     fn opened(store: &MemoryHalves, path: &std::path::Path, server_half: &[u8]) -> PersistedVault {

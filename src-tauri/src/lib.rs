@@ -207,6 +207,7 @@ pub fn run() {
                         let app = handle.clone();
                         let id = account_id.clone();
                         tauri::async_runtime::spawn_blocking(move || {
+                            keystore::save_key_history(&app.state::<Keystore>(), &id);
                             keystore::rewrap_persisted(
                                 &app.state::<Keystore>(),
                                 &app.state::<keystore::PersistentHalves>(),
@@ -217,6 +218,13 @@ pub fn run() {
                             handle.clone(),
                             account_id.clone(),
                         ));
+                    }
+                    if let Broadcast::VaultChanged { account_id, .. } = &event {
+                        let app = handle.clone();
+                        let id = account_id.clone();
+                        tauri::async_runtime::spawn_blocking(move || {
+                            keystore::save_key_history(&app.state::<Keystore>(), &id);
+                        });
                     }
                     let _ = handle.emit("keystore", event);
                 }

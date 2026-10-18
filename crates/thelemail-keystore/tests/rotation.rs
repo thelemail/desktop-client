@@ -247,9 +247,11 @@ fn a_rotation_endorses_with_the_retired_key_and_keeps_old_mail_readable() {
             current_fingerprint_hex,
             key_version,
             current_changed,
+            changed,
         } => {
             assert_eq!(account_id, ACCOUNT);
             assert!(current_changed);
+            assert!(changed);
             assert_eq!(current_fingerprint_hex, new_fp);
             assert_eq!(key_version, 2);
             assert_eq!(fingerprints, vec![new_fp.clone(), first_fp.clone()]);
@@ -1153,17 +1155,299 @@ fn malformed_key_lists_are_refused_without_changing_anything() {
 #[test]
 fn every_accepted_key_list_is_announced_once() {
     let a = account();
-    load(&a.ks, vec![current(1, &a.first)]);
     let mut events = a.ks.subscribe();
+    load(&a.ks, vec![current(1, &a.first)]);
+    assert!(matches!(
+        events.try_recv().expect("keys event"),
+        Broadcast::AccountKeysChanged {
+            current_changed: false,
+            changed: true,
+            key_version: 1,
+            ..
+        }
+    ));
     let loaded = load(&a.ks, vec![current(1, &a.first)]);
     assert_eq!(loaded["currentChanged"], false);
     assert!(matches!(
         events.try_recv().expect("keys event"),
         Broadcast::AccountKeysChanged {
             current_changed: false,
+            changed: false,
             key_version: 1,
             ..
         }
     ));
     assert!(events.try_recv().is_err());
+}
+
+#[test]
+fn a_key_list_that_changes_nothing_is_not_marked_as_a_change() {
+    let a = account();
+    let second = generate(&a.amk, &[EMAIL]);
+    let keys = || history(&a.amk, &[&a.first, &second]);
+    load(&a.ks, keys());
+    let mut events = a.ks.subscribe();
+    for _ in 0..3 {
+        assert_eq!(load(&a.ks, keys())["ok"], true);
+        assert!(matches!(
+            events.try_recv().expect("keys event"),
+            Broadcast::AccountKeysChanged { changed: false, .. }
+        ));
+    }
+    let event = serde_json::to_value(Broadcast::AccountKeysChanged {
+        account_id: ACCOUNT.to_owned(),
+        fingerprints: Vec::new(),
+        current_fingerprint_hex: String::new(),
+        key_version: 2,
+        current_changed: false,
+        changed: true,
+    })
+    .unwrap();
+    assert!(event.get("changed").is_none(), "{event}");
+}
+
+const PASSWORD: &str = "a long and sturdy passphrase";
+
+fn sign_in(amk: &Amk, key: &GeneratedKey, stored: Vec<StoredAccountKey>) -> Keystore {
+    use opaque_ke::{
+        CredentialRequest, Identifiers, RegistrationRequest, RegistrationUpload, ServerLogin,
+        ServerLoginParameters, ServerRegistration, ServerSetup,
+    };
+    use thelemail_crypto::amk::{derive_master_key_id, wrap_master_key};
+    use thelemail_crypto::opaque::{ThelemailSuite, finish_registration, start_registration};
+
+    let b64 = base64::engine::general_purpose::STANDARD;
+    let mut rng = rand::rngs::OsRng;
+    let identity = format!("thelemail/auth/opaque/v1:{ACCOUNT}");
+    let identifiers = || Identifiers {
+        client: Some(identity.as_bytes()),
+        server: Some(b"thelemail.com"),
+    };
+    let setup = ServerSetup::<ThelemailSuite>::new(&mut rng);
+    let registration = start_registration(PASSWORD).expect("registration start");
+    let response = ServerRegistration::<ThelemailSuite>::start(
+        &setup,
+        RegistrationRequest::deserialize(&registration.request).expect("request"),
+        ACCOUNT.as_bytes(),
+    )
+    .expect("server registration");
+    let registered = finish_registration(
+        registration.state,
+        PASSWORD,
+        &response.message.serialize(),
+        &identity,
+        "thelemail.com",
+    )
+    .expect("registration finish");
+    let record = ServerRegistration::<ThelemailSuite>::finish(
+        RegistrationUpload::deserialize(&registered.record).expect("upload"),
+    );
+
+    let ks = Keystore::new();
+    let runtime = tokio::runtime::Runtime::new().expect("runtime");
+    let started = runtime
+        .block_on(ks.opaque_start_auth(OpaqueStartAuthArgs {
+            password: PASSWORD.to_owned(),
+            email: Some(EMAIL.to_owned()),
+            recovery: false,
+        }))
+        .expect("auth start");
+    let ke1 = b64.decode(&started.ke1).expect("ke1");
+    let ke2 = ServerLogin::start(
+        &mut rng,
+        &setup,
+        Some(record),
+        CredentialRequest::deserialize(&ke1).expect("credential request"),
+        ACCOUNT.as_bytes(),
+        ServerLoginParameters {
+            context: None,
+            identifiers: identifiers(),
+        },
+    )
+    .expect("server login")
+    .message
+    .serialize();
+    let finished = runtime.block_on(ks.opaque_finish_auth(OpaqueFinishAuthArgs {
+        operation_id: started.operation_id.clone(),
+        account_id: ACCOUNT.to_owned(),
+        ke2: b64.encode(ke2),
+        recovery: false,
+    }));
+    assert!(matches!(finished, OpaqueFinishAuthResponse::Ok { .. }));
+
+    let unlocked = ks.opaque_complete_login_unlock(
+        OpaqueCompleteLoginUnlockArgs {
+            operation_id: started.operation_id,
+            account_id: ACCOUNT.to_owned(),
+            encrypted_private_key: key.encrypted_private_key_armored.clone(),
+            wrapped_master_key: b64.encode(wrap_master_key(&registered.export_key, amk, false)),
+            master_key_id: b64.encode(derive_master_key_id(amk)),
+            opaque_params_version: 1,
+            server_auth_scheme: AuthScheme::OpaqueV1,
+        },
+        stored,
+    );
+    assert!(
+        matches!(unlocked, OpaqueCompleteLoginUnlockResponse::Ok { .. }),
+        "sign-in unlocks"
+    );
+    ks
+}
+
+fn stored_versions(ks: &Keystore) -> Vec<(i64, String, bool)> {
+    ks.stored_account_keys(ACCOUNT)
+        .expect("stored keys")
+        .into_iter()
+        .map(|k| {
+            (
+                k.key_version,
+                k.fingerprint_hex,
+                k.encrypted_private_key_armored.is_some(),
+            )
+        })
+        .collect()
+}
+
+#[test]
+fn a_sign_in_keeps_the_stored_newest_key_current_when_the_server_replays_a_retired_one() {
+    let a = account();
+    let second = generate(&a.amk, &[EMAIL]);
+    let third = generate(&a.amk, &[EMAIL]);
+    load(&a.ks, history(&a.amk, &[&a.first, &second, &third]));
+    assert_eq!(
+        stored_versions(&a.ks),
+        vec![
+            (3, third.fingerprint_hex.clone(), true),
+            (2, second.fingerprint_hex.clone(), true),
+            (1, a.first.fingerprint_hex.clone(), true),
+        ]
+    );
+
+    let device = sign_in(&a.amk, &a.first, a.ks.stored_account_keys(ACCOUNT).unwrap());
+    assert_eq!(
+        current_fingerprint(&device),
+        (third.fingerprint_hex.clone(), Some(3))
+    );
+
+    let loaded = load(&device, vec![current(1, &a.first)]);
+    assert_eq!(loaded["ok"], true, "{loaded}");
+    assert_eq!(loaded["currentChanged"], false);
+    assert_eq!(loaded["keyVersion"], 3);
+    assert_eq!(
+        current_fingerprint(&device),
+        (third.fingerprint_hex.clone(), Some(3))
+    );
+    assert_eq!(stored_versions(&device), stored_versions(&a.ks));
+
+    let mut replayed = history(&a.amk, &[&second, &third, &a.first]);
+    replayed[2].transitions = vec![endorsement(&a.amk, &third, &a.first.fingerprint_hex)];
+    assert_refused(&device, 3, replayed, "v1 relabelled above the stored v3");
+
+    let mail = encrypt_to(&device, &second.public_key_armored, b"kept across sign-in");
+    assert_eq!(
+        decrypt(&device, &mail, None)["plaintext"],
+        "kept across sign-in"
+    );
+}
+
+#[test]
+fn a_sign_in_with_a_newer_key_climbs_the_chain_from_the_stored_one() {
+    let a = account();
+    let second = generate(&a.amk, &[EMAIL]);
+    let third = generate(&a.amk, &[EMAIL]);
+    load(&a.ks, history(&a.amk, &[&a.first, &second]));
+
+    let device = sign_in(&a.amk, &third, a.ks.stored_account_keys(ACCOUNT).unwrap());
+    assert_eq!(
+        current_fingerprint(&device),
+        (second.fingerprint_hex.clone(), Some(2))
+    );
+
+    let mut unendorsed = history(&a.amk, &[&a.first, &second, &third]);
+    unendorsed[2].transitions = Vec::new();
+    let loaded = load(&device, unendorsed);
+    assert_eq!(loaded["unverified"], serde_json::json!([3]));
+    assert_eq!(current_fingerprint(&device).0, second.fingerprint_hex);
+
+    let loaded = load(&device, history(&a.amk, &[&a.first, &second, &third]));
+    assert_eq!(loaded["currentChanged"], true);
+    assert_eq!(
+        current_fingerprint(&device),
+        (third.fingerprint_hex.clone(), Some(3))
+    );
+}
+
+#[test]
+fn a_sign_in_without_stored_keys_starts_from_the_key_it_was_given() {
+    let a = account();
+    let device = sign_in(&a.amk, &a.first, Vec::new());
+    assert_eq!(current_public(&device).1, None);
+    assert!(device.stored_account_keys(ACCOUNT).unwrap().is_empty());
+    let loaded = load(&device, vec![current(1, &a.first)]);
+    assert_eq!(loaded["keyVersion"], 1);
+    assert_eq!(
+        stored_versions(&device),
+        vec![(1, a.first.fingerprint_hex.clone(), true)]
+    );
+}
+
+#[test]
+fn a_version_learned_from_one_list_follows_a_later_list_in_the_same_order() {
+    let a = account();
+    let second = generate(&a.amk, &[EMAIL]);
+    let third = generate(&a.amk, &[EMAIL]);
+    let real = || history(&a.amk, &[&a.first, &second, &third]);
+
+    let device = Keystore::new();
+    assert!(device.adopt_persisted(ACCOUNT, persisted_for(&a.amk, &third)));
+    let loaded = load(&device, vec![input(1, &a.first), current(2, &third)]);
+    assert_eq!(loaded["keyVersion"], 2, "{loaded}");
+
+    let loaded = load(&device, real());
+    assert_eq!(loaded["ok"], true, "{loaded}");
+    assert_eq!(loaded["keyVersion"], 3);
+    assert_eq!(loaded["currentChanged"], false);
+    assert_eq!(
+        current_fingerprint(&device),
+        (third.fingerprint_hex.clone(), Some(3))
+    );
+    assert_eq!(
+        stored_versions(&device),
+        vec![
+            (3, third.fingerprint_hex.clone(), true),
+            (2, second.fingerprint_hex.clone(), true),
+            (1, a.first.fingerprint_hex.clone(), true),
+        ]
+    );
+    assert_eq!(prepare(&device)["keyVersion"], 4);
+
+    assert_refused(
+        &device,
+        3,
+        vec![input(1, &third), input(2, &second), current(3, &a.first)],
+        "the order of known keys reversed",
+    );
+}
+
+#[test]
+fn a_version_this_device_rotated_to_never_moves() {
+    let a = account();
+    load(&a.ks, vec![current(1, &a.first)]);
+    let prepared = rotate(&a.ks);
+    let rotated = prepared["fingerprintHex"].as_str().unwrap().to_owned();
+    let rotated_input = AccountKeyInput {
+        key_version: 3,
+        fingerprint_hex: rotated.clone(),
+        encrypted_private_key_armored: prepared["encryptedPrivateKey"].as_str().unwrap().to_owned(),
+        is_current: true,
+        transitions: Vec::new(),
+    };
+    let filler = generate(&a.amk, &[EMAIL]);
+    assert_refused(
+        &a.ks,
+        3,
+        vec![input(1, &a.first), input(2, &filler), rotated_input],
+        "the rotated key moved to version 3",
+    );
+    assert_eq!(current_fingerprint(&a.ks), (rotated, Some(2)));
 }

@@ -210,6 +210,8 @@ pub enum Broadcast {
         key_version: i64,
         #[serde(rename = "currentChanged")]
         current_changed: bool,
+        #[serde(skip)]
+        changed: bool,
     },
 }
 
@@ -645,6 +647,21 @@ pub struct CommitReformattedKeyArgs {
 pub struct PersistedAccountKey {
     pub key_version: i64,
     pub secret_key_armored: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub encrypted_private_key_armored: Option<String>,
+    #[serde(default)]
+    pub fixed: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StoredAccountKey {
+    pub key_version: i64,
+    pub fingerprint_hex: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub encrypted_private_key_armored: Option<String>,
+    #[serde(default)]
+    pub fixed: bool,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -658,6 +675,10 @@ pub struct PersistedVault {
     pub key_version: i64,
     #[serde(default)]
     pub history: Vec<PersistedAccountKey>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub encrypted_private_key_armored: Option<String>,
+    #[serde(default)]
+    pub key_fixed: bool,
 }
 
 #[derive(Debug, Deserialize)]

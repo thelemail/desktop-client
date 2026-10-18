@@ -75,24 +75,27 @@ fn signs_in_against_the_live_backend_and_unlocks_the_vault() {
         .cloned()
         .unwrap_or_else(|| complete.clone());
 
-    let unlocked = ks.opaque_complete_login_unlock(OpaqueCompleteLoginUnlockArgs {
-        operation_id: start.operation_id,
-        account_id: account_id.clone(),
-        encrypted_private_key: grant["encryptedPrivateKey"]
-            .as_str()
-            .expect("encryptedPrivateKey")
-            .to_owned(),
-        wrapped_master_key: grant["wrappedMasterKey"]
-            .as_str()
-            .expect("wrappedMasterKey")
-            .to_owned(),
-        master_key_id: grant["masterKeyId"]
-            .as_str()
-            .expect("masterKeyId")
-            .to_owned(),
-        opaque_params_version: grant["opaqueParamsVersion"].as_i64().unwrap_or(1),
-        server_auth_scheme: AuthScheme::OpaqueV1,
-    });
+    let unlocked = ks.opaque_complete_login_unlock(
+        OpaqueCompleteLoginUnlockArgs {
+            operation_id: start.operation_id,
+            account_id: account_id.clone(),
+            encrypted_private_key: grant["encryptedPrivateKey"]
+                .as_str()
+                .expect("encryptedPrivateKey")
+                .to_owned(),
+            wrapped_master_key: grant["wrappedMasterKey"]
+                .as_str()
+                .expect("wrappedMasterKey")
+                .to_owned(),
+            master_key_id: grant["masterKeyId"]
+                .as_str()
+                .expect("masterKeyId")
+                .to_owned(),
+            opaque_params_version: grant["opaqueParamsVersion"].as_i64().unwrap_or(1),
+            server_auth_scheme: AuthScheme::OpaqueV1,
+        },
+        Vec::new(),
+    );
 
     match unlocked {
         OpaqueCompleteLoginUnlockResponse::Ok { .. } => {}

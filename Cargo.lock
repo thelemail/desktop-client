@@ -5656,6 +5656,7 @@ version = "0.20.0"
 dependencies = [
  "base64 0.22.1",
  "bip39",
+ "opaque-ke",
  "rand 0.8.8",
  "reqwest 0.12.28",
  "serde",
