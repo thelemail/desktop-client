@@ -22,6 +22,7 @@ const BODY_CONCURRENCY: usize = 4;
 const DELTA_SCOPE: &str = "__delta__";
 const DELTA_LIMIT: u32 = 200;
 const SHUTTING_DOWN: &str = "the mirror is shutting down";
+const RETRY_LIMIT: i64 = 2000;
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -135,6 +136,7 @@ pub struct Mirror {
     pokes: Mutex<HashSet<String>>,
     watching: Mutex<HashMap<String, bool>>,
     notify_armed: Mutex<HashMap<String, bool>>,
+    retry_wanted: Mutex<HashSet<String>>,
     closed: AtomicBool,
     started_at: i64,
 }
@@ -149,6 +151,7 @@ impl Default for Mirror {
             pokes: Mutex::default(),
             watching: Mutex::default(),
             notify_armed: Mutex::default(),
+            retry_wanted: Mutex::default(),
             closed: AtomicBool::new(false),
             started_at: now_unix(),
         }
@@ -195,6 +198,10 @@ impl Mirror {
         self.token_wakers
             .lock()
             .expect("mirror wakers")
+            .remove(account_id);
+        self.retry_wanted
+            .lock()
+            .expect("mirror retries")
             .remove(account_id);
 
         let dir = Self::root().join("accounts").join(account_id);
@@ -396,6 +403,37 @@ impl Mirror {
         true
     }
 
+    fn want_retry(&self, account_id: &str) {
+        self.retry_wanted
+            .lock()
+            .expect("mirror retries")
+            .insert(account_id.to_owned());
+    }
+
+    fn retry_pending(&self, account_id: &str) -> bool {
+        self.retry_wanted
+            .lock()
+            .expect("mirror retries")
+            .contains(account_id)
+    }
+
+    fn take_retry(&self, account_id: &str) -> bool {
+        self.retry_wanted
+            .lock()
+            .expect("mirror retries")
+            .remove(account_id)
+    }
+
+    fn defer_retry(&self, account_id: &str) {
+        self.want_retry(account_id);
+        self.release(account_id);
+    }
+
+    fn release_wanting_retry(&self, account_id: &str) -> bool {
+        self.release(account_id);
+        self.retry_pending(account_id)
+    }
+
     fn release(&self, account_id: &str) {
         self.running
             .lock()
@@ -418,14 +456,7 @@ fn upsert_message(
     preview: &MessagePreview,
     decrypted: bool,
 ) -> rusqlite::Result<()> {
-    let recipients = serde_json::to_string(
-        &preview
-            .recipients
-            .iter()
-            .map(|r| r.address.clone())
-            .collect::<Vec<_>>(),
-    )
-    .unwrap_or_else(|_| "[]".to_owned());
+    let recipients = recipients_json(preview);
     let labels_json = serde_json::to_string(&item.label_ids).unwrap_or_else(|_| "[]".to_owned());
     let now = now_iso();
 
@@ -440,11 +471,15 @@ fn upsert_message(
          ON CONFLICT(id) DO UPDATE SET \
           mailbox_state=excluded.mailbox_state, starred=excluded.starred, read=excluded.read, \
           attachment_count=excluded.attachment_count, thread_root_id=excluded.thread_root_id, \
-          subject=excluded.subject, sender_display=excluded.sender_display, \
-          sender_address=excluded.sender_address, recipients_json=excluded.recipients_json, \
-          snippet=excluded.snippet, display_date=excluded.display_date, \
-          preview_state=excluded.preview_state, deleted=0, synced_at=excluded.synced_at, \
-          delivered_to=excluded.delivered_to, encrypted=excluded.encrypted, \
+          subject=CASE WHEN excluded.preview_state <> 'ok' AND messages.preview_state = 'ok' THEN messages.subject ELSE excluded.subject END, \
+          sender_display=CASE WHEN excluded.preview_state <> 'ok' AND messages.preview_state = 'ok' THEN messages.sender_display ELSE excluded.sender_display END, \
+          sender_address=CASE WHEN excluded.preview_state <> 'ok' AND messages.preview_state = 'ok' THEN messages.sender_address ELSE excluded.sender_address END, \
+          recipients_json=CASE WHEN excluded.preview_state <> 'ok' AND messages.preview_state = 'ok' THEN messages.recipients_json ELSE excluded.recipients_json END, \
+          snippet=CASE WHEN excluded.preview_state <> 'ok' AND messages.preview_state = 'ok' THEN messages.snippet ELSE excluded.snippet END, \
+          display_date=CASE WHEN excluded.preview_state <> 'ok' AND messages.preview_state = 'ok' THEN messages.display_date ELSE excluded.display_date END, \
+          preview_state=CASE WHEN excluded.preview_state <> 'ok' AND messages.preview_state = 'ok' THEN messages.preview_state ELSE excluded.preview_state END, \
+          delivered_to=CASE WHEN excluded.preview_state <> 'ok' AND messages.preview_state = 'ok' THEN messages.delivered_to ELSE excluded.delivered_to END, \
+          deleted=0, synced_at=excluded.synced_at, encrypted=excluded.encrypted, \
           signature_status=excluded.signature_status, \
           signer_key_fingerprint=excluded.signer_key_fingerprint, \
           signer_delegation_id=excluded.signer_delegation_id, \
@@ -481,12 +516,35 @@ fn upsert_message(
         ],
     )?;
 
-    let rowid: i64 = conn.query_row(
-        "SELECT rowid FROM messages WHERE id = ?1",
+    let (rowid, stored_state): (i64, String) = conn.query_row(
+        "SELECT rowid, preview_state FROM messages WHERE id = ?1",
         [&item.id],
-        |r| r.get(0),
+        |r| Ok((r.get(0)?, r.get(1)?)),
     )?;
+    if !decrypted && stored_state == "ok" {
+        return Ok(());
+    }
 
+    index_preview(conn, rowid, preview, &recipients)
+}
+
+fn recipients_json(preview: &MessagePreview) -> String {
+    serde_json::to_string(
+        &preview
+            .recipients
+            .iter()
+            .map(|r| r.address.clone())
+            .collect::<Vec<_>>(),
+    )
+    .unwrap_or_else(|_| "[]".to_owned())
+}
+
+fn index_preview(
+    conn: &Connection,
+    rowid: i64,
+    preview: &MessagePreview,
+    recipients: &str,
+) -> rusqlite::Result<()> {
     conn.execute(
         "INSERT INTO search_docs (rowid, subject, sender, recipients, snippet, body) \
          VALUES (?1,?2,?3,?4,?5,COALESCE((SELECT body FROM search_docs WHERE rowid = ?1), '')) \
@@ -502,8 +560,149 @@ fn upsert_message(
             preview.snippet,
         ],
     )?;
-
     Ok(())
+}
+
+fn apply_retried_preview(
+    conn: &Connection,
+    message_id: &str,
+    preview: &MessagePreview,
+) -> rusqlite::Result<bool> {
+    let recipients = recipients_json(preview);
+    let updated = conn.execute(
+        "UPDATE messages SET subject=?2, sender_display=?3, sender_address=?4, \
+          recipients_json=?5, snippet=?6, display_date=?7, delivered_to=?8, preview_state='ok' \
+         WHERE id=?1 AND preview_state='undecryptable' AND dirty=0 AND deleted=0",
+        params![
+            message_id,
+            preview.subject,
+            preview.sender.display,
+            preview.sender.address,
+            recipients,
+            preview.snippet,
+            preview.display_date,
+            preview.delivered_to,
+        ],
+    )?;
+    if updated == 0 {
+        return Ok(false);
+    }
+    let rowid: i64 = conn.query_row(
+        "SELECT rowid FROM messages WHERE id = ?1",
+        [message_id],
+        |r| r.get(0),
+    )?;
+    index_preview(conn, rowid, preview, &recipients)?;
+    Ok(true)
+}
+
+fn undecryptable_messages(conn: &Connection) -> Result<Vec<String>, String> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT id FROM messages WHERE preview_state = 'undecryptable' AND deleted = 0 \
+             AND dirty = 0 ORDER BY stored_at DESC LIMIT ?1",
+        )
+        .map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map([RETRY_LIMIT], |row| row.get::<_, String>(0))
+        .map_err(|e| e.to_string())?;
+    rows.collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())
+}
+
+pub async fn retry_undecryptable(app: AppHandle, account_id: String) {
+    let mirror = app.state::<Mirror>();
+    mirror.want_retry(&account_id);
+    if !mirror.claim(&account_id) {
+        return;
+    }
+    while mirror.take_retry(&account_id) {
+        if retry_pass(&app, &account_id).await == RetryPass::Deferred {
+            mirror.defer_retry(&account_id);
+            return;
+        }
+    }
+    release_and_hand_off(&app, &account_id);
+}
+
+#[derive(PartialEq, Eq)]
+enum RetryPass {
+    Done,
+    Deferred,
+}
+
+async fn retry_pass(app: &AppHandle, account_id: &str) -> RetryPass {
+    let net = app.state::<Net>();
+    let ks = app.state::<Keystore>();
+    let mirror = app.state::<Mirror>();
+    let Some(token) = mirror.token(account_id) else {
+        return RetryPass::Deferred;
+    };
+    let Ok(ids) = mirror.with_conn(account_id, undecryptable_messages) else {
+        return RetryPass::Deferred;
+    };
+    if ids.is_empty() {
+        return RetryPass::Done;
+    }
+
+    let mut recovered = 0usize;
+    for chunk in ids.chunks(BODY_BATCH) {
+        let pending: Vec<_> = chunk
+            .iter()
+            .map(|id| async {
+                let detail = get_detail(&net, account_id, &token, id).await;
+                (id.clone(), detail)
+            })
+            .collect();
+        let results: Vec<_> = stream::iter(pending)
+            .buffer_unordered(BODY_CONCURRENCY)
+            .collect()
+            .await;
+
+        let mut expired = false;
+        for (id, detail) in results {
+            let encrypted = match detail {
+                Ok(detail) => detail.encrypted_preview,
+                Err(err) => {
+                    expired |= err == SESSION_EXPIRED;
+                    None
+                }
+            };
+            let Some(encrypted) = encrypted else {
+                continue;
+            };
+            let (preview, decrypted) = decrypt_preview(&ks, account_id, &encrypted);
+            if !decrypted {
+                continue;
+            }
+            match mirror.with_conn(account_id, |conn| {
+                apply_retried_preview(conn, &id, &preview).map_err(|e| e.to_string())
+            }) {
+                Ok(true) => recovered += 1,
+                Ok(false) => {}
+                Err(err) => {
+                    eprintln!("mirror: storing a recovered preview for {account_id} failed: {err}");
+                    return RetryPass::Done;
+                }
+            }
+        }
+        if expired {
+            return RetryPass::Deferred;
+        }
+    }
+
+    if recovered == 0 {
+        return RetryPass::Done;
+    }
+    eprintln!("mirror: recovered {recovered} preview(s) for {account_id} after a key change");
+    let _ = app.emit(
+        "mirror://changed",
+        serde_json::json!({ "accountId": account_id, "arrived": 0 }),
+    );
+    if let Err(err) = prefetch_bodies(&net, &ks, &mirror, account_id, &token, |_, _| {}).await {
+        eprintln!("mirror: fetching recovered bodies for {account_id} failed: {err}");
+    }
+    RetryPass::Done
 }
 
 pub fn now_iso() -> String {
@@ -608,7 +807,14 @@ pub async fn backfill(app: AppHandle, account_id: String, access_token: String) 
             complete: true,
         },
     );
-    app.state::<Mirror>().release(&account_id);
+    release_and_hand_off(&app, &account_id);
+}
+
+fn release_and_hand_off(app: &AppHandle, account_id: &str) {
+    let mirror = app.state::<Mirror>();
+    if mirror.release_wanting_retry(account_id) {
+        tauri::async_runtime::spawn(retry_undecryptable(app.clone(), account_id.to_owned()));
+    }
 }
 
 pub fn apply_page(
@@ -811,7 +1017,7 @@ fn decrypt_preview(ks: &Keystore, account_id: &str, encrypted_b64: &str) -> (Mes
     let Ok(ciphertext) = base64::engine::general_purpose::STANDARD.decode(encrypted_b64) else {
         return (MessagePreview::default(), false);
     };
-    match ks.decrypt_bytes(account_id, &ciphertext) {
+    match ks.decrypt_bytes(account_id, &ciphertext, None) {
         Ok(plain) => match serde_json::from_slice::<MessagePreview>(&plain) {
             Ok(preview) => (preview, true),
             Err(_) => (MessagePreview::default(), false),
@@ -962,6 +1168,99 @@ mod tests {
         assert_eq!(got.delivered_to, "");
     }
 
+    fn preview_state(conn: &Connection, id: &str) -> String {
+        conn.query_row(
+            "SELECT preview_state FROM messages WHERE id = ?1",
+            [id],
+            |r| r.get(0),
+        )
+        .expect("preview state")
+    }
+
+    #[test]
+    fn an_undecryptable_update_never_blanks_a_decrypted_preview() {
+        let conn = Connection::open_in_memory().expect("db");
+        thelemail_store::migrations::migrate(&conn).expect("migrate");
+        let item = |starred: bool| -> MessageListItem {
+            serde_json::from_value(serde_json::json!({
+                "id": "m1",
+                "direction": "received",
+                "source": "inbound_external",
+                "mailboxState": "inbox",
+                "storedAt": "2026-10-18T09:00:00Z",
+                "starred": starred
+            }))
+            .expect("item")
+        };
+        let preview: MessagePreview = serde_json::from_str(
+            r#"{"subject":"Quarterly numbers","sender":{"display":"Ines","address":"ines@example.com"},
+                "snippet":"Attached are the figures","recipients":[{"display":"","address":"nora@thelemail.test"}]}"#,
+        )
+        .expect("preview");
+
+        upsert_message(&conn, &item(false), &preview, true).expect("decrypted upsert");
+        upsert_message(&conn, &item(true), &MessagePreview::default(), false)
+            .expect("undecryptable upsert");
+
+        let got = thelemail_store::list::get_message(&conn, "m1", "now")
+            .expect("query")
+            .expect("message");
+        assert_eq!(got.subject, "Quarterly numbers");
+        assert_eq!(got.sender_address, "ines@example.com");
+        assert_eq!(got.snippet, "Attached are the figures");
+        assert!(got.starred, "metadata still follows the server");
+        assert_eq!(preview_state(&conn, "m1"), "ok");
+        let hits =
+            thelemail_store::search::search_messages(&conn, "quarterly", None).expect("search");
+        assert_eq!(
+            hits.len(),
+            1,
+            "the search index keeps the decrypted preview"
+        );
+        assert!(
+            undecryptable_messages(&conn).expect("list").is_empty(),
+            "a kept preview is not queued for a retry"
+        );
+    }
+
+    #[test]
+    fn a_recovered_preview_replaces_an_undecryptable_row() {
+        let conn = Connection::open_in_memory().expect("db");
+        thelemail_store::migrations::migrate(&conn).expect("migrate");
+        let item: MessageListItem = serde_json::from_value(serde_json::json!({
+            "id": "m2",
+            "direction": "received",
+            "source": "inbound_external",
+            "mailboxState": "inbox",
+            "storedAt": "2026-10-18T09:05:00Z"
+        }))
+        .expect("item");
+        upsert_message(&conn, &item, &MessagePreview::default(), false).expect("upsert");
+        assert_eq!(preview_state(&conn, "m2"), "undecryptable");
+        assert_eq!(undecryptable_messages(&conn).expect("list"), vec!["m2"]);
+
+        let preview: MessagePreview = serde_json::from_str(
+            r#"{"subject":"Sent before the new key","sender":{"display":"","address":"old@example.com"},
+                "recipients":[],"delivered_to":"nora@thelemail.test"}"#,
+        )
+        .expect("preview");
+        assert!(apply_retried_preview(&conn, "m2", &preview).expect("apply"));
+        assert!(
+            !apply_retried_preview(&conn, "m2", &preview).expect("apply again"),
+            "a row that is already readable is left alone"
+        );
+
+        let got = thelemail_store::list::get_message(&conn, "m2", "now")
+            .expect("query")
+            .expect("message");
+        assert_eq!(got.subject, "Sent before the new key");
+        assert_eq!(got.delivered_to, "nora@thelemail.test");
+        assert_eq!(preview_state(&conn, "m2"), "ok");
+        assert!(undecryptable_messages(&conn).expect("list").is_empty());
+        let hits = thelemail_store::search::search_messages(&conn, "before", None).expect("search");
+        assert_eq!(hits.len(), 1);
+    }
+
     #[test]
     fn signature_facts_survive_for_the_offline_reader() {
         let conn = Connection::open_in_memory().expect("db");
@@ -1081,12 +1380,52 @@ mod tests {
         let account = "0f0f0f0f-0f0f-4f0f-8f0f-0f0f0f0f0f0f";
         assert!(mirror.claim(account));
         mirror.arm_notifications(account);
+        mirror.want_retry(account);
         mirror.purge(account).expect("purge");
         assert!(
             mirror.claim(account),
             "a purged account must be claimable again"
         );
         assert!(!mirror.notifications_armed(account));
+        assert!(!mirror.retry_pending(account));
+    }
+
+    #[test]
+    fn a_retry_asked_for_while_a_sync_runs_waits_for_it() {
+        let mirror = Mirror::default();
+        let account = "0e0e0e0e-0e0e-4e0e-8e0e-0e0e0e0e0e0e";
+        assert!(mirror.claim(account));
+        mirror.want_retry(account);
+        assert!(!mirror.claim(account), "the running sync keeps the account");
+        assert!(mirror.retry_pending(account));
+        assert!(mirror.take_retry(account));
+        assert!(!mirror.take_retry(account), "one request runs one pass");
+    }
+
+    #[test]
+    fn a_retry_with_no_session_yet_is_kept_for_the_next_sync() {
+        let mirror = Mirror::default();
+        let account = "0d0d0d0d-0d0d-4d0d-8d0d-0d0d0d0d0d0d";
+        mirror.want_retry(account);
+        assert!(mirror.claim(account));
+        assert!(mirror.take_retry(account));
+        mirror.defer_retry(account);
+
+        assert!(
+            mirror.retry_pending(account),
+            "the request survives the pass"
+        );
+        assert!(
+            mirror.claim(account),
+            "the deferred pass releases the account"
+        );
+        assert!(
+            mirror.release_wanting_retry(account),
+            "the sync that follows hands the retry on"
+        );
+        assert!(mirror.claim(account));
+        assert!(mirror.take_retry(account));
+        assert!(!mirror.release_wanting_retry(account));
     }
 
     #[tokio::test]
@@ -1286,6 +1625,8 @@ const BODY_BATCH: usize = 16;
 struct MessageDetailResponse {
     body: BlobPointer,
     #[serde(default)]
+    encrypted_preview: Option<String>,
+    #[serde(default)]
     attachments: Vec<AttachmentDetailResponse>,
 }
 
@@ -1453,7 +1794,7 @@ async fn fetch_one_body(
     }
 
     let plain = ks
-        .decrypt_bytes(account_id, &resp.body.unwrap_or_default())
+        .decrypt_bytes(account_id, &resp.body.unwrap_or_default(), None)
         .map_err(|code| code.to_owned())?;
     let mime = unwrap_pgp_layers(ks, account_id, plain)?;
     let extracted = thelemail_mime::extract(&mime, thelemail_mime::DEFAULT_MAX_TEXT_BYTES);
@@ -1516,7 +1857,7 @@ fn unwrap_pgp_layers(ks: &Keystore, account_id: &str, outer: Vec<u8>) -> Result<
             return Err("missing PGP payload".to_owned());
         };
         current = ks
-            .decrypt_bytes(account_id, armor.as_bytes())
+            .decrypt_bytes(account_id, armor.as_bytes(), None)
             .map_err(|code| code.to_owned())?;
     }
     Ok(current)

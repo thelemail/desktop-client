@@ -78,18 +78,21 @@ fn backfills_a_real_mailbox_and_searches_it_offline() {
         .expect("accessToken")
         .to_owned();
 
-    let unlocked = ks.opaque_complete_login_unlock(OpaqueCompleteLoginUnlockArgs {
-        operation_id: start.operation_id,
-        account_id: account_id.clone(),
-        encrypted_private_key: grant["encryptedPrivateKey"]
-            .as_str()
-            .expect("key")
-            .to_owned(),
-        wrapped_master_key: grant["wrappedMasterKey"].as_str().expect("wmk").to_owned(),
-        master_key_id: grant["masterKeyId"].as_str().expect("mkid").to_owned(),
-        opaque_params_version: grant["opaqueParamsVersion"].as_i64().unwrap_or(1),
-        server_auth_scheme: AuthScheme::OpaqueV1,
-    });
+    let unlocked = ks.opaque_complete_login_unlock(
+        OpaqueCompleteLoginUnlockArgs {
+            operation_id: start.operation_id,
+            account_id: account_id.clone(),
+            encrypted_private_key: grant["encryptedPrivateKey"]
+                .as_str()
+                .expect("key")
+                .to_owned(),
+            wrapped_master_key: grant["wrappedMasterKey"].as_str().expect("wmk").to_owned(),
+            master_key_id: grant["masterKeyId"].as_str().expect("mkid").to_owned(),
+            opaque_params_version: grant["opaqueParamsVersion"].as_i64().unwrap_or(1),
+            server_auth_scheme: AuthScheme::OpaqueV1,
+        },
+        Vec::new(),
+    );
     assert!(
         matches!(unlocked, OpaqueCompleteLoginUnlockResponse::Ok { .. }),
         "vault must unlock"

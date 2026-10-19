@@ -19,7 +19,7 @@ use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::TrayIconBuilder;
 use tauri::{Emitter, Manager, WebviewUrl, WebviewWindowBuilder, WindowEvent};
 use thelemail_api::{ApiConfig, Net};
-use thelemail_keystore::Keystore;
+use thelemail_keystore::{Broadcast, Keystore};
 
 fn allowed_navigation(url: &tauri::Url) -> bool {
     matches!(url.scheme(), "tauri" | "ipc") && url.host_str() == Some("localhost")
@@ -83,6 +83,7 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(net)
         .manage(Keystore::new())
+        .manage(keystore::PersistentHalves::default())
         .manage(Mirror::default())
         .manage(locale::UiLocale::default())
         .manage(sse::Streams::default())
@@ -126,6 +127,11 @@ pub fn run() {
             keystore::keystore_encrypt_to_keys,
             keystore::keystore_sign_detached,
             keystore::keystore_get_public_key,
+            keystore::keystore_load_account_keys,
+            keystore::keystore_list_account_keys,
+            keystore::keystore_prepare_key_rotation,
+            keystore::keystore_commit_key_rotation,
+            keystore::keystore_abandon_key_rotation,
             keystore::keystore_opaque_recovery_setup_start,
             keystore::keystore_opaque_recovery_setup_finish,
             keystore::keystore_opaque_complete_recovery_unlock,
@@ -191,7 +197,40 @@ pub fn run() {
             let handle = app.handle().clone();
             let mut events = app.state::<Keystore>().subscribe();
             tauri::async_runtime::spawn(async move {
-                while let Ok(event) = events.recv().await {
+                loop {
+                    let event = match events.recv().await {
+                        Ok(event) => event,
+                        Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
+                        Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+                    };
+                    if let Broadcast::AccountKeysChanged {
+                        account_id,
+                        changed: true,
+                        ..
+                    } = &event
+                    {
+                        let app = handle.clone();
+                        let id = account_id.clone();
+                        tauri::async_runtime::spawn_blocking(move || {
+                            keystore::save_key_history(&app.state::<Keystore>(), &id);
+                            keystore::rewrap_persisted(
+                                &app.state::<Keystore>(),
+                                &app.state::<keystore::PersistentHalves>(),
+                                &id,
+                            );
+                        });
+                        tauri::async_runtime::spawn(mirror::retry_undecryptable(
+                            handle.clone(),
+                            account_id.clone(),
+                        ));
+                    }
+                    if let Broadcast::VaultChanged { account_id, .. } = &event {
+                        let app = handle.clone();
+                        let id = account_id.clone();
+                        tauri::async_runtime::spawn_blocking(move || {
+                            keystore::save_key_history(&app.state::<Keystore>(), &id);
+                        });
+                    }
                     let _ = handle.emit("keystore", event);
                 }
             });

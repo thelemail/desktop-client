@@ -1,0 +1,25 @@
+{
+	"generator": "openpgp.js OpenPGP.js 6.3.0",
+	"transitions": [
+		{
+			"name": "openpgpjs-v4-previous",
+			"accountId": "4b1f2c3d-5e6f-4a7b-8c9d-0e1f2a3b4c5d",
+			"newKeyFingerprint": "ef5e9f153a452c6ae1d03b9b03f92f273540737fef38c926ce7e395d915f36d8",
+			"previousKeyFingerprint": "25c3c86b9e59522deeabd0a2b3953acc5a3eec27",
+			"payload": "{\"accountId\":\"4b1f2c3d-5e6f-4a7b-8c9d-0e1f2a3b4c5d\",\"newKeyFingerprint\":\"ef5e9f153a452c6ae1d03b9b03f92f273540737fef38c926ce7e395d915f36d8\",\"previousKeyFingerprint\":\"25c3c86b9e59522deeabd0a2b3953acc5a3eec27\",\"type\":\"thelemail-key-transition/v1\"}",
+			"signature": "wqcEABsIAF0FgmrU2J4JELOVOsxaPuwnNRQAAAAAABwAEHNhbHRAbm90YXRpb25zLm9wZW5wZ3Bqcy5vcmfn4IvGgPL+FBSD2jlgAW/NFiEEJcPIa55ZUi3uq9Cis5U6zFo+7CcAAArCM219hSV5VDYi1nWH6XAYJanR/poHf5WrJTYRy+L0Q5yk7oHSXYx7g3s2wsQ1uFkvHCfKnTrhdcEDKvbNRNkjBw==",
+			"previousPublicKeyArmored": "-----BEGIN PGP PUBLIC KEY BLOCK-----\n\nxiYEapWZqBukUmKGTBW+3LOEwju5NugY/Th2Eikig5egtf/d8TpnL80pRml4\ndHVyZSBBY2NvdW50IDxmaXh0dXJlQHRoZWxlbWFpbC5sb2NhbD7CwA8EExsK\nAIUFgmqVmagDCwkHCRCzlTrMWj7sJ0UUAAAAAAAcACBzYWx0QG5vdGF0aW9u\ncy5vcGVucGdwanMub3JnH8k0Ies86yL5zk2IbOT/XTLWJsmF5EUvCkt+A0E1\nQlIFFQoIDgwEFgACAQIZAQKbAwIeARYhBCXDyGueWVIt7qvQorOVOsxaPuwn\nAAB3ikPdmngBd+s4s5T7k/5LoFwaZ+1D9dnM1VH2KWX3Y3SgqC06x9P+OToq\nygmTG1jWfAWyIa/T4vqB/HyQpCm3owfOJgRqlZmoGUhFtyHXNwptsBG+2XMs\n2bSkHUVq6JlJsJHWe32c5Vc6wroEGBsKAHAFgmqVmagJELOVOsxaPuwnRRQA\nAAAAABwAIHNhbHRAbm90YXRpb25zLm9wZW5wZ3Bqcy5vcmeM0btpIAAsrbom\nWGv2PXx4/sW1hSwaTBzJ8GNaR1pGTwKbDBYhBCXDyGueWVIt7qvQorOVOsxa\nPuwnAACF/r4oGw+jjrjWfHwr3FHai3Ub54prOYJsHLrdlQpFKx7WmVJSnHee\nn3bT6RPfuRgPtmr7Ac5l/e702U1Cr3nvZgM=\n=LVLV\n-----END PGP PUBLIC KEY BLOCK-----\n",
+			"valid": true
+		},
+		{
+			"name": "openpgpjs-v6-previous",
+			"accountId": "4b1f2c3d-5e6f-4a7b-8c9d-0e1f2a3b4c5d",
+			"newKeyFingerprint": "25c3c86b9e59522deeabd0a2b3953acc5a3eec27",
+			"previousKeyFingerprint": "ef5e9f153a452c6ae1d03b9b03f92f273540737fef38c926ce7e395d915f36d8",
+			"payload": "{\"accountId\":\"4b1f2c3d-5e6f-4a7b-8c9d-0e1f2a3b4c5d\",\"newKeyFingerprint\":\"25c3c86b9e59522deeabd0a2b3953acc5a3eec27\",\"previousKeyFingerprint\":\"ef5e9f153a452c6ae1d03b9b03f92f273540737fef38c926ce7e395d915f36d8\",\"type\":\"thelemail-key-transition/v1\"}",
+			"signature": "wogGABsIAAAAKQWCatTYniKhBu9enxU6RSxq4dA7mwP5Lyc1QHN/7zjJJs5+OV2RXzbYAAAAAGphEJT7jIqVk3T3U9qpFiW+awXoj7LhEW0ymg8UfIEPjwgm1hAY+Y9SR/JhLzUQRY0ZIH+B/pmRpUBCSBUQFIHeM8EC/uR0J4QyXaChlu2yEmUN",
+			"previousPublicKeyArmored": "-----BEGIN PGP PUBLIC KEY BLOCK-----\n\nxioGaq1YBBsAAAAgmjXn77A0mHgrjwxqcZDoVAMpJtaeJAdTy6K8QGv8qr7C\nuwYfGwoAAABMBYJqrVgEAwsJBwUVCggODAQWAAIBApsDAh4JIqEG716fFTpF\nLGrh0DubA/kvJzVAc3/vOMkmzn45XZFfNtgNJwkDBwMJAQcBCQIHAgAAAACY\npSCx6iKoL4/NTRK9FQzbZwiBY93RSG5Uh0mvcwHj9gyRBDxrZkzC5+2yNcya\nBv+PUzp9GB9oVyt+1M/BKt4C+BGQZxM4pWwkeGyiToPHKy+QWp03NbH0znPT\nXeDrAive7gXNKUZpeHR1cmUgQWNjb3VudCA8Zml4dHVyZUB0aGVsZW1haWwu\nbG9jYWw+wpsGExsKAAAALAWCaq1YBAIZASKhBu9enxU6RSxq4dA7mwP5Lyc1\nQHN/7zjJJs5+OV2RXzbYAAAAAGx3IFtC5jG9MDMpq8bUgKviECkInMitylqK\n/NQEHzyjjL3o/0XbPNtAvLEPQl1kQRbqFl2O9BdQZz/XJuISIOAkboHenYqZ\nEolll+kJmzTKNAQb/Fcl0gRoG4l+JYsejXxMBc4qBmqtWAQZAAAAIAz7599K\nM3qduEEYYyxsfxDGsPLJOGKYGLtHpuidYLoZwpsGGBsKAAAALAWCaq1YBAKb\nDCKhBu9enxU6RSxq4dA7mwP5Lyc1QHN/7zjJJs5+OV2RXzbYAAAAAMVMIBUZ\nPCxbZserq4dT8NdKXncO8X9NHNpsMvM+UoJB0++xxQlLaOIRoaeXJGJ5bFsm\n6mlDdIE78U8IH7O0Mt8tqmTkaxAVVFj+ANqqO5sB32rMErea32bz1sqShaQT\nEVi8BA==\n-----END PGP PUBLIC KEY BLOCK-----\n",
+			"valid": true
+		}
+	]
+}

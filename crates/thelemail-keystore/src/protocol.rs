@@ -174,6 +174,8 @@ pub enum GetPublicKeyResponse {
         #[serde(rename = "publicKeyArmored")]
         public_key_armored: String,
         fingerprint: Vec<u8>,
+        #[serde(rename = "keyVersion", skip_serializing_if = "Option::is_none")]
+        key_version: Option<i64>,
     },
     Err {
         ok: bool,
@@ -198,6 +200,19 @@ pub enum Broadcast {
         account_id: String,
     },
     ClearedAll,
+    AccountKeysChanged {
+        #[serde(rename = "accountId")]
+        account_id: String,
+        fingerprints: Vec<String>,
+        #[serde(rename = "currentFingerprintHex")]
+        current_fingerprint_hex: String,
+        #[serde(rename = "keyVersion")]
+        key_version: i64,
+        #[serde(rename = "currentChanged")]
+        current_changed: bool,
+        #[serde(skip)]
+        changed: bool,
+    },
 }
 
 #[derive(Debug, Deserialize)]
@@ -386,6 +401,8 @@ pub struct AliasKeyGrantInput {
     pub key_version: i64,
     pub alias_key_fingerprint_hex: String,
     pub wrapped_private_key_armored: String,
+    #[serde(default)]
+    pub member_key_fingerprint_hex: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -627,9 +644,186 @@ pub struct CommitReformattedKeyArgs {
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct PersistedAccountKey {
+    pub key_version: i64,
+    pub secret_key_armored: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub encrypted_private_key_armored: Option<String>,
+    #[serde(default)]
+    pub fixed: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StoredAccountKey {
+    pub key_version: i64,
+    pub fingerprint_hex: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub encrypted_private_key_armored: Option<String>,
+    #[serde(default)]
+    pub fixed: bool,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct PersistedVault {
     pub email: String,
     pub auth_scheme: AuthScheme,
     pub secret_key_armored: String,
     pub amk: String,
+    #[serde(default)]
+    pub key_version: i64,
+    #[serde(default)]
+    pub history: Vec<PersistedAccountKey>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub encrypted_private_key_armored: Option<String>,
+    #[serde(default)]
+    pub key_fixed: bool,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AccountKeyTransitionInput {
+    pub previous_key_fingerprint_hex: String,
+    pub signature: Vec<u8>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AccountKeyInput {
+    pub key_version: i64,
+    pub fingerprint_hex: String,
+    pub encrypted_private_key_armored: String,
+    #[serde(default)]
+    pub is_current: bool,
+    #[serde(default)]
+    pub transitions: Vec<AccountKeyTransitionInput>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LoadAccountKeysArgs {
+    pub account_id: String,
+    #[serde(default)]
+    pub current_version: i64,
+    pub keys: Vec<AccountKeyInput>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(untagged)]
+pub enum LoadAccountKeysResponse {
+    Ok {
+        ok: bool,
+        loaded: Vec<String>,
+        failed: Vec<i64>,
+        unverified: Vec<i64>,
+        #[serde(rename = "currentFingerprintHex")]
+        current_fingerprint_hex: String,
+        #[serde(rename = "keyVersion")]
+        key_version: i64,
+        #[serde(rename = "currentChanged")]
+        current_changed: bool,
+    },
+    Err {
+        ok: bool,
+        code: &'static str,
+    },
+}
+
+impl LoadAccountKeysResponse {
+    pub fn err(code: &'static str) -> Self {
+        Self::Err { ok: false, code }
+    }
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AccountKeySummary {
+    pub fingerprint_hex: String,
+    pub key_version: i64,
+    pub is_current: bool,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(untagged)]
+pub enum ListAccountKeysResponse {
+    Ok {
+        ok: bool,
+        keys: Vec<AccountKeySummary>,
+        #[serde(rename = "keyVersion")]
+        key_version: i64,
+    },
+    Err {
+        ok: bool,
+        code: &'static str,
+    },
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PrepareKeyRotationArgs {
+    pub account_id: String,
+    pub emails: Vec<String>,
+    pub expected_key_version: i64,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PreparedKeyTransition {
+    pub previous_key_fingerprint_hex: String,
+    pub signature: Vec<u8>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(untagged)]
+pub enum PrepareKeyRotationResponse {
+    Ok {
+        ok: bool,
+        #[serde(rename = "publicKeyArmored")]
+        public_key_armored: String,
+        #[serde(rename = "encryptedPrivateKey")]
+        encrypted_private_key: String,
+        #[serde(rename = "fingerprintHex")]
+        fingerprint_hex: String,
+        #[serde(rename = "keyVersion")]
+        key_version: i64,
+        transitions: Vec<PreparedKeyTransition>,
+    },
+    Err {
+        ok: bool,
+        code: &'static str,
+    },
+}
+
+impl PrepareKeyRotationResponse {
+    pub fn err(code: &'static str) -> Self {
+        Self::Err { ok: false, code }
+    }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CommitKeyRotationArgs {
+    pub account_id: String,
+    pub fingerprint_hex: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(untagged)]
+pub enum CommitKeyRotationResponse {
+    Ok {
+        ok: bool,
+        #[serde(rename = "keyVersion")]
+        key_version: i64,
+    },
+    Err {
+        ok: bool,
+        code: &'static str,
+    },
+}
+
+impl CommitKeyRotationResponse {
+    pub fn err(code: &'static str) -> Self {
+        Self::Err { ok: false, code }
+    }
 }

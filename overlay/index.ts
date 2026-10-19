@@ -203,6 +203,11 @@ const KEYSTORE_COMMANDS: Record<string, string> = {
 	encryptToKeys: 'keystore_encrypt_to_keys',
 	signDetached: 'keystore_sign_detached',
 	getPublicKey: 'keystore_get_public_key',
+	loadAccountKeys: 'keystore_load_account_keys',
+	listAccountKeys: 'keystore_list_account_keys',
+	prepareKeyRotation: 'keystore_prepare_key_rotation',
+	commitKeyRotation: 'keystore_commit_key_rotation',
+	abandonKeyRotation: 'keystore_abandon_key_rotation',
 	opaqueRecoverySetupStart: 'keystore_opaque_recovery_setup_start',
 	opaqueRecoverySetupFinish: 'keystore_opaque_recovery_setup_finish',
 	opaqueCompleteRecoveryUnlock: 'keystore_opaque_complete_recovery_unlock',
@@ -252,6 +257,8 @@ function bindKeystoreEvents() {
 
 const BYTE_FIELDS = ['ciphertext', 'plaintextBinary', 'fingerprint', 'exportKey', 'sessionKey', 'signature'];
 
+const NESTED_BYTE_LISTS = ['transitions'];
+
 function normalizeBytes<T>(value: T): T {
 	if (!value || typeof value !== 'object' || Array.isArray(value)) return value;
 	const record = value as Record<string, unknown>;
@@ -263,7 +270,39 @@ function normalizeBytes<T>(value: T): T {
 			patched[field] = new Uint8Array(raw as number[]);
 		}
 	}
+	for (const field of NESTED_BYTE_LISTS) {
+		const raw = record[field];
+		if (Array.isArray(raw)) {
+			patched ??= { ...record };
+			patched[field] = raw.map((item) => normalizeBytes(item));
+		}
+	}
 	return (patched ?? value) as T;
+}
+
+function wireSignatures<T>(args: T): T {
+	const record = args as { keys?: unknown };
+	if (!record || !Array.isArray(record.keys)) return args;
+	return {
+		...record,
+		keys: record.keys.map((key: { transitions?: unknown }) =>
+			key && Array.isArray(key.transitions)
+				? {
+						...key,
+						transitions: key.transitions.map((t: { signature?: unknown }) =>
+							t && ArrayBuffer.isView(t.signature)
+								? {
+										...t,
+										signature: Array.from(
+											new Uint8Array(t.signature.buffer, t.signature.byteOffset, t.signature.byteLength)
+										)
+									}
+								: t
+						)
+					}
+				: key
+		)
+	} as T;
 }
 
 const keystoreChannel = {
@@ -280,7 +319,8 @@ const keystoreChannel = {
 			}
 			throw new Error(`${cmd} is not available in the desktop app yet.`);
 		}
-		const result = await invoke<T>(command, args === undefined ? {} : { args });
+		const wire = cmd === 'loadAccountKeys' ? wireSignatures(args) : args;
+		const result = await invoke<T>(command, wire === undefined ? {} : { args: wire });
 		if (cmd === 'attachmentBytes') {
 			const res = result as {
 				ok?: boolean;
