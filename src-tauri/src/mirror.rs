@@ -89,6 +89,13 @@ pub struct MessageListItem {
     signer_key_fingerprint: Option<String>,
     #[serde(default, rename = "signerDelegationId")]
     signer_delegation_id: Option<String>,
+    #[serde(default)]
+    attested_sender: Option<AttestedSender>,
+}
+
+#[derive(Debug, Deserialize)]
+struct AttestedSender {
+    address: String,
 }
 
 #[derive(Debug, Deserialize, Default)]
@@ -465,9 +472,9 @@ fn upsert_message(
           body_size_bytes, attachment_count, thread_root_id, subject, sender_display, \
           sender_address, recipients_json, snippet, display_date, preview_state, synced_at, \
           delivered_to, encrypted, signature_status, signer_key_fingerprint, signer_delegation_id, \
-          folder_id, labels_json, returns_to_archive) \
+          folder_id, labels_json, returns_to_archive, attested_sender_address) \
          VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23, \
-          ?24,?25,?26) \
+          ?24,?25,?26,?27) \
          ON CONFLICT(id) DO UPDATE SET \
           mailbox_state=excluded.mailbox_state, starred=excluded.starred, read=excluded.read, \
           attachment_count=excluded.attachment_count, thread_root_id=excluded.thread_root_id, \
@@ -484,7 +491,8 @@ fn upsert_message(
           signer_key_fingerprint=excluded.signer_key_fingerprint, \
           signer_delegation_id=excluded.signer_delegation_id, \
           folder_id=excluded.folder_id, labels_json=excluded.labels_json, \
-          returns_to_archive=excluded.returns_to_archive \
+          returns_to_archive=excluded.returns_to_archive, \
+          attested_sender_address=excluded.attested_sender_address \
          WHERE messages.dirty = 0",
         params![
             item.id,
@@ -513,6 +521,7 @@ fn upsert_message(
             item.folder_id,
             labels_json,
             item.returns_to_archive as i64,
+            item.attested_sender.as_ref().map(|a| a.address.as_str()),
         ],
     )?;
 
@@ -871,14 +880,20 @@ fn arrival_for(
     Some(crate::notify::NewMail {
         account_id: account_id.to_owned(),
         message_id: item.id.clone(),
-        sender: if preview.sender.display.is_empty() {
-            preview.sender.address.clone()
-        } else {
-            preview.sender.display.clone()
+        sender: match forged_sender(item, preview) {
+            Some(attested) => attested.to_owned(),
+            None if preview.sender.display.is_empty() => preview.sender.address.clone(),
+            None => preview.sender.display.clone(),
         },
         subject: preview.subject.clone(),
         snippet: preview.snippet.clone(),
     })
+}
+
+fn forged_sender<'a>(item: &'a MessageListItem, preview: &MessagePreview) -> Option<&'a str> {
+    let attested = item.attested_sender.as_ref()?.address.as_str();
+    let same = attested.trim().to_lowercase() == preview.sender.address.trim().to_lowercase();
+    (!same).then_some(attested)
 }
 
 fn reset_for_resync(conn: &Connection, watermark_cursor: &str) -> Result<(), String> {
@@ -1293,6 +1308,65 @@ mod tests {
     }
 
     #[test]
+    fn the_attested_sender_reaches_the_offline_list_and_reader() {
+        let conn = Connection::open_in_memory().expect("db");
+        thelemail_store::migrations::migrate(&conn).expect("migrate");
+        let item: MessageListItem = serde_json::from_value(serde_json::json!({
+            "id": "m1",
+            "direction": "received",
+            "source": "internal",
+            "mailboxState": "inbox",
+            "storedAt": "2026-10-21T20:00:00Z",
+            "attestedSender": { "address": "mallory@acme.test" }
+        }))
+        .expect("item");
+        let preview: MessagePreview = serde_json::from_str(
+            r#"{"subject":"hi","sender":{"display":"Chief Executive","address":"ceo@acme.test"},"recipients":[]}"#,
+        )
+        .expect("preview");
+
+        upsert_message(&conn, &item, &preview, true).expect("upsert");
+
+        let got = thelemail_store::list::get_message(&conn, "m1", "now")
+            .expect("query")
+            .expect("message");
+        assert_eq!(
+            got.attested_sender_address.as_deref(),
+            Some("mallory@acme.test")
+        );
+        assert_eq!(got.sender_address, "ceo@acme.test");
+        let rows =
+            thelemail_store::list::list_mailbox(&conn, "inbox", None, None, 10).expect("list");
+        assert_eq!(
+            rows[0].attested_sender_address.as_deref(),
+            Some("mallory@acme.test")
+        );
+    }
+
+    #[test]
+    fn mail_without_an_attestation_stores_none() {
+        let conn = Connection::open_in_memory().expect("db");
+        thelemail_store::migrations::migrate(&conn).expect("migrate");
+        let item: MessageListItem = serde_json::from_value(serde_json::json!({
+            "id": "m1",
+            "direction": "received",
+            "source": "inbound_external",
+            "mailboxState": "inbox",
+            "storedAt": "2026-10-21T20:00:00Z"
+        }))
+        .expect("item");
+        let preview: MessagePreview =
+            serde_json::from_str(r#"{"subject":"hi","recipients":[]}"#).expect("preview");
+
+        upsert_message(&conn, &item, &preview, true).expect("upsert");
+
+        let got = thelemail_store::list::get_message(&conn, "m1", "now")
+            .expect("query")
+            .expect("message");
+        assert_eq!(got.attested_sender_address, None);
+    }
+
+    #[test]
     fn folder_and_labels_reach_the_offline_mirror() {
         let conn = Connection::open_in_memory().expect("db");
         thelemail_store::migrations::migrate(&conn).expect("migrate");
@@ -1510,6 +1584,7 @@ mod tests {
             signature_status: None,
             signer_key_fingerprint: None,
             signer_delegation_id: None,
+            attested_sender: None,
         }
     }
 
@@ -1535,6 +1610,36 @@ mod tests {
 
         let spam = item("m5", "received", "spam", false, "2026-09-02T12:00:05Z");
         assert!(arrival_for("acct", &spam, &preview, true, since).is_none());
+    }
+
+    #[test]
+    fn a_forged_sender_is_announced_under_the_attested_address() {
+        let since = chrono_parse("2026-09-02T12:00:00Z").expect("since");
+        let preview: MessagePreview = serde_json::from_str(
+            r#"{"subject":"hi","sender":{"display":"Chief Executive","address":"ceo@acme.test"},"recipients":[]}"#,
+        )
+        .expect("preview");
+        let attested = |address: &str| {
+            let mut it = item("m1", "received", "inbox", false, "2026-09-02T12:00:05Z");
+            it.attested_sender = Some(AttestedSender {
+                address: address.to_owned(),
+            });
+            it
+        };
+
+        let forged = arrival_for(
+            "acct",
+            &attested("mallory@acme.test"),
+            &preview,
+            true,
+            since,
+        )
+        .expect("announced");
+        assert_eq!(forged.sender, "mallory@acme.test");
+
+        let genuine = arrival_for("acct", &attested("CEO@acme.test"), &preview, true, since)
+            .expect("announced");
+        assert_eq!(genuine.sender, "Chief Executive");
     }
 
     #[test]
