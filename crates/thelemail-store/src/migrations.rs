@@ -34,6 +34,11 @@ pub static MIGRATIONS: &[Migration] = &[
         name: "returns_to_archive",
         up: m0005_returns_to_archive,
     },
+    Migration {
+        version: 6,
+        name: "attested_sender",
+        up: m0006_attested_sender,
+    },
 ];
 
 pub fn migrate(conn: &Connection) -> Result<(), StoreError> {
@@ -71,6 +76,13 @@ fn m0004_custom_folders(tx: &Transaction) -> rusqlite::Result<()> {
 fn m0005_returns_to_archive(tx: &Transaction) -> rusqlite::Result<()> {
     tx.execute_batch(
         "ALTER TABLE messages ADD COLUMN returns_to_archive INTEGER NOT NULL DEFAULT 0;",
+    )
+}
+
+fn m0006_attested_sender(tx: &Transaction) -> rusqlite::Result<()> {
+    tx.execute_batch(
+        "ALTER TABLE messages ADD COLUMN attested_sender_address TEXT;
+         UPDATE sync_state SET cursor = NULL;",
     )
 }
 

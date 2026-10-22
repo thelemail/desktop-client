@@ -68,6 +68,50 @@ fn ids(hits: &[thelemail_store::search::SearchHit]) -> Vec<String> {
 }
 
 #[test]
+fn the_attested_sender_migration_rewalks_every_scope() {
+    let conn = rusqlite::Connection::open_in_memory().expect("db");
+    for migration in thelemail_store::migrations::MIGRATIONS
+        .iter()
+        .filter(|m| m.version < 6)
+    {
+        let tx = conn.unchecked_transaction().expect("tx");
+        (migration.up)(&tx).expect("migration");
+        tx.pragma_update(None, "user_version", migration.version)
+            .expect("user_version");
+        tx.commit().expect("commit");
+    }
+    conn.execute(
+        "INSERT INTO sync_state (scope, cursor, delta_token) VALUES ('inbox', 'c-9', NULL), ('delta', NULL, 'd-1')",
+        [],
+    )
+    .expect("seed sync_state");
+
+    thelemail_store::migrations::migrate(&conn).expect("migrate");
+
+    let cursors: Vec<Option<String>> = conn
+        .prepare("SELECT cursor FROM sync_state ORDER BY scope")
+        .expect("prepare")
+        .query_map([], |r| r.get(0))
+        .expect("query")
+        .collect::<Result<_, _>>()
+        .expect("rows");
+    assert_eq!(cursors, vec![None, None]);
+    let delta: Option<String> = conn
+        .query_row(
+            "SELECT delta_token FROM sync_state WHERE scope = 'delta'",
+            [],
+            |r| r.get(0),
+        )
+        .expect("delta");
+    assert_eq!(delta.as_deref(), Some("d-1"));
+    conn.execute(
+        "UPDATE messages SET attested_sender_address = 'a@acme.test' WHERE 0",
+        [],
+    )
+    .expect("column exists");
+}
+
+#[test]
 fn opens_an_encrypted_database_and_migrates() {
     let (_dir, path) = temp_db();
     let key = generate_db_key();

@@ -23,6 +23,7 @@ pub struct MirrorRow {
     pub folder_id: Option<String>,
     pub returns_to_archive: bool,
     pub labels_json: String,
+    pub attested_sender_address: Option<String>,
 }
 
 pub fn list_mailbox(
@@ -35,7 +36,8 @@ pub fn list_mailbox(
     let mut stmt = conn.prepare(
         "SELECT id, direction, mailbox_state, subject, sender_display, sender_address, \
                 recipients_json, snippet, display_date, stored_at, read, starred, \
-                attachment_count, thread_root_id, labels_json, folder_id, returns_to_archive \
+                attachment_count, thread_root_id, labels_json, folder_id, returns_to_archive, \
+                attested_sender_address \
          FROM messages \
          WHERE deleted = 0 AND mailbox_state = ?1 \
            AND (?2 IS NULL OR direction = ?2) \
@@ -65,6 +67,7 @@ pub fn list_mailbox(
                 labels_json: row.get(14)?,
                 folder_id: row.get(15)?,
                 returns_to_archive: row.get::<_, i64>(16)? != 0,
+                attested_sender_address: row.get(17)?,
             })
         },
     )?;
@@ -109,6 +112,7 @@ pub struct MirrorMessage {
     pub signer_key_fingerprint: Option<String>,
     pub signer_delegation_id: Option<String>,
     pub encrypted: bool,
+    pub attested_sender_address: Option<String>,
     pub subject: String,
     pub sender_display: String,
     pub sender_address: String,
@@ -126,7 +130,7 @@ const MESSAGE_COLUMNS: &str = "m.rowid, m.id, m.direction, m.source, m.mailbox_s
      m.signature_status, m.subject, m.sender_display, m.sender_address, m.recipients_json, \
      m.snippet, m.display_date, m.attachment_count, b.mime, m.delivered_to, \
      m.signer_key_fingerprint, m.signer_delegation_id, m.encrypted, m.folder_id, \
-     m.returns_to_archive";
+     m.returns_to_archive, m.attested_sender_address";
 
 fn read_message(row: &rusqlite::Row<'_>) -> rusqlite::Result<(i64, MirrorMessage)> {
     let mime: Option<Vec<u8>> = row.get(20)?;
@@ -150,6 +154,7 @@ fn read_message(row: &rusqlite::Row<'_>) -> rusqlite::Result<(i64, MirrorMessage
             signer_key_fingerprint: row.get(22)?,
             signer_delegation_id: row.get(23)?,
             encrypted: row.get::<_, i64>(24)? != 0,
+            attested_sender_address: row.get(27)?,
             subject: row.get(13)?,
             sender_display: row.get(14)?,
             sender_address: row.get(15)?,
