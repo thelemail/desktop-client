@@ -25,7 +25,7 @@ semver = "1"
 serde.workspace = true
 sha2.workspace = true
 serde_json.workspace = true
-tauri = { version = "2.11", features = ["tray-icon", "image-png"] }
+tauri = { version = "2.12", features = ["tray-icon", "image-png"] }
 tauri-plugin-dialog.workspace = true
 tauri-plugin-opener.workspace = true
 tauri-plugin-updater.workspace = true
