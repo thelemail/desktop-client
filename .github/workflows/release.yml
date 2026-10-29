@@ -55,15 +55,13 @@ jobs:
       contents: read
     uses: ./.github/workflows/ci.yml
 
-  release:
+  macos:
     needs: [preflight, verify]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: macos-15
     environment: release
     permissions:
-      contents: write
-      id-token: write
-      attestations: write
+      contents: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -119,6 +117,90 @@ jobs:
           ./scripts/release-macos.sh
           rm -P "$APPLE_API_KEY_PATH"
 
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: macos
+          path: |
+            target/release/Thelemail_*_aarch64.dmg
+            target/release/Thelemail_*_aarch64.app.tar.gz
+            target/release/Thelemail_*_aarch64.app.tar.gz.sig
+          if-no-files-found: error
+          retention-days: 1
+
+  windows:
+    needs: [preflight, verify]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: windows-2025
+    environment: release
+    permissions:
+      contents: read
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Keep line endings as committed
+        run: git config --global core.autocrlf false
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          submodules: true
+          persist-credentials: false
+
+      - name: Fetch the pinned web client tags
+        run: git -C web-client fetch --tags --force origin
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: web-client/.nvmrc
+
+      - run: corepack enable
+
+      - uses: Swatinem/rust-cache@98c8021b550208e191a6a3145459bfc9fb29c4c0 # v2.8.0
+        with:
+          workspaces: src-tauri -> target
+
+      - name: Build OpenSSL with Strawberry Perl
+        run: |
+          set -euo pipefail
+          test -f /c/Strawberry/perl/bin/perl.exe
+          printf '%s\n' 'OPENSSL_SRC_PERL=C:\Strawberry\perl\bin\perl.exe' >> "$GITHUB_ENV"
+
+      - name: Build and sign the update
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: ./scripts/release-windows.sh
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: windows
+          path: |
+            target/release/bundle/nsis/Thelemail_*_x64-setup.exe
+            target/release/bundle/nsis/Thelemail_*_x64-setup.exe.sig
+          if-no-files-found: error
+          retention-days: 1
+
+  publish:
+    needs: [macos, windows]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          submodules: true
+          persist-credentials: false
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          path: built
+          merge-multiple: true
+
       - name: Assemble the release artifacts
         env:
           TAG: ${{ github.ref_name }}
@@ -127,22 +209,30 @@ jobs:
           version="${TAG#v}"
           mkdir -p dist
           updater="Thelemail_${version}_aarch64.app.tar.gz"
-          cp "target/release/Thelemail_${version}_aarch64.dmg" dist/
-          cp "target/release/${updater}" "target/release/${updater}.sig" dist/
+          installer="Thelemail_${version}_x64-setup.exe"
+          download="https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG}"
+          cp "built/Thelemail_${version}_aarch64.dmg" dist/
+          cp "built/${updater}" "built/${updater}.sig" dist/
+          cp "built/${installer}" "built/${installer}.sig" dist/
           jq -n --arg version "$version" \
                 --arg notes "Thelemail ${version}" \
                 --arg pubDate "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-                --arg url "https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG}/${updater}" \
-                --rawfile signature "dist/${updater}.sig" \
-                '{version: $version, notes: $notes, pub_date: $pubDate, platforms: {"darwin-aarch64": {signature: ($signature | rtrimstr("\n")), url: $url}}}' \
+                --arg macUrl "${download}/${updater}" \
+                --rawfile macSignature "dist/${updater}.sig" \
+                --arg windowsUrl "${download}/${installer}" \
+                --rawfile windowsSignature "dist/${installer}.sig" \
+                '{version: $version, notes: $notes, pub_date: $pubDate, platforms: {
+                    "darwin-aarch64": {signature: ($macSignature | rtrimstr("\n")), url: $macUrl},
+                    "windows-x86_64": {signature: ($windowsSignature | rtrimstr("\n")), url: $windowsUrl}
+                  }}' \
             > dist/latest.json
           jq -n --arg tag "$TAG" --arg commit "$GITHUB_SHA" \
                 --arg webClient "$(cat web-client.version)" \
                 --arg webClientCommit "$(git -C web-client rev-parse HEAD)" \
-                '{tag: $tag, commit: $commit, webClient: $webClient, webClientCommit: $webClientCommit, arch: "aarch64"}' \
+                '{tag: $tag, commit: $commit, webClient: $webClient, webClientCommit: $webClientCommit, arch: "aarch64", targets: ["darwin-aarch64", "windows-x86_64"]}' \
             > dist/release-metadata.json
           cd dist
-          shasum -a 256 ./*.dmg ./*.app.tar.gz ./*.app.tar.gz.sig latest.json release-metadata.json > SHA256SUMS
+          shasum -a 256 ./*.dmg ./*.app.tar.gz ./*.app.tar.gz.sig ./*-setup.exe ./*-setup.exe.sig latest.json release-metadata.json > SHA256SUMS
           sort -k2 -o SHA256SUMS SHA256SUMS
           cat SHA256SUMS
 
@@ -161,6 +251,7 @@ jobs:
           subject-path: |
             dist/*.dmg
             dist/*.app.tar.gz
+            dist/*-setup.exe
             dist/latest.json
             dist/release-metadata.json
             dist/SHA256SUMS
@@ -186,10 +277,12 @@ jobs:
           {
             printf 'Source commit: `%s`\n\n' "$GITHUB_SHA"
             printf 'UI from web-client `%s`.\n\n' "$(cat web-client.version)"
-            printf 'Apple Silicon build, signed with Developer ID and notarized by Apple.\n'
+            printf 'macOS: Apple Silicon build, signed with Developer ID and notarized by Apple.\n'
+            printf 'Windows: x64 installer. It is not Authenticode-signed yet, so SmartScreen asks before the first run.\n\n'
             printf 'Verify before installing:\n\n'
             printf '    shasum -a 256 -c SHA256SUMS\n'
             printf '    spctl --assess --type open --context context:primary-signature -v Thelemail_*.dmg\n'
+            printf '    Get-FileHash -Algorithm SHA256 Thelemail_*_x64-setup.exe\n'
           } > dist/notes.md
           gh release create "$TAG" \
             --verify-tag \
@@ -198,6 +291,8 @@ jobs:
             dist/*.dmg \
             dist/*.app.tar.gz \
             dist/*.app.tar.gz.sig \
+            dist/*-setup.exe \
+            dist/*-setup.exe.sig \
             dist/latest.json \
             dist/release-metadata.json \
             dist/sbom.source.spdx.json \

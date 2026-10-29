@@ -35,7 +35,7 @@ python3 -c "import json,sys;sys.exit(0 if json.load(open('src-tauri/tauri.conf.j
 [[ -f "$APPLE_API_KEY_PATH" ]] || { echo "release-macos: no key at $APPLE_API_KEY_PATH" >&2; exit 1; }
 
 THELEMAIL_RELEASE=1 node scripts/build-frontend.mjs
-npx --yes "@tauri-apps/cli@${TAURI_CLI_VERSION:-2.11.4}" build
+npx --yes "@tauri-apps/cli@${TAURI_CLI_VERSION:-2.12.4}" build
 
 codesign --force --options runtime --timestamp \
 	--sign "$APPLE_SIGNING_IDENTITY" \
@@ -75,7 +75,7 @@ spctl --assess --type open --context context:primary-signature -vv "$dmg"
 rm -f "$updater" "$updater.sig"
 COPYFILE_DISABLE=1 tar -C "$(dirname "$app")" -czf "$updater" "$(basename "$app")"
 TAURI_SIGNING_PRIVATE_KEY="$signing_key" TAURI_SIGNING_PRIVATE_KEY_PASSWORD="$signing_password" \
-	npx --yes "@tauri-apps/cli@${TAURI_CLI_VERSION:-2.11.4}" signer sign "$updater"
+	npx --yes "@tauri-apps/cli@${TAURI_CLI_VERSION:-2.12.4}" signer sign "$updater"
 cargo run --quiet --release -p thelemail-release --bin verify-update -- \
 	src-tauri/tauri.conf.json "$updater" "$updater.sig"
 

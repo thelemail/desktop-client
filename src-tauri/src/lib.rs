@@ -21,8 +21,16 @@ use tauri::{Emitter, Manager, WebviewUrl, WebviewWindowBuilder, WindowEvent};
 use thelemail_api::{ApiConfig, Net};
 use thelemail_keystore::{Broadcast, Keystore};
 
+#[cfg(not(windows))]
 fn allowed_navigation(url: &tauri::Url) -> bool {
     matches!(url.scheme(), "tauri" | "ipc") && url.host_str() == Some("localhost")
+}
+
+#[cfg(windows)]
+fn allowed_navigation(url: &tauri::Url) -> bool {
+    matches!(url.scheme(), "http" | "https")
+        && matches!(url.host_str(), Some("tauri.localhost" | "ipc.localhost"))
+        && url.port().is_none()
 }
 
 fn show_main(app: &tauri::AppHandle) {
@@ -54,30 +62,60 @@ fn build_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
     app.state::<locale::UiLocale>()
         .attach_tray(show.clone(), quit.clone());
 
-    let icon =
-        tauri::image::Image::from_bytes(include_bytes!("../icons/tray@2x.png")).expect("tray icon");
-
-    TrayIconBuilder::with_id("main")
-        .icon(icon)
-        .icon_as_template(true)
+    let tray = TrayIconBuilder::with_id("main")
         .tooltip("Thelemail")
         .menu(&menu)
-        .show_menu_on_left_click(true)
         .on_menu_event(|app, event| match event.id.as_ref() {
             "show" => show_main(app),
             "quit" => app.exit(0),
             _ => {}
-        })
-        .build(app)?;
+        });
+
+    #[cfg(not(windows))]
+    let tray = tray
+        .icon(
+            tauri::image::Image::from_bytes(include_bytes!("../icons/tray@2x.png"))
+                .expect("tray icon"),
+        )
+        .icon_as_template(true)
+        .show_menu_on_left_click(true);
+
+    #[cfg(windows)]
+    let tray = tray
+        .icon(
+            tauri::image::Image::from_bytes(include_bytes!("../icons/32x32.png"))
+                .expect("tray icon"),
+        )
+        .show_menu_on_left_click(false)
+        .on_tray_icon_event(|tray, event| {
+            if let tauri::tray::TrayIconEvent::Click {
+                button: tauri::tray::MouseButton::Left,
+                button_state: tauri::tray::MouseButtonState::Up,
+                ..
+            } = event
+            {
+                show_main(tray.app_handle());
+            }
+        });
+
+    tray.build(app)?;
     Ok(())
 }
 
 pub fn run() {
     eprintln!("[ui:startup] thelemail desktop starting");
+    #[cfg(windows)]
+    notify::claim_app_id();
     let config = ApiConfig::from_env().expect("desktop api configuration");
     let net = Net::new(config).expect("http client");
 
-    tauri::Builder::default()
+    let builder = tauri::Builder::default();
+    #[cfg(windows)]
+    let builder = builder.plugin(tauri_plugin_single_instance::init(|app, _, _| {
+        show_main(app)
+    }));
+
+    builder
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
@@ -246,6 +284,7 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("thelemail desktop failed to start")
         .run(|app, event| match event {
+            #[cfg(target_os = "macos")]
             tauri::RunEvent::Reopen { .. } => show_main(app),
             tauri::RunEvent::Exit => {
                 app.state::<sse::Streams>().close_all();
@@ -253,4 +292,46 @@ pub fn run() {
             }
             _ => {}
         });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::allowed_navigation;
+
+    fn allowed(raw: &str) -> bool {
+        allowed_navigation(&raw.parse().expect("url"))
+    }
+
+    #[test]
+    fn navigation_stays_inside_the_app() {
+        for foreign in [
+            "https://thelemail.com/",
+            "http://localhost/",
+            "http://tauri.localhost.evil.com/",
+            "file:///C:/Windows/",
+            "javascript:alert(1)",
+        ] {
+            assert!(
+                !allowed(foreign),
+                "{foreign} must not load in the app window"
+            );
+        }
+    }
+
+    #[cfg(not(windows))]
+    #[test]
+    fn the_app_origin_loads() {
+        assert!(allowed("tauri://localhost/index.html"));
+        assert!(allowed("ipc://localhost/plugin"));
+        assert!(!allowed("http://tauri.localhost/"));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn the_webview2_app_origin_loads() {
+        assert!(allowed("http://tauri.localhost/index.html"));
+        assert!(allowed("http://ipc.localhost/plugin"));
+        assert!(!allowed("http://tauri.localhost:8080/"));
+        assert!(!allowed("tauri://localhost/"));
+    }
 }

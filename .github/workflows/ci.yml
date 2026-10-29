@@ -50,3 +50,53 @@ jobs:
       - run: cargo clippy --workspace --all-targets -- -D warnings
 
       - run: cargo test --workspace
+
+  windows:
+    runs-on: windows-2025
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Keep line endings as committed
+        run: git config --global core.autocrlf false
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          submodules: true
+          persist-credentials: false
+
+      - name: Fetch the pinned web client tags
+        run: git -C web-client fetch --tags --force origin
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: web-client/.nvmrc
+
+      - run: corepack enable
+
+      - uses: Swatinem/rust-cache@98c8021b550208e191a6a3145459bfc9fb29c4c0 # v2.8.0
+        with:
+          workspaces: src-tauri -> target
+
+      - name: Build OpenSSL with Strawberry Perl
+        run: |
+          set -euo pipefail
+          test -f /c/Strawberry/perl/bin/perl.exe
+          printf '%s\n' 'OPENSSL_SRC_PERL=C:\Strawberry\perl\bin\perl.exe' >> "$GITHUB_ENV"
+
+      - name: Build the frontend from the pin
+        run: THELEMAIL_RELEASE=1 node scripts/build-frontend.mjs
+
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - run: cargo test --workspace
+
+      - name: Build the installer
+        run: npx --yes @tauri-apps/cli@2.12.4 build
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: windows-installer
+          path: target/release/bundle/nsis/*-setup.exe
+          if-no-files-found: error
+          retention-days: 14

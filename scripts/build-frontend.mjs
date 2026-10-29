@@ -8,6 +8,7 @@ const submodule = resolve(root, 'web-client');
 const dist = resolve(root, 'frontend-dist');
 const pinned = readFileSync(resolve(root, 'web-client.version'), 'utf8').trim();
 const strict = process.env.THELEMAIL_RELEASE === '1';
+const shell = process.platform === 'win32';
 
 function fail(message) {
 	console.error(`build-frontend: ${message}`);
@@ -56,7 +57,7 @@ function buildConfig() {
 	const config = {};
 	const configFile = resolve(source, '.github/build-config.env');
 	if (existsSync(configFile)) {
-		for (const line of readFileSync(configFile, 'utf8').split('\n')) {
+		for (const line of readFileSync(configFile, 'utf8').split(/\r?\n/)) {
 			const at = line.indexOf('=');
 			if (at > 0 && !line.startsWith('#')) config[line.slice(0, at)] = line.slice(at + 1);
 		}
@@ -87,7 +88,8 @@ for (const dir of [root, source]) {
 	if (!existsSync(resolve(dir, 'node_modules'))) {
 		execFileSync('pnpm', ['install', '--frozen-lockfile', '--ignore-scripts'], {
 			cwd: dir,
-			stdio: 'inherit'
+			stdio: 'inherit',
+			shell
 		});
 	}
 }
@@ -99,6 +101,7 @@ rmSync(resolve(app, '.svelte-kit'), { recursive: true, force: true });
 execFileSync('pnpm', ['--filter', '@thelemail/mail', 'build'], {
 	cwd: source,
 	stdio: 'inherit',
+	shell,
 	env: {
 		...process.env,
 		...config,

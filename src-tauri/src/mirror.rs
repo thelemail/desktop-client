@@ -449,6 +449,14 @@ impl Mirror {
     }
 }
 
+#[cfg(windows)]
+fn dirs_root() -> PathBuf {
+    std::env::var_os("LOCALAPPDATA")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("."))
+}
+
+#[cfg(not(windows))]
 fn dirs_root() -> PathBuf {
     std::env::var_os("HOME")
         .map(PathBuf::from)
