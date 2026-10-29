@@ -104,6 +104,8 @@ fn build_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
 
 pub fn run() {
     eprintln!("[ui:startup] thelemail desktop starting");
+    #[cfg(windows)]
+    notify::claim_app_id();
     let config = ApiConfig::from_env().expect("desktop api configuration");
     let net = Net::new(config).expect("http client");
 

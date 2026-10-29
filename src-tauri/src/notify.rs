@@ -518,12 +518,15 @@ mod platform {
         let _ = app.emit("notify://status", status);
     }
 
-    pub fn bind(app: &AppHandle) {
+    pub fn claim_app_id() {
         let id = HSTRING::from(APP_ID);
         unsafe {
             let _ =
                 windows_sys::Win32::UI::Shell::SetCurrentProcessExplicitAppUserModelID(id.as_ptr());
         }
+    }
+
+    pub fn bind(app: &AppHandle) {
         publish(app, snapshot(None));
     }
 
@@ -611,6 +614,11 @@ mod platform {
             ..NotifyStatus::unbundled()
         }
     }
+}
+
+#[cfg(windows)]
+pub fn claim_app_id() {
+    platform::claim_app_id();
 }
 
 pub fn prepare(app: &AppHandle) {
