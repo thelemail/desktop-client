@@ -1,6 +1,6 @@
 # Thelemail desktop client
 
-The macOS client for [Thelemail](https://thelemail.com), an end-to-end encrypted email service. It is a [Tauri 2](https://tauri.app) shell around the [web client](https://github.com/thelemail/web-client) UI, with a Rust core that owns the private keys, an encrypted local mirror of the mailbox, and a background sync loop.
+The macOS and Windows client for [Thelemail](https://thelemail.com), an end-to-end encrypted email service. It is a [Tauri 2](https://tauri.app) shell around the [web client](https://github.com/thelemail/web-client) UI, with a Rust core that owns the private keys, an encrypted local mirror of the mailbox, and a background sync loop.
 
 The webview never holds a private key. Every cryptographic operation — OPAQUE login, key generation, message decryption, signing, attachment framing — happens in Rust, and the webview receives plaintext results over Tauri's IPC. The UI is packaged into the binary and served from a local scheme; the app never loads the web client over the network as executable content.
 
@@ -8,7 +8,7 @@ The webview never holds a private key. Every cryptographic operation — OPAQUE 
 
 | Path | Contents |
 | --- | --- |
-| `src-tauri/` | The Tauri application: commands, tray, windowing, network and keychain access |
+| `src-tauri/` | The Tauri application: commands, tray, windowing, network, keychain and credential store access |
 | `crates/thelemail-crypto/` | OpenPGP, OPAQUE, the account master key schedule, attachment framing |
 | `crates/thelemail-keystore/` | Unlocked vaults, alias keys, and the operations the UI is allowed to ask for |
 | `crates/thelemail-store/` | The encrypted per-account mirror and its full-text index |
@@ -18,7 +18,7 @@ The webview never holds a private key. Every cryptographic operation — OPAQUE 
 
 The web client is written against a small platform interface rather than the browser directly. `overlay/` supplies the desktop implementation of it, so every request, keystore call, blob fetch and file save is routed through Rust instead of `fetch` and the DOM. Nothing in the UI reaches the network on its own.
 
-Mail is mirrored into a per-account SQLCipher database with a SQLite FTS5 index, so search and reading work offline and never leave the machine. The database key is a random 256-bit value held in the macOS keychain, bound to the device where the signed build's entitlements allow it. How much mail to keep is asked on first run and can be changed later.
+Mail is mirrored into a per-account SQLCipher database with a SQLite FTS5 index, so search and reading work offline and never leave the machine. The database key is a random 256-bit value held in the macOS keychain, bound to the device where the signed build's entitlements allow it. On Windows it is held in the Credential Manager of the signed-in user, stored for this machine only so it never roams with the profile. How much mail to keep is asked on first run and can be changed later.
 
 ## Cryptography
 
@@ -30,7 +30,8 @@ Mail is mirrored into a per-account SQLCipher database with a SQLite FTS5 index,
 | `hkdf`, `sha2`, `aes-gcm` | The account master key schedule and vault wrapping |
 | `bip39` | Recovery phrase generation |
 | `rusqlite` (SQLCipher) | Encryption of the local mirror at rest |
-| `security-framework` | Keychain storage of the mirror key |
+| `security-framework` | Keychain storage of the mirror key on macOS |
+| `windows-sys` | Credential Manager storage of the mirror key on Windows |
 
 The wire formats are byte-compatible with the browser client: an account can be used from either, and the interop tests in `crates/thelemail-crypto/tests/` prove it in both directions against `openpgp.js` and `@serenity-kit/opaque`.
 
@@ -57,6 +58,12 @@ cargo test --workspace
 cargo clippy --workspace --all-targets
 ```
 
+On Windows the build needs the MSVC build tools and a native Perl for the vendored OpenSSL. Git Bash ships a Perl that OpenSSL refuses, so point the build at Strawberry Perl:
+
+```bash
+export OPENSSL_SRC_PERL='C:\Strawberry\perl\bin\perl.exe'
+```
+
 ## Configuration
 
 A release build needs no configuration: the API and submission origins are compiled in, and the trust roots come from the pinned web client. For development the following override them at runtime.
@@ -73,7 +80,7 @@ Requests to any other host are refused by the transport rather than merely disco
 
 The app never installs anything on its own. About a minute after launch and then every six hours it fetches `latest.json` from the latest GitHub release, and when a newer version is listed it shows a banner in the mail view and an entry under Settings, About & updates. Nothing is downloaded until the person using the app chooses Install. Later hides that version for three days; a newer release shows up straight away.
 
-Choosing Install downloads `Thelemail_<version>_aarch64.app.tar.gz` and accepts it only if all of these hold:
+On macOS, choosing Install downloads `Thelemail_<version>_aarch64.app.tar.gz` and accepts it only if all of these hold:
 
 1. The archive carries a minisign signature from the release key whose public half is pinned in `src-tauri/tauri.conf.json`.
 2. The unpacked bundle is `com.thelemail.desktop`, its version equals the one the manifest announced, and that version is newer than the running one. An older signed build relabelled as new is refused, and so is any downgrade.
@@ -81,11 +88,13 @@ Choosing Install downloads `Thelemail_<version>_aarch64.app.tar.gz` and accepts 
 
 The bundle is unpacked next to the running app and verified there, so a failed check leaves the installed app untouched. Before the swap the app refuses to restart while a message is sending, an attachment is uploading or a draft cannot be saved. It then stops sync, closes every local database and exchanges the two bundles in one atomic rename. If the app runs from a translocated or read-only location it never asks for administrator rights; it points to the release page instead.
 
-The update channel is not TLS-pinned, because GitHub rotates its certificates. The trust comes from the two signatures above, so whoever controls the network or the release host still cannot get code installed.
+On Windows, choosing Install downloads `Thelemail_<version>_x64-setup.exe` and runs it only if the installer carries a minisign signature from the same release key, and its version resource names Thelemail with the announced version, newer than the running one. The app then stops sync, closes every local database and hands over to the installer, which updates the per-user install in place without asking for administrator rights and starts the new version. The installer is not Authenticode-signed yet, so the release key is the only signature checked.
+
+The update channel is not TLS-pinned, because GitHub rotates its certificates. The trust comes from the signatures above, so whoever controls the network or the release host still cannot get code installed.
 
 ## Releases
 
-A release is built from a `v*` tag, signed with a Developer ID certificate and notarized by Apple. The build is reproducible in the sense that matters: the tag records the exact web client version the UI was built from, and `release-metadata.json` in each release names both commits.
+A release is built from a `v*` tag. The macOS build is signed with a Developer ID certificate and notarized by Apple. The Windows installer is not Authenticode-signed yet, so Windows SmartScreen asks before its first run; check it against `SHA256SUMS` first. The build is reproducible in the sense that matters: the tag records the exact web client version the UI was built from, and `release-metadata.json` in each release names both commits.
 
 Every release carries `SHA256SUMS`, a Sigstore signature over it, an SBOM, and build provenance:
 
@@ -98,6 +107,10 @@ cosign verify-blob --bundle SHA256SUMS.sigstore.json \
   SHA256SUMS
 
 gh attestation verify Thelemail_*.dmg \
+  --repo thelemail/desktop-client \
+  --signer-workflow thelemail/desktop-client/.github/workflows/release.yml
+
+gh attestation verify Thelemail_*_x64-setup.exe \
   --repo thelemail/desktop-client \
   --signer-workflow thelemail/desktop-client/.github/workflows/release.yml
 ```

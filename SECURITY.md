@@ -12,16 +12,16 @@ Do not test against other people's accounts or mailboxes. Register your own acco
 
 ## Scope
 
-This repository is the macOS desktop client. Findings that are in scope here include:
+This repository is the macOS and Windows desktop client. Findings that are in scope here include:
 
 - Anything that causes plaintext, private keys, or the account master key to leave the machine, or to reach the webview when it should not
 - Weaknesses in key generation, key derivation, vault wrapping, or the OPAQUE exchange as implemented here
-- Any path by which the webview can reach the network, the filesystem, or the keychain other than through the commands the Rust core exposes, or can invoke a command with an account it should not have access to
+- Any path by which the webview can reach the network, the filesystem, or the keychain or credential store other than through the commands the Rust core exposes, or can invoke a command with an account it should not have access to
 - Cross-site scripting or code execution through the rendering of received mail, and any escape from the sandboxed frame it is rendered in
-- Reading or tampering with the local mirror without the keychain key, weaknesses in how that key is stored, or mail that is retained after an account is signed out
+- Reading or tampering with the local mirror without the key held in the keychain or credential store, weaknesses in how that key is stored, or mail that is retained after an account is signed out
 - Failures in directory key verification or transparency log proof checking that would let a substituted key be accepted
-- Any way to make the app install or run code the user did not ask for, including anything that defeats the user-initiated-only install policy or gets an update accepted without the release signature, the pinned Developer ID requirement, or a newer version
-- A release whose signature, notarization, provenance or checksums do not match the commit it claims
+- Any way to make the app install or run code the user did not ask for, including anything that defeats the user-initiated-only install policy or gets an update accepted without the release signature, the pinned Developer ID requirement on macOS, or a newer version
+- A release whose signatures, notarization, provenance or checksums do not match the commit it claims
 
 Findings in the shared UI belong to [thelemail/web-client](https://github.com/thelemail/web-client), and server-side issues to the backend, but report them to the same address and we will route them.
 
@@ -31,5 +31,5 @@ Findings in the shared UI belong to [thelemail/web-client](https://github.com/th
 - Automated scanner output without a working proof of concept
 - Denial of service through volume alone
 - Social engineering, and physical attacks
-- Attacks that require an already-compromised macOS account, since the local mirror key is held by the keychain of that account
+- Attacks that require an already-compromised macOS or Windows account, since the local mirror key is held by the keychain or credential store of that account
 - Vulnerabilities in dependencies with no demonstrated path to exploitation here
