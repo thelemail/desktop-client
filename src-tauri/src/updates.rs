@@ -91,8 +91,10 @@ fn save(path: &Path, persisted: &Persisted) -> std::io::Result<()> {
     }
     let tmp = path.with_extension("json.tmp");
     let bytes = serde_json::to_vec(persisted).map_err(std::io::Error::other)?;
-    std::fs::write(&tmp, bytes)?;
-    std::fs::File::open(&tmp)?.sync_all()?;
+    let mut file = std::fs::File::create(&tmp)?;
+    std::io::Write::write_all(&mut file, &bytes)?;
+    file.sync_all()?;
+    drop(file);
     std::fs::rename(&tmp, path)
 }
 
