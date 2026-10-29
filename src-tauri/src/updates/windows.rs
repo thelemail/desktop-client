@@ -39,6 +39,7 @@ pub fn stage(
 }
 
 pub fn finish(app: &AppHandle, update: Update, staged: Staged, _installed: &Path, version: &str) {
+    app.cleanup_before_exit();
     if let Err(err) = update.install(&staged.installer) {
         eprintln!("updates: launching the {version} installer failed: {err}");
         app.state::<Updates>()
