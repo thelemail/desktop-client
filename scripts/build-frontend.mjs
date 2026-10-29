@@ -57,7 +57,7 @@ function buildConfig() {
 	const config = {};
 	const configFile = resolve(source, '.github/build-config.env');
 	if (existsSync(configFile)) {
-		for (const line of readFileSync(configFile, 'utf8').split('\n')) {
+		for (const line of readFileSync(configFile, 'utf8').split(/\r?\n/)) {
 			const at = line.indexOf('=');
 			if (at > 0 && !line.startsWith('#')) config[line.slice(0, at)] = line.slice(at + 1);
 		}
