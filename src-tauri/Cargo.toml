@@ -15,12 +15,9 @@ tauri-build = { version = "2", features = [] }
 [dependencies]
 base64.workspace = true
 rand.workspace = true
-flate2 = "1.1"
 futures-util = "0.3"
 rusqlite = { workspace = true, features = ["bundled-sqlcipher-vendored-openssl"] }
 hex.workspace = true
-libc = "0.2"
-plist = "1.10"
 semver = "1"
 serde.workspace = true
 sha2.workspace = true
@@ -29,7 +26,6 @@ tauri = { version = "2.12", features = ["tray-icon", "image-png"] }
 tauri-plugin-dialog.workspace = true
 tauri-plugin-opener.workspace = true
 tauri-plugin-updater.workspace = true
-tar = "0.4.46"
 thelemail-api = { path = "../crates/thelemail-api" }
 thelemail-crypto = { path = "../crates/thelemail-crypto" }
 thelemail-keystore = { path = "../crates/thelemail-keystore" }
@@ -43,6 +39,10 @@ sys-locale = "0.3.2"
 
 [target."cfg(target_os = \"macos\")".dependencies]
 block2 = "0.6.2"
+flate2 = "1.1"
+libc = "0.2"
+plist = "1.10"
+tar = "0.4.46"
 objc2 = "0.6.4"
 objc2-foundation = { version = "0.3.2", features = ["NSString", "NSDictionary", "NSError", "NSArray", "NSDate", "NSObject", "NSEnumerator"] }
 objc2-user-notifications = { version = "0.3.2", features = [
@@ -59,7 +59,24 @@ objc2-user-notifications = { version = "0.3.2", features = [
 ] }
 security-framework.workspace = true
 
+[target."cfg(windows)".dependencies]
+dataview = "1.1"
+pelite = "0.10.0"
+tauri-plugin-single-instance = "2.5"
+windows = { version = "0.61", features = [
+    "Data_Xml_Dom",
+    "Foundation",
+    "UI_Notifications",
+] }
+windows-sys = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_Security_Credentials",
+    "Win32_UI_Shell",
+] }
+
 [dev-dependencies]
+dataview = "1.1"
+pelite = "0.10.0"
 reqwest = { workspace = true, features = ["blocking", "json"] }
 tempfile = "3"
 thelemail-store = { path = "../crates/thelemail-store" }
