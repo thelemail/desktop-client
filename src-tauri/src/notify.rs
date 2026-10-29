@@ -73,6 +73,39 @@ fn remember_opened(target: NotificationTarget) {
     }
 }
 
+#[cfg(any(windows, test))]
+fn escape(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    for c in text.chars() {
+        match c {
+            '&' => out.push_str("&amp;"),
+            '<' => out.push_str("&lt;"),
+            '>' => out.push_str("&gt;"),
+            '"' => out.push_str("&quot;"),
+            '\'' => out.push_str("&apos;"),
+            c if c.is_control() && !matches!(c, '\t' | '\n') => {}
+            c => out.push(c),
+        }
+    }
+    out
+}
+
+#[cfg(any(windows, test))]
+fn toast_xml(title: &str, subtitle: &str, body: &str) -> String {
+    let mut lines = format!(
+        "<text>{}</text><text>{}</text>",
+        escape(title),
+        escape(subtitle)
+    );
+    if !body.is_empty() {
+        lines.push_str(&format!("<text>{}</text>", escape(body)));
+    }
+    format!(
+        "<toast><visual><binding template=\"ToastGeneric\">{lines}</binding></visual>\
+         <audio src=\"ms-winsoundevent:Notification.Mail\"/></toast>"
+    )
+}
+
 #[cfg(target_os = "macos")]
 mod platform {
     use std::ptr::NonNull;
@@ -407,7 +440,161 @@ mod platform {
     }
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(windows)]
+mod platform {
+    use std::collections::VecDeque;
+    use std::sync::Mutex;
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    use tauri::{AppHandle, Emitter, Manager};
+    use windows::Data::Xml::Dom::XmlDocument;
+    use windows::Foundation::TypedEventHandler;
+    use windows::UI::Notifications::{
+        NotificationSetting, ToastNotification, ToastNotificationManager, ToastNotifier,
+    };
+    use windows::core::HSTRING;
+
+    use super::{NewMail, NotificationTarget, NotifyStatus, remember_opened};
+
+    const APP_ID: &str = "com.thelemail.desktop";
+    const KEPT: usize = 50;
+
+    static SHOWN: Mutex<VecDeque<ToastNotification>> = Mutex::new(VecDeque::new());
+    static WARNED_UNBUNDLED: AtomicBool = AtomicBool::new(false);
+    static LAST_ERROR: Mutex<Option<String>> = Mutex::new(None);
+
+    fn installed() -> Option<String> {
+        crate::updates::installed().map(|dir| dir.display().to_string())
+    }
+
+    fn notifier() -> windows::core::Result<ToastNotifier> {
+        ToastNotificationManager::CreateToastNotifierWithId(&HSTRING::from(APP_ID))
+    }
+
+    fn remember_error(error: Option<String>) -> Option<String> {
+        let mut slot = LAST_ERROR.lock().ok()?;
+        if error.is_some() {
+            *slot = error;
+        }
+        slot.clone()
+    }
+
+    fn snapshot(error: Option<String>) -> NotifyStatus {
+        let Some(path) = installed() else {
+            return NotifyStatus::unbundled();
+        };
+        let mut status = NotifyStatus {
+            supported: true,
+            bundled: true,
+            translocated: false,
+            bundle_path: Some(path),
+            authorization: "unknown".to_owned(),
+            alerts: false,
+            sound: false,
+            last_error: None,
+        };
+        match notifier().and_then(|n| n.Setting()) {
+            Ok(setting) if setting == NotificationSetting::Enabled => {
+                status.authorization = "authorized".to_owned();
+                status.alerts = true;
+                status.sound = true;
+            }
+            Ok(_) => status.authorization = "denied".to_owned(),
+            Err(err) => status.last_error = Some(err.message()),
+        }
+        if status.last_error.is_none() {
+            status.last_error = remember_error(error);
+        }
+        status
+    }
+
+    fn publish(app: &AppHandle, status: NotifyStatus) {
+        eprintln!(
+            "notifications: authorization={} alerts={} error={}",
+            status.authorization,
+            status.alerts,
+            status.last_error.as_deref().unwrap_or("none")
+        );
+        let _ = app.emit("notify://status", status);
+    }
+
+    pub fn bind(app: &AppHandle) {
+        let id = HSTRING::from(APP_ID);
+        unsafe {
+            let _ =
+                windows_sys::Win32::UI::Shell::SetCurrentProcessExplicitAppUserModelID(id.as_ptr());
+        }
+        publish(app, snapshot(None));
+    }
+
+    fn deliver(app: &AppHandle, mail: &NewMail) -> windows::core::Result<()> {
+        let lang = crate::locale::current(app);
+        let xml = XmlDocument::new()?;
+        xml.LoadXml(&HSTRING::from(super::toast_xml(
+            &mail.title(lang),
+            &mail.subtitle(lang),
+            &mail.snippet,
+        )))?;
+        let toast = ToastNotification::CreateToastNotification(&xml)?;
+        toast.SetTag(&HSTRING::from(
+            mail.message_id.chars().take(64).collect::<String>(),
+        ))?;
+        toast.SetGroup(&HSTRING::from(
+            mail.account_id.chars().take(64).collect::<String>(),
+        ))?;
+
+        let opened = app.clone();
+        let target = NotificationTarget {
+            account_id: mail.account_id.clone(),
+            message_id: mail.message_id.clone(),
+        };
+        toast.Activated(&TypedEventHandler::new(move |_, _| {
+            if let Some(window) = opened.get_webview_window("main") {
+                let _ = window.show();
+                let _ = window.unminimize();
+                let _ = window.set_focus();
+            }
+            remember_opened(target.clone());
+            let _ = opened.emit("notification://opened", target.clone());
+            Ok(())
+        }))?;
+
+        notifier()?.Show(&toast)?;
+        if let Ok(mut shown) = SHOWN.lock() {
+            shown.push_back(toast);
+            while shown.len() > KEPT {
+                shown.pop_front();
+            }
+        }
+        Ok(())
+    }
+
+    pub fn post(app: &AppHandle, mail: &NewMail) {
+        if installed().is_none() {
+            if !WARNED_UNBUNDLED.swap(true, Ordering::SeqCst) {
+                eprintln!(
+                    "notifications: not running from an installed copy, notifications are disabled"
+                );
+            }
+            return;
+        }
+        match deliver(app, mail) {
+            Ok(()) => eprintln!("notifications: posted {}", mail.message_id),
+            Err(err) => {
+                eprintln!("notifications: the toast was rejected: {}", err.message());
+                publish(app, snapshot(Some(err.message())));
+            }
+        }
+    }
+
+    pub async fn status(_app: &AppHandle) -> NotifyStatus {
+        tauri::async_runtime::spawn_blocking(|| snapshot(None))
+            .await
+            .unwrap_or_else(|_| NotifyStatus::unbundled())
+    }
+}
+
+#[cfg(not(any(target_os = "macos", windows)))]
 mod platform {
     use tauri::AppHandle;
 
@@ -442,4 +629,35 @@ pub async fn notify_status(app: AppHandle) -> NotifyStatus {
 #[tauri::command]
 pub fn notify_take_opened() -> Option<NotificationTarget> {
     LAST_OPENED.lock().ok().and_then(|mut slot| slot.take())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::toast_xml;
+
+    #[test]
+    fn mail_text_cannot_break_out_of_the_toast_markup() {
+        let xml = toast_xml(
+            "Eve <eve@x.org>",
+            "a & b",
+            "\"quoted\" 'single' </text><action/>\u{0007}",
+        );
+        assert!(xml.contains("<text>Eve &lt;eve@x.org&gt;</text>"));
+        assert!(xml.contains("<text>a &amp; b</text>"));
+        assert!(
+            xml.contains(
+                "&quot;quoted&quot; &apos;single&apos; &lt;/text&gt;&lt;action/&gt;</text>"
+            )
+        );
+        assert!(!xml.contains('\u{0007}'));
+        assert_eq!(xml.matches("<text>").count(), 3);
+    }
+
+    #[test]
+    fn an_empty_snippet_leaves_out_the_body_line() {
+        assert_eq!(
+            toast_xml("From", "Subject", "").matches("<text>").count(),
+            2
+        );
+    }
 }
