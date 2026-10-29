@@ -3,8 +3,11 @@ use tauri_plugin_dialog::DialogExt;
 use tauri_plugin_opener::OpenerExt;
 use url::Url;
 
+#[cfg(not(windows))]
 pub const NOTIFICATION_SETTINGS_URL: &str =
     "x-apple.systempreferences:com.apple.Notifications-Settings.extension";
+#[cfg(windows)]
+pub const NOTIFICATION_SETTINGS_URL: &str = "ms-settings:notifications";
 
 #[tauri::command]
 pub fn open_external(app: AppHandle, url: String) -> Result<(), String> {
@@ -28,8 +31,17 @@ pub(crate) fn safe_filename(raw: &str) -> String {
     let cleaned: String = raw
         .chars()
         .filter(|c| !matches!(c, '/' | '\\' | '\0'))
+        .filter(|c| {
+            !cfg!(windows)
+                || !(c.is_control() || matches!(c, ':' | '*' | '?' | '"' | '<' | '>' | '|'))
+        })
         .collect();
     let trimmed = cleaned.trim().trim_start_matches('.');
+    let trimmed = if cfg!(windows) {
+        trimmed.trim_end_matches(['.', ' '])
+    } else {
+        trimmed
+    };
     if trimmed.is_empty() {
         "attachment".to_owned()
     } else {
@@ -60,4 +72,17 @@ pub async fn save_bytes(app: AppHandle, args: SaveBytesArgs) -> Result<bool, Str
     let path = path.into_path().map_err(|e| e.to_string())?;
     std::fs::write(path, args.bytes).map_err(|e| e.to_string())?;
     Ok(true)
+}
+
+#[cfg(all(test, windows))]
+mod tests {
+    use super::safe_filename;
+
+    #[test]
+    fn characters_windows_refuses_in_a_filename_are_dropped() {
+        assert_eq!(safe_filename("Q3: plan?.pdf"), "Q3 plan.pdf");
+        assert_eq!(safe_filename("a<b>|c\"d*.txt"), "abcd.txt");
+        assert_eq!(safe_filename("notes. . "), "notes");
+        assert_eq!(safe_filename("::"), "attachment");
+    }
 }
