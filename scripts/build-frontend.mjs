@@ -8,6 +8,7 @@ const submodule = resolve(root, 'web-client');
 const dist = resolve(root, 'frontend-dist');
 const pinned = readFileSync(resolve(root, 'web-client.version'), 'utf8').trim();
 const strict = process.env.THELEMAIL_RELEASE === '1';
+const shell = process.platform === 'win32';
 
 function fail(message) {
 	console.error(`build-frontend: ${message}`);
@@ -87,7 +88,8 @@ for (const dir of [root, source]) {
 	if (!existsSync(resolve(dir, 'node_modules'))) {
 		execFileSync('pnpm', ['install', '--frozen-lockfile', '--ignore-scripts'], {
 			cwd: dir,
-			stdio: 'inherit'
+			stdio: 'inherit',
+			shell
 		});
 	}
 }
@@ -99,6 +101,7 @@ rmSync(resolve(app, '.svelte-kit'), { recursive: true, force: true });
 execFileSync('pnpm', ['--filter', '@thelemail/mail', 'build'], {
 	cwd: source,
 	stdio: 'inherit',
+	shell,
 	env: {
 		...process.env,
 		...config,
