@@ -123,6 +123,8 @@ struct PreviewParty {
     display: String,
     #[serde(default)]
     address: String,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    offsite: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -1386,21 +1388,18 @@ mod tests {
         let preview: MessagePreview = serde_json::from_str(
             r#"{"subject":"Digest","sender":{"display":"Bot","address":"noreply@lists.test"},
                 "recipients":[],"reply_to":[{"display":"The List","address":"list@lists.test"},
-                {"display":"","address":""},{"display":"","address":"help@lists.test"}]}"#,
+                {"display":"","address":""},{"display":"","address":"pay@other.test","offsite":true}]}"#,
         )
         .expect("preview");
         upsert_message(&conn, &item("m1"), &preview, true).expect("upsert");
         upsert_message(&conn, &item("m1"), &MessagePreview::default(), false)
             .expect("undecryptable upsert");
 
-        let want = r#"[{"display":"The List","address":"list@lists.test"},{"display":"","address":"help@lists.test"}]"#;
+        let want = r#"[{"display":"The List","address":"list@lists.test"},{"display":"","address":"pay@other.test","offsite":true}]"#;
         let got = thelemail_store::list::get_message(&conn, "m1", "now")
             .expect("query")
             .expect("message");
         assert_eq!(got.reply_to_json, want);
-        let rows =
-            thelemail_store::list::list_mailbox(&conn, "inbox", None, None, 10).expect("list");
-        assert_eq!(rows[0].reply_to_json, want);
 
         upsert_message(&conn, &item("m2"), &MessagePreview::default(), false).expect("upsert");
         assert!(apply_retried_preview(&conn, "m2", &preview).expect("apply"));

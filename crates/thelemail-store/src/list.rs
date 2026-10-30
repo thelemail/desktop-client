@@ -24,7 +24,6 @@ pub struct MirrorRow {
     pub returns_to_archive: bool,
     pub labels_json: String,
     pub attested_sender_address: Option<String>,
-    pub reply_to_json: String,
 }
 
 pub fn list_mailbox(
@@ -38,7 +37,7 @@ pub fn list_mailbox(
         "SELECT id, direction, mailbox_state, subject, sender_display, sender_address, \
                 recipients_json, snippet, display_date, stored_at, read, starred, \
                 attachment_count, thread_root_id, labels_json, folder_id, returns_to_archive, \
-                attested_sender_address, reply_to_json \
+                attested_sender_address \
          FROM messages \
          WHERE deleted = 0 AND mailbox_state = ?1 \
            AND (?2 IS NULL OR direction = ?2) \
@@ -69,7 +68,6 @@ pub fn list_mailbox(
                 folder_id: row.get(15)?,
                 returns_to_archive: row.get::<_, i64>(16)? != 0,
                 attested_sender_address: row.get(17)?,
-                reply_to_json: row.get(18)?,
             })
         },
     )?;
