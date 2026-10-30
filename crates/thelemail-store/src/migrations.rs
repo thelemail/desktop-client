@@ -39,6 +39,11 @@ pub static MIGRATIONS: &[Migration] = &[
         name: "attested_sender",
         up: m0006_attested_sender,
     },
+    Migration {
+        version: 7,
+        name: "reply_to",
+        up: m0007_reply_to,
+    },
 ];
 
 pub fn migrate(conn: &Connection) -> Result<(), StoreError> {
@@ -82,6 +87,13 @@ fn m0005_returns_to_archive(tx: &Transaction) -> rusqlite::Result<()> {
 fn m0006_attested_sender(tx: &Transaction) -> rusqlite::Result<()> {
     tx.execute_batch(
         "ALTER TABLE messages ADD COLUMN attested_sender_address TEXT;
+         UPDATE sync_state SET cursor = NULL;",
+    )
+}
+
+fn m0007_reply_to(tx: &Transaction) -> rusqlite::Result<()> {
+    tx.execute_batch(
+        "ALTER TABLE messages ADD COLUMN reply_to_json TEXT NOT NULL DEFAULT '[]';
          UPDATE sync_state SET cursor = NULL;",
     )
 }
