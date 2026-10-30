@@ -113,9 +113,11 @@ struct MessagePreview {
     recipients: Vec<PreviewParty>,
     #[serde(default)]
     delivered_to: String,
+    #[serde(default)]
+    reply_to: Vec<PreviewParty>,
 }
 
-#[derive(Debug, Deserialize, Default, Clone)]
+#[derive(Debug, Deserialize, Serialize, Default, Clone)]
 struct PreviewParty {
     #[serde(default)]
     display: String,
@@ -472,6 +474,7 @@ fn upsert_message(
     decrypted: bool,
 ) -> rusqlite::Result<()> {
     let recipients = recipients_json(preview);
+    let reply_to = reply_to_json(preview);
     let labels_json = serde_json::to_string(&item.label_ids).unwrap_or_else(|_| "[]".to_owned());
     let now = now_iso();
 
@@ -480,9 +483,9 @@ fn upsert_message(
           body_size_bytes, attachment_count, thread_root_id, subject, sender_display, \
           sender_address, recipients_json, snippet, display_date, preview_state, synced_at, \
           delivered_to, encrypted, signature_status, signer_key_fingerprint, signer_delegation_id, \
-          folder_id, labels_json, returns_to_archive, attested_sender_address) \
+          folder_id, labels_json, returns_to_archive, attested_sender_address, reply_to_json) \
          VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23, \
-          ?24,?25,?26,?27) \
+          ?24,?25,?26,?27,?28) \
          ON CONFLICT(id) DO UPDATE SET \
           mailbox_state=excluded.mailbox_state, starred=excluded.starred, read=excluded.read, \
           attachment_count=excluded.attachment_count, thread_root_id=excluded.thread_root_id, \
@@ -494,6 +497,7 @@ fn upsert_message(
           display_date=CASE WHEN excluded.preview_state <> 'ok' AND messages.preview_state = 'ok' THEN messages.display_date ELSE excluded.display_date END, \
           preview_state=CASE WHEN excluded.preview_state <> 'ok' AND messages.preview_state = 'ok' THEN messages.preview_state ELSE excluded.preview_state END, \
           delivered_to=CASE WHEN excluded.preview_state <> 'ok' AND messages.preview_state = 'ok' THEN messages.delivered_to ELSE excluded.delivered_to END, \
+          reply_to_json=CASE WHEN excluded.preview_state <> 'ok' AND messages.preview_state = 'ok' THEN messages.reply_to_json ELSE excluded.reply_to_json END, \
           deleted=0, synced_at=excluded.synced_at, encrypted=excluded.encrypted, \
           signature_status=excluded.signature_status, \
           signer_key_fingerprint=excluded.signer_key_fingerprint, \
@@ -530,6 +534,7 @@ fn upsert_message(
             labels_json,
             item.returns_to_archive as i64,
             item.attested_sender.as_ref().map(|a| a.address.as_str()),
+            reply_to,
         ],
     )?;
 
@@ -551,6 +556,17 @@ fn recipients_json(preview: &MessagePreview) -> String {
             .recipients
             .iter()
             .map(|r| r.address.clone())
+            .collect::<Vec<_>>(),
+    )
+    .unwrap_or_else(|_| "[]".to_owned())
+}
+
+fn reply_to_json(preview: &MessagePreview) -> String {
+    serde_json::to_string(
+        &preview
+            .reply_to
+            .iter()
+            .filter(|p| !p.address.trim().is_empty())
             .collect::<Vec<_>>(),
     )
     .unwrap_or_else(|_| "[]".to_owned())
@@ -588,7 +604,8 @@ fn apply_retried_preview(
     let recipients = recipients_json(preview);
     let updated = conn.execute(
         "UPDATE messages SET subject=?2, sender_display=?3, sender_address=?4, \
-          recipients_json=?5, snippet=?6, display_date=?7, delivered_to=?8, preview_state='ok' \
+          recipients_json=?5, snippet=?6, display_date=?7, delivered_to=?8, reply_to_json=?9, \
+          preview_state='ok' \
          WHERE id=?1 AND preview_state='undecryptable' AND dirty=0 AND deleted=0",
         params![
             message_id,
@@ -599,6 +616,7 @@ fn apply_retried_preview(
             preview.snippet,
             preview.display_date,
             preview.delivered_to,
+            reply_to_json(preview),
         ],
     )?;
     if updated == 0 {
@@ -1349,6 +1367,55 @@ mod tests {
             rows[0].attested_sender_address.as_deref(),
             Some("mallory@acme.test")
         );
+    }
+
+    #[test]
+    fn reply_to_reaches_the_offline_list_and_reader() {
+        let conn = Connection::open_in_memory().expect("db");
+        thelemail_store::migrations::migrate(&conn).expect("migrate");
+        let item = |id: &str| -> MessageListItem {
+            serde_json::from_value(serde_json::json!({
+                "id": id,
+                "direction": "received",
+                "source": "inbound_external",
+                "mailboxState": "inbox",
+                "storedAt": "2026-10-30T09:00:00Z"
+            }))
+            .expect("item")
+        };
+        let preview: MessagePreview = serde_json::from_str(
+            r#"{"subject":"Digest","sender":{"display":"Bot","address":"noreply@lists.test"},
+                "recipients":[],"reply_to":[{"display":"The List","address":"list@lists.test"},
+                {"display":"","address":""},{"display":"","address":"help@lists.test"}]}"#,
+        )
+        .expect("preview");
+        upsert_message(&conn, &item("m1"), &preview, true).expect("upsert");
+        upsert_message(&conn, &item("m1"), &MessagePreview::default(), false)
+            .expect("undecryptable upsert");
+
+        let want = r#"[{"display":"The List","address":"list@lists.test"},{"display":"","address":"help@lists.test"}]"#;
+        let got = thelemail_store::list::get_message(&conn, "m1", "now")
+            .expect("query")
+            .expect("message");
+        assert_eq!(got.reply_to_json, want);
+        let rows =
+            thelemail_store::list::list_mailbox(&conn, "inbox", None, None, 10).expect("list");
+        assert_eq!(rows[0].reply_to_json, want);
+
+        upsert_message(&conn, &item("m2"), &MessagePreview::default(), false).expect("upsert");
+        assert!(apply_retried_preview(&conn, "m2", &preview).expect("apply"));
+        let got = thelemail_store::list::get_message(&conn, "m2", "now")
+            .expect("query")
+            .expect("message");
+        assert_eq!(got.reply_to_json, want);
+
+        let plain: MessagePreview =
+            serde_json::from_str(r#"{"subject":"x","recipients":[]}"#).expect("preview");
+        upsert_message(&conn, &item("m3"), &plain, true).expect("upsert");
+        let got = thelemail_store::list::get_message(&conn, "m3", "now")
+            .expect("query")
+            .expect("message");
+        assert_eq!(got.reply_to_json, "[]");
     }
 
     #[test]
