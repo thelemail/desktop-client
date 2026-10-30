@@ -11,6 +11,15 @@ require() {
 	fi
 }
 
+staple() {
+	local attempt
+	for attempt in 1 2 3 4 5; do
+		xcrun stapler staple "$1" && return 0
+		(( attempt < 5 )) && sleep $((attempt * 30))
+	done
+	return 1
+}
+
 require APPLE_SIGNING_IDENTITY
 require APPLE_TEAM_ID
 require APPLE_API_KEY_PATH
@@ -51,7 +60,7 @@ xcrun notarytool submit "$app_zip" \
 	--issuer "$APPLE_API_ISSUER" \
 	--wait
 rm -f "$app_zip"
-xcrun stapler staple "$app"
+staple "$app"
 spctl --assess --type execute -vv "$app"
 
 staging="$(mktemp -d)"
@@ -69,7 +78,7 @@ xcrun notarytool submit "$dmg" \
 	--issuer "$APPLE_API_ISSUER" \
 	--wait
 
-xcrun stapler staple "$dmg"
+staple "$dmg"
 spctl --assess --type open --context context:primary-signature -vv "$dmg"
 
 rm -f "$updater" "$updater.sig"

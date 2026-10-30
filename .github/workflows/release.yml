@@ -101,6 +101,12 @@ jobs:
           security list-keychain -d user -s "$keychain" login.keychain-db
           rm -P "$certificate"
 
+      - name: Keep Apple ticket lookups on TCP
+        run: |
+          set -euo pipefail
+          echo "block return out quick proto udp from any to any port 443" | sudo pfctl -f -
+          sudo pfctl -E
+
       - name: Build, sign, notarize and staple
         env:
           APPLE_SIGNING_IDENTITY: ${{ vars.APPLE_SIGNING_IDENTITY }}
