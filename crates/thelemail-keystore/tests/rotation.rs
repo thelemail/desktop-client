@@ -1484,7 +1484,10 @@ fn a_staged_sign_in_stays_on_the_password_scheme_until_finalized() {
     assert_eq!(scheme_of(&device), Some(AuthScheme::SrpV1));
     assert!(device.stored_account_keys(ACCOUNT).is_none());
 
-    assert_eq!(finalized(&device, stored), serde_json::json!({ "ok": true }));
+    assert_eq!(
+        finalized(&device, stored),
+        serde_json::json!({ "ok": true })
+    );
     assert_eq!(scheme_of(&device), Some(AuthScheme::OpaqueV1));
     assert_eq!(
         current_fingerprint(&device),
