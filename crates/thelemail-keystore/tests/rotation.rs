@@ -1209,6 +1209,15 @@ fn a_key_list_that_changes_nothing_is_not_marked_as_a_change() {
 const PASSWORD: &str = "a long and sturdy passphrase";
 
 fn sign_in(amk: &Amk, key: &GeneratedKey, stored: Vec<StoredAccountKey>) -> Keystore {
+    sign_in_as(amk, key, stored, AuthScheme::OpaqueV1)
+}
+
+fn sign_in_as(
+    amk: &Amk,
+    key: &GeneratedKey,
+    stored: Vec<StoredAccountKey>,
+    scheme: AuthScheme,
+) -> Keystore {
     use opaque_ke::{
         CredentialRequest, Identifiers, RegistrationRequest, RegistrationUpload, ServerLogin,
         ServerLoginParameters, ServerRegistration, ServerSetup,
@@ -1283,7 +1292,7 @@ fn sign_in(amk: &Amk, key: &GeneratedKey, stored: Vec<StoredAccountKey>) -> Keys
             wrapped_master_key: b64.encode(wrap_master_key(&registered.export_key, amk, false)),
             master_key_id: b64.encode(derive_master_key_id(amk)),
             opaque_params_version: 1,
-            server_auth_scheme: AuthScheme::OpaqueV1,
+            server_auth_scheme: scheme,
         },
         stored,
     );
@@ -1450,4 +1459,59 @@ fn a_version_this_device_rotated_to_never_moves() {
         "the rotated key moved to version 3",
     );
     assert_eq!(current_fingerprint(&a.ks), (rotated, Some(2)));
+}
+
+fn scheme_of(ks: &Keystore) -> Option<AuthScheme> {
+    ks.status()
+        .accounts
+        .into_iter()
+        .find(|a| a.account_id == ACCOUNT)
+        .map(|a| a.auth_scheme)
+}
+
+fn finalized(ks: &Keystore, stored: Vec<StoredAccountKey>) -> Value {
+    serde_json::to_value(ks.migration_finalized(ACCOUNT, stored)).unwrap()
+}
+
+#[test]
+fn a_staged_sign_in_stays_on_the_password_scheme_until_finalized() {
+    let a = account();
+    let second = generate(&a.amk, &[EMAIL]);
+    load(&a.ks, history(&a.amk, &[&a.first, &second]));
+    let stored = a.ks.stored_account_keys(ACCOUNT).unwrap();
+
+    let device = sign_in_as(&a.amk, &a.first, stored.clone(), AuthScheme::SrpV1);
+    assert_eq!(scheme_of(&device), Some(AuthScheme::SrpV1));
+    assert!(device.stored_account_keys(ACCOUNT).is_none());
+
+    assert_eq!(
+        finalized(&device, stored),
+        serde_json::json!({ "ok": true })
+    );
+    assert_eq!(scheme_of(&device), Some(AuthScheme::OpaqueV1));
+    assert_eq!(
+        current_fingerprint(&device),
+        (second.fingerprint_hex.clone(), Some(2))
+    );
+}
+
+#[test]
+fn finalizing_an_opaque_vault_again_is_refused() {
+    let a = account();
+    let device = sign_in(&a.amk, &a.first, Vec::new());
+
+    assert_eq!(
+        finalized(&device, Vec::new()),
+        serde_json::json!({ "ok": false, "code": "not_staged" })
+    );
+}
+
+#[test]
+fn finalizing_a_locked_account_is_refused() {
+    let ks = Keystore::new();
+
+    assert_eq!(
+        finalized(&ks, Vec::new()),
+        serde_json::json!({ "ok": false, "code": "locked" })
+    );
 }

@@ -204,6 +204,20 @@ pub async fn keystore_opaque_complete_login_unlock(
 }
 
 #[tauri::command]
+pub async fn keystore_migration_finalized(
+    app: AppHandle,
+    args: AccountScopedArgs,
+) -> Result<PlainOkResponse, KeystoreError> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let stored = read_key_history(&args.account_id);
+        app.state::<Keystore>()
+            .migration_finalized(&args.account_id, stored)
+    })
+    .await
+    .map_err(|_| KeystoreError::Protocol)
+}
+
+#[tauri::command]
 pub fn keystore_opaque_abandon_operation(ks: State<'_, Keystore>, args: AbandonArgs) {
     ks.abandon(&args.operation_id);
 }

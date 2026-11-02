@@ -183,6 +183,7 @@ const KEYSTORE_COMMANDS: Record<string, string> = {
 	opaqueFinishAuth: 'keystore_opaque_finish_auth',
 	opaqueCompleteLoginUnlock: 'keystore_opaque_complete_login_unlock',
 	opaqueAbandonOperation: 'keystore_opaque_abandon_operation',
+	migrationFinalized: 'keystore_migration_finalized',
 	opaqueStartRegistration: 'keystore_opaque_start_registration',
 	opaqueFinishRegistration: 'keystore_opaque_finish_registration',
 	opaqueFinalizeRegister: 'keystore_opaque_finalize_register',

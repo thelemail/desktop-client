@@ -144,6 +144,7 @@ pub fn run() {
             keystore::keystore_opaque_start_auth,
             keystore::keystore_opaque_finish_auth,
             keystore::keystore_opaque_complete_login_unlock,
+            keystore::keystore_migration_finalized,
             keystore::keystore_opaque_abandon_operation,
             keystore::keystore_opaque_start_registration,
             keystore::keystore_opaque_finish_registration,

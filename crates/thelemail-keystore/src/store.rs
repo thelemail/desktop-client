@@ -499,6 +499,31 @@ impl Keystore {
         OpaqueCompleteLoginUnlockResponse::ok(args.account_id, email)
     }
 
+    pub fn migration_finalized(
+        &self,
+        account_id: &str,
+        stored: Vec<StoredAccountKey>,
+    ) -> PlainOkResponse {
+        let mut vaults = self.vaults.lock().expect("keystore vaults");
+        let Some(vault) = vaults.get_mut(account_id) else {
+            return PlainOkResponse::err("locked");
+        };
+        if vault.auth_scheme != AuthScheme::SrpV1 {
+            return PlainOkResponse::err("not_staged");
+        }
+        vault.auth_scheme = AuthScheme::OpaqueV1;
+        let passphrase = derive_pgp_passphrase(&vault.amk);
+        seed_stored_keys(vault, &stored, passphrase.expose());
+        let email = vault.email.clone();
+        drop(vaults);
+
+        self.emit(Broadcast::VaultChanged {
+            account_id: account_id.to_owned(),
+            email,
+        });
+        PlainOkResponse::ok()
+    }
+
     pub fn try_restore_from_persistent(&self, account_id: &str) -> RestoreResponse {
         let vaults = self.vaults.lock().expect("keystore vaults");
         match vaults.get(account_id) {
