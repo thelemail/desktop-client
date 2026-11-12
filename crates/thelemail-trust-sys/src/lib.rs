@@ -3,6 +3,7 @@
 
 use core::ffi::c_char;
 
+#[cfg_attr(windows, link(name = "thelemail_trust", kind = "raw-dylib"))]
 unsafe extern "C" {
     pub fn ThelemailOpaque(request: *const c_char) -> *mut c_char;
     pub fn ThelemailSession(request: *const c_char) -> *mut c_char;

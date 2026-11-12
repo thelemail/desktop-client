@@ -101,21 +101,16 @@ fn testkit() -> bool {
     env::var_os("CARGO_FEATURE_TESTKIT").is_some()
 }
 
-fn go_build(module: &Path, mode: &str, artifact: &Path) -> Command {
+fn go_build(module: &Path, mode: &str, artifact: &Path, extra: &[&str]) -> Command {
     let tags = if testkit() {
         "-tags=testexports"
     } else {
         "-tags="
     };
     let mut cmd = go();
-    cmd.current_dir(module).args([
-        "build",
-        "-trimpath",
-        tags,
-        &format!("-buildmode={mode}"),
-        "-o",
-    ]);
-    cmd.arg(artifact).arg(PACKAGE);
+    cmd.current_dir(module)
+        .args(["build", "-trimpath", tags, &format!("-buildmode={mode}")]);
+    cmd.args(extra).arg("-o").arg(artifact).arg(PACKAGE);
     cmd
 }
 
@@ -126,7 +121,7 @@ fn build_macos(module: &Path, out: &Path, goarch: &str) {
     let clang_arch = if goarch == "arm64" { "arm64" } else { "x86_64" };
     let flags = format!("-isysroot {sdk} -arch {clang_arch} -mmacosx-version-min={min}");
 
-    let mut cmd = go_build(module, "c-archive", &out.join("libthelemail_trust.a"));
+    let mut cmd = go_build(module, "c-archive", &out.join("libthelemail_trust.a"), &[]);
     cmd.env("GOOS", "darwin")
         .env("GOARCH", goarch)
         .env("CC", cc)
@@ -142,7 +137,7 @@ fn build_macos(module: &Path, out: &Path, goarch: &str) {
 }
 
 fn build_linux(module: &Path, out: &Path, goarch: &str) {
-    let mut cmd = go_build(module, "c-archive", &out.join("libthelemail_trust.a"));
+    let mut cmd = go_build(module, "c-archive", &out.join("libthelemail_trust.a"), &[]);
     cmd.env("GOOS", "linux").env("GOARCH", goarch);
     run(cmd, "go build");
 
@@ -155,38 +150,30 @@ fn build_linux(module: &Path, out: &Path, goarch: &str) {
 fn build_windows(module: &Path, out: &Path, goarch: &str) {
     assert_eq!(goarch, "amd64", "trust: Windows builds are x86_64 only");
     let cc = env::var("TRUST_MINGW_CC").unwrap_or_else(|_| "x86_64-w64-mingw32-gcc".into());
-    let dlltool = cc
-        .strip_suffix("gcc")
-        .map(|prefix| format!("{prefix}dlltool"))
-        .unwrap_or_else(|| "dlltool".into());
     let dll = out.join("thelemail_trust.dll");
 
-    let mut cmd = go_build(module, "c-shared", &dll);
+    let mut cmd = go_build(module, "c-shared", &dll, &["-ldflags=-extldflags=-static"]);
     cmd.env("GOOS", "windows")
         .env("GOARCH", goarch)
-        .env("CC", &cc)
-        .arg("-ldflags=-extldflags=-static");
+        .env("CC", &cc);
     run(cmd, "go build");
 
-    let def = out.join("thelemail_trust.def");
-    let mut listing = String::from("LIBRARY thelemail_trust.dll\nEXPORTS\n");
-    for name in EXPORTS {
-        listing.push_str(name);
-        listing.push('\n');
-    }
+    let exported = output(
+        &objdump(&cc),
+        &["-p", dll.to_str().expect("trust: dll path")],
+    );
+    let mut wanted: Vec<&str> = EXPORTS.to_vec();
     if testkit() {
-        listing.push_str("ThelemailTestkit\n");
+        wanted.push("ThelemailTestkit");
     }
-    fs::write(&def, listing).expect("trust: write def file");
-
-    let mut lib = Command::new(&dlltool);
-    lib.args(["-m", "i386:x86-64", "-d"])
-        .arg(&def)
-        .arg("-D")
-        .arg("thelemail_trust.dll")
-        .arg("-l")
-        .arg(out.join("thelemail_trust.lib"));
-    run(lib, "dlltool");
+    for name in wanted {
+        assert!(
+            exported
+                .lines()
+                .any(|line| line.split_whitespace().last() == Some(name)),
+            "trust: {name} is missing from the DLL exports"
+        );
+    }
 
     let profile = out
         .ancestors()
@@ -198,6 +185,10 @@ fn build_windows(module: &Path, out: &Path, goarch: &str) {
     }
 
     println!("cargo:dll={}", dll.display());
-    println!("cargo:rustc-link-search=native={}", out.display());
-    println!("cargo:rustc-link-lib=dylib=thelemail_trust");
+}
+
+fn objdump(cc: &str) -> String {
+    cc.strip_suffix("gcc")
+        .map(|prefix| format!("{prefix}objdump"))
+        .unwrap_or_else(|| "objdump".into())
 }
