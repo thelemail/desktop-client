@@ -711,8 +711,12 @@ pub fn keystore_clear(
     halves: State<'_, PersistentHalves>,
     args: AccountScopedArgs,
 ) {
-    halves.forget(&args.account_id);
-    ks.clear(&args.account_id);
+    clear_account(&ks, &halves, &args.account_id);
+}
+
+pub fn clear_account(ks: &Keystore, halves: &PersistentHalves, account_id: &str) {
+    halves.forget(account_id);
+    ks.clear(account_id);
 }
 
 #[tauri::command]

@@ -138,12 +138,17 @@ pub fn mirror_start_sync(
 ) -> Result<(), String> {
     crate::ids::account_id(&args.account_id)?;
     mirror.set_token(&args.account_id, &args.access_token);
-    tauri::async_runtime::spawn(backfill(
-        app.clone(),
-        args.account_id.clone(),
-        args.access_token,
-    ));
-    tauri::async_runtime::spawn(watch_inbox(app, args.account_id));
+    tauri::async_runtime::spawn(async move {
+        if !crate::productkeys::verify_or_clear(&app, &args.account_id, &args.access_token).await {
+            return;
+        }
+        tauri::async_runtime::spawn(backfill(
+            app.clone(),
+            args.account_id.clone(),
+            args.access_token,
+        ));
+        tauri::async_runtime::spawn(watch_inbox(app, args.account_id));
+    });
     Ok(())
 }
 

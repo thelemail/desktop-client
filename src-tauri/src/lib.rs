@@ -8,6 +8,7 @@ pub mod mirror;
 mod mirror_cmds;
 mod net;
 mod notify;
+mod productkeys;
 mod session;
 mod shell;
 mod sse;
