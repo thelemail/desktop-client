@@ -13,6 +13,8 @@ pub enum Family {
     Trust,
     Proof,
     Tlog,
+    #[cfg(feature = "testkit")]
+    Testkit,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -93,6 +95,8 @@ fn raw(family: Family, request: &CStr) -> Result<Zeroizing<Vec<u8>>, TrustError>
         Family::Trust => sys::ThelemailTrust,
         Family::Proof => sys::ThelemailProof,
         Family::Tlog => sys::ThelemailVerifyTlogProof,
+        #[cfg(feature = "testkit")]
+        Family::Testkit => sys::ThelemailTestkit,
     };
     let response = unsafe { entry(request.as_ptr()) };
     if response.is_null() {

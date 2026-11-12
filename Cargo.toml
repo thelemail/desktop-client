@@ -9,16 +9,10 @@ rust-version = "1.90"
 license = "AGPL-3.0-only"
 
 [workspace.dependencies]
-aes-gcm = "0.10"
 anyhow = "1"
-argon2 = "0.5"
 base64 = "0.22"
-generic-array = "=0.14.7"
 hex = "0.4"
-hkdf = "0.12"
 mail-parser = "0.11"
-opaque-ke = { version = "4.0.0", features = ["argon2"] }
-pgp = "0.20"
 rand = "0.8"
 rusqlite = "0.37"
 security-framework = { version = "3", features = ["OSX_10_15"] }

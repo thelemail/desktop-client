@@ -27,8 +27,8 @@ tauri-plugin-dialog.workspace = true
 tauri-plugin-opener.workspace = true
 tauri-plugin-updater.workspace = true
 thelemail-api = { path = "../crates/thelemail-api" }
-thelemail-crypto = { path = "../crates/thelemail-crypto" }
 thelemail-keystore = { path = "../crates/thelemail-keystore" }
+thelemail-trust-sys = { path = "../crates/thelemail-trust-sys" }
 thelemail-mime = { path = "../crates/thelemail-mime" }
 thelemail-store = { path = "../crates/thelemail-store" }
 tokio.workspace = true

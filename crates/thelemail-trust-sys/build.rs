@@ -81,12 +81,21 @@ fn output(program: &str, args: &[&str]) -> String {
         .to_owned()
 }
 
+fn testkit() -> bool {
+    env::var_os("CARGO_FEATURE_TESTKIT").is_some()
+}
+
 fn go_build(module: &Path, mode: &str, artifact: &Path) -> Command {
+    let tags = if testkit() {
+        "-tags=testexports"
+    } else {
+        "-tags="
+    };
     let mut cmd = go();
     cmd.current_dir(module).args([
         "build",
         "-trimpath",
-        "-tags=",
+        tags,
         &format!("-buildmode={mode}"),
         "-o",
     ]);
@@ -148,6 +157,9 @@ fn build_windows(module: &Path, out: &Path, goarch: &str) {
     for name in EXPORTS {
         listing.push_str(name);
         listing.push('\n');
+    }
+    if testkit() {
+        listing.push_str("ThelemailTestkit\n");
     }
     fs::write(&def, listing).expect("trust: write def file");
 

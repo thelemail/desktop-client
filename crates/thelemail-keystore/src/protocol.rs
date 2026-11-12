@@ -394,7 +394,7 @@ pub enum EncryptToKeysResponse {
     Err { ok: bool, code: &'static str },
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AliasKeyGrantInput {
     pub alias_id: String,

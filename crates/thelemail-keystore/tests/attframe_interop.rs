@@ -1,5 +1,5 @@
 use serde::Deserialize;
-use thelemail_crypto::attframe::{FrameError, MAX_HEADER_BYTES, parse, parse_header};
+use thelemail_keystore::attframe::{FrameError, MAX_HEADER_BYTES, parse, parse_header};
 
 const FIXTURES: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../fixtures/attframe");
 

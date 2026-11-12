@@ -2,12 +2,10 @@ use std::collections::HashMap;
 use std::sync::Mutex;
 
 use base64::Engine as _;
-use rand::RngCore;
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager, State};
 use thelemail_api::{ApiRequest, Net};
-use thelemail_crypto::amk::{device_unwrap, device_wrap};
-use thelemail_crypto::attframe::{self, DecryptedAttachmentHeader};
+use thelemail_keystore::attframe::{self, DecryptedAttachmentHeader};
 use thelemail_keystore::*;
 use zeroize::Zeroizing;
 
@@ -253,7 +251,20 @@ pub fn keystore_opaque_finalize_register(
 #[serde(rename_all = "camelCase")]
 struct VaultFile {
     email: String,
-    wrapped: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    wrapped: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    session: Option<SessionFile>,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SessionFile {
+    iv: String,
+    cipher_text: String,
+    mac: String,
+    wrap_version: i64,
+    keys: SavedKeys,
 }
 
 fn accounts_root() -> std::path::PathBuf {
@@ -439,20 +450,14 @@ impl PersistentHalves {
         store: &impl LocalHalfStore,
         path: &std::path::Path,
         account_id: &str,
-        persisted: impl FnOnce() -> Option<PersistedVault>,
+        persisted: impl FnOnce() -> Option<PersistedSession>,
         server_half: &[u8],
     ) -> bool {
         let _files = self.files.lock().expect("persistent files");
         let Some(persisted) = persisted() else {
             return false;
         };
-        let mut local_half = Zeroizing::new([0u8; 32]);
-        rand::rngs::OsRng.fill_bytes(local_half.as_mut());
-        if write_vault_file(path, &persisted, local_half.as_ref(), server_half).is_err() {
-            return false;
-        }
-        if !store.write(account_id, local_half.as_ref()) {
-            let _ = std::fs::remove_file(path);
+        if !replace_session(store, path, account_id, &persisted) {
             return false;
         }
         self.remember(account_id, server_half);
@@ -461,23 +466,88 @@ impl PersistentHalves {
 
     fn rewrap(
         &self,
-        store: &impl LocalHalfStore,
         path: &std::path::Path,
         account_id: &str,
-        persisted: impl FnOnce() -> Option<PersistedVault>,
+        keys: impl FnOnce() -> Option<SavedKeys>,
     ) -> bool {
         let _files = self.files.lock().expect("persistent files");
-        if !path.exists() {
+        if self.get(account_id).is_none() {
             return false;
         }
-        let (Some(server_half), Some(local_half)) = (self.get(account_id), store.read(account_id))
+        let Ok(VaultFile {
+            email,
+            session: Some(mut session),
+            ..
+        }) = read_vault_file(path)
         else {
             return false;
         };
-        let Some(persisted) = persisted() else {
+        let Some(keys) = keys() else {
             return false;
         };
-        write_vault_file(path, &persisted, &local_half, &server_half).is_ok()
+        session.keys = keys;
+        write_vault_file(
+            path,
+            &VaultFile {
+                email,
+                wrapped: None,
+                session: Some(session),
+            },
+        )
+        .is_ok()
+    }
+
+    fn restore(
+        &self,
+        ks: &Keystore,
+        store: &impl LocalHalfStore,
+        path: &std::path::Path,
+        account_id: &str,
+        server_half: &[u8],
+    ) -> Result<String, &'static str> {
+        let _files = self.files.lock().expect("persistent files");
+        let local_half = store.read(account_id).ok_or("no_persistent")?;
+        let raw = std::fs::read(path).map_err(|_| "no_persistent")?;
+        let file = serde_json::from_slice::<VaultFile>(&raw).map_err(|_| "no_persistent")?;
+        let email = match (file.session, file.wrapped) {
+            (Some(session), _) => {
+                let wrapped = WrappedSecret {
+                    local_half: b64().encode(&*local_half),
+                    iv: session.iv,
+                    cipher_text: session.cipher_text,
+                    mac: session.mac,
+                };
+                if !ks.restore(
+                    account_id,
+                    file.email.clone(),
+                    &session.keys,
+                    &wrapped,
+                    session.wrap_version,
+                    server_half,
+                ) {
+                    return Err("unwrap_failed");
+                }
+                file.email
+            }
+            (None, Some(_)) => {
+                let legacy = std::str::from_utf8(&raw).map_err(|_| "no_persistent")?;
+                let email = ks
+                    .import_desktop_vault(account_id, legacy, &local_half, server_half)
+                    .ok_or("unwrap_failed")?;
+                let moved = ks
+                    .persist(account_id, server_half)
+                    .is_some_and(|persisted| replace_session(store, path, account_id, &persisted));
+                if !moved {
+                    eprintln!(
+                        "keystore: moving the saved vault for {account_id} to the new format failed"
+                    );
+                }
+                email
+            }
+            (None, None) => return Err("no_persistent"),
+        };
+        self.remember(account_id, server_half);
+        Ok(email)
     }
 
     fn discard(
@@ -495,46 +565,72 @@ impl PersistentHalves {
     }
 }
 
-fn write_vault_file(
+fn replace_session(
+    store: &impl LocalHalfStore,
     path: &std::path::Path,
-    persisted: &PersistedVault,
-    local_half: &[u8],
-    server_half: &[u8],
-) -> Result<(), ()> {
-    let payload = Zeroizing::new(serde_json::to_vec(persisted).map_err(|_| ())?);
-    let wrapped = device_wrap(local_half, server_half, &payload);
+    account_id: &str,
+    persisted: &PersistedSession,
+) -> bool {
+    let Ok(local_half) = b64().decode(&persisted.wrapped.local_half) else {
+        return false;
+    };
+    let local_half = Zeroizing::new(local_half);
     let file = VaultFile {
         email: persisted.email.clone(),
-        wrapped: b64().encode(&wrapped),
+        wrapped: None,
+        session: Some(SessionFile {
+            iv: persisted.wrapped.iv.clone(),
+            cipher_text: persisted.wrapped.cipher_text.clone(),
+            mac: persisted.wrapped.mac.clone(),
+            wrap_version: persisted.wrap_version,
+            keys: persisted.keys.clone(),
+        }),
     };
-    let encoded = serde_json::to_vec(&file).map_err(|_| ())?;
+    let staged = path.with_extension("bin.new");
+    if write_file(&staged, &file).is_err() {
+        return false;
+    }
+    let previous = store.read(account_id);
+    if !store.write(account_id, &local_half) {
+        let _ = std::fs::remove_file(&staged);
+        return false;
+    }
+    if std::fs::rename(&staged, path).is_err() {
+        let _ = std::fs::remove_file(&staged);
+        match previous {
+            Some(previous) => {
+                store.write(account_id, &previous);
+            }
+            None => store.forget(account_id),
+        }
+        return false;
+    }
+    true
+}
+
+fn write_file(path: &std::path::Path, file: &VaultFile) -> Result<(), ()> {
+    let encoded = serde_json::to_vec(file).map_err(|_| ())?;
+    std::fs::write(path, encoded).map_err(|_| ())
+}
+
+fn write_vault_file(path: &std::path::Path, file: &VaultFile) -> Result<(), ()> {
     let staged = path.with_extension("bin.tmp");
-    std::fs::write(&staged, encoded).map_err(|_| ())?;
+    write_file(&staged, file)?;
     std::fs::rename(&staged, path).map_err(|_| {
         let _ = std::fs::remove_file(&staged);
     })
 }
 
-fn read_vault_file(
-    path: &std::path::Path,
-    local_half: &[u8],
-    server_half: &[u8],
-) -> Result<PersistedVault, &'static str> {
-    let raw = std::fs::read(path).map_err(|_| "no_persistent")?;
-    let file = serde_json::from_slice::<VaultFile>(&raw).map_err(|_| "no_persistent")?;
-    let wrapped = b64().decode(&file.wrapped).map_err(|_| "no_persistent")?;
-    let payload = Zeroizing::new(
-        device_unwrap(local_half, server_half, &wrapped).map_err(|_| "unwrap_failed")?,
-    );
-    serde_json::from_slice::<PersistedVault>(&payload).map_err(|_| "unwrap_failed")
+fn read_vault_file(path: &std::path::Path) -> Result<VaultFile, ()> {
+    let raw = std::fs::read(path).map_err(|_| ())?;
+    serde_json::from_slice::<VaultFile>(&raw).map_err(|_| ())
 }
 
 pub(crate) fn rewrap_persisted(ks: &Keystore, halves: &PersistentHalves, account_id: &str) {
     let Ok(path) = vault_path(account_id) else {
         return;
     };
-    if path.exists() && !halves.rewrap(&Keychain, &path, account_id, || ks.persistable(account_id))
-    {
+    if path.exists() && !halves.rewrap(&path, account_id, || ks.saved_keys(account_id)) {
         eprintln!("keystore: rewriting the saved vault for {account_id} failed");
     }
 }
@@ -559,7 +655,7 @@ pub fn keystore_enroll_persistent(
         &Keychain,
         &path,
         &args.account_id,
-        || ks.persistable(&args.account_id),
+        || ks.persist(&args.account_id, &server_half),
         &server_half,
     );
 }
@@ -586,31 +682,21 @@ pub fn keystore_try_restore_from_persistent(
     let Some(server_half) = args.server_half.as_deref() else {
         return RestoreResponse::failed("server_half_unavailable");
     };
-    let (Ok(server_half), Some(local_half)) =
-        (b64().decode(server_half), Keychain.read(&args.account_id))
-    else {
+    let Ok(server_half) = b64().decode(server_half) else {
         return RestoreResponse::failed("no_persistent");
     };
     let server_half = Zeroizing::new(server_half);
     let Ok(path) = vault_path(&args.account_id) else {
         return RestoreResponse::failed("no_persistent");
     };
-    let persisted = match read_vault_file(&path, &local_half, &server_half) {
-        Ok(persisted) => persisted,
-        Err(reason) => return RestoreResponse::failed(reason),
-    };
-
-    let email = persisted.email.clone();
-    if ks.adopt_persisted(&args.account_id, persisted) {
-        halves.remember(&args.account_id, &server_half);
-        RestoreResponse {
+    match halves.restore(&ks, &Keychain, &path, &args.account_id, &server_half) {
+        Ok(email) => RestoreResponse {
             ok: true,
             account_id: Some(args.account_id),
             email: Some(email),
             reason: None,
-        }
-    } else {
-        RestoreResponse::failed("unwrap_failed")
+        },
+        Err(reason) => RestoreResponse::failed(reason),
     }
 }
 
@@ -869,23 +955,31 @@ mod tests {
         }
     }
 
-    fn vault(key_version: i64) -> PersistedVault {
-        PersistedVault {
+    fn session(mark: u8, key_version: i64) -> PersistedSession {
+        PersistedSession {
+            wrapped: WrappedSecret {
+                local_half: b64().encode([mark; 32]),
+                iv: format!("iv-{mark}"),
+                cipher_text: format!("ct-{mark}"),
+                mac: format!("mac-{mark}"),
+            },
+            wrap_version: 2,
+            keys: keys(key_version),
             email: "nora@thelemail.test".to_owned(),
-            auth_scheme: AuthScheme::OpaqueV1,
-            secret_key_armored: format!("secret-{key_version}"),
-            amk: "amk".to_owned(),
+        }
+    }
+
+    fn keys(key_version: i64) -> SavedKeys {
+        SavedKeys {
+            encrypted_private_key: format!("encrypted-{key_version}"),
             key_version,
-            history: (1..key_version)
-                .map(|v| PersistedAccountKey {
+            key_anchored: true,
+            history_keys: (1..key_version)
+                .map(|v| HistoryKey {
                     key_version: v,
-                    secret_key_armored: format!("secret-{v}"),
-                    encrypted_private_key_armored: None,
-                    fixed: false,
+                    encrypted_private_key: format!("encrypted-{v}"),
                 })
                 .collect(),
-            encrypted_private_key_armored: None,
-            key_fixed: false,
         }
     }
 
@@ -924,29 +1018,37 @@ mod tests {
         assert_eq!(read_key_history_at(&path).len(), 3);
     }
 
-    fn opened(store: &MemoryHalves, path: &std::path::Path, server_half: &[u8]) -> PersistedVault {
+    fn opened(store: &MemoryHalves, path: &std::path::Path) -> SessionFile {
+        let session = read_vault_file(path)
+            .ok()
+            .and_then(|f| f.session)
+            .expect("the saved vault is in the session format");
         let local_half = store.read(ACCOUNT).expect("local half");
-        read_vault_file(path, &local_half, server_half).expect("the saved vault opens")
+        assert_eq!(
+            session.iv,
+            format!("iv-{}", local_half[0]),
+            "the file belongs to the stored local half"
+        );
+        session
     }
 
     #[test]
-    fn a_key_change_rewrites_the_saved_vault_under_the_same_halves() {
+    fn a_key_change_rewrites_the_saved_keys_under_the_same_halves() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("vault.bin");
         let halves = PersistentHalves::default();
         let store = MemoryHalves::default();
-        let server_half = [7u8; 32];
 
-        assert!(halves.enroll(&store, &path, ACCOUNT, || Some(vault(1)), &server_half));
-        assert_eq!(opened(&store, &path, &server_half).key_version, 1);
-        let local_before = store.read(ACCOUNT).unwrap();
+        assert!(halves.enroll(&store, &path, ACCOUNT, || Some(session(1, 1)), &[7u8; 32]));
+        assert_eq!(opened(&store, &path).keys.key_version, 1);
 
-        assert!(halves.rewrap(&store, &path, ACCOUNT, || Some(vault(3))));
-        let reopened = opened(&store, &path, &server_half);
-        assert_eq!(reopened.key_version, 3);
-        assert_eq!(reopened.history.len(), 2);
-        assert_eq!(*store.read(ACCOUNT).unwrap(), *local_before);
+        assert!(halves.rewrap(&path, ACCOUNT, || Some(keys(3))));
+        let reopened = opened(&store, &path);
+        assert_eq!(reopened.keys.key_version, 3);
+        assert_eq!(reopened.keys.history_keys.len(), 2);
+        assert_eq!(reopened.iv, "iv-1");
         assert!(!path.with_extension("bin.tmp").exists());
+        assert!(!path.with_extension("bin.new").exists());
     }
 
     #[test]
@@ -956,13 +1058,13 @@ mod tests {
         let halves = PersistentHalves::default();
         let store = MemoryHalves::default();
 
-        assert!(!halves.rewrap(&store, &path, ACCOUNT, || Some(vault(2))));
+        assert!(!halves.rewrap(&path, ACCOUNT, || Some(keys(2))));
         assert!(!path.exists());
 
-        assert!(halves.enroll(&store, &path, ACCOUNT, || Some(vault(1)), &[1u8; 32]));
+        assert!(halves.enroll(&store, &path, ACCOUNT, || Some(session(1, 1)), &[1u8; 32]));
         halves.forget(ACCOUNT);
-        assert!(!halves.rewrap(&store, &path, ACCOUNT, || Some(vault(2))));
-        assert_eq!(opened(&store, &path, &[1u8; 32]).key_version, 1);
+        assert!(!halves.rewrap(&path, ACCOUNT, || Some(keys(2))));
+        assert_eq!(opened(&store, &path).keys.key_version, 1);
     }
 
     #[test]
@@ -972,9 +1074,9 @@ mod tests {
         let halves = PersistentHalves::default();
         let store = MemoryHalves::default();
 
-        assert!(halves.enroll(&store, &path, ACCOUNT, || Some(vault(1)), &[2u8; 32]));
+        assert!(halves.enroll(&store, &path, ACCOUNT, || Some(session(1, 1)), &[2u8; 32]));
         halves.discard(&store, Some(&path), ACCOUNT);
-        assert!(!halves.rewrap(&store, &path, ACCOUNT, || Some(vault(2))));
+        assert!(!halves.rewrap(&path, ACCOUNT, || Some(keys(2))));
         assert!(!path.exists());
         assert!(store.read(ACCOUNT).is_none());
     }
@@ -986,17 +1088,23 @@ mod tests {
         let halves = Arc::new(PersistentHalves::default());
         let store = Arc::new(MemoryHalves::default());
         let server_half = [9u8; 32];
-        assert!(halves.enroll(&*store, &path, ACCOUNT, || Some(vault(1)), &server_half));
+        assert!(halves.enroll(
+            &*store,
+            &path,
+            ACCOUNT,
+            || Some(session(1, 1)),
+            &server_half
+        ));
 
         let enroller = {
             let (halves, store, path) = (halves.clone(), store.clone(), path.clone());
             std::thread::spawn(move || {
-                for _ in 0..200 {
+                for mark in 0..200u8 {
                     assert!(halves.enroll(
                         &*store,
                         &path,
                         ACCOUNT,
-                        || Some(vault(1)),
+                        || Some(session(mark, 1)),
                         &server_half
                     ));
                 }
@@ -1006,16 +1114,102 @@ mod tests {
             let (halves, store, path) = (halves.clone(), store.clone(), path.clone());
             std::thread::spawn(move || {
                 for version in 2..202 {
-                    halves.rewrap(&*store, &path, ACCOUNT, || Some(vault(version)));
+                    halves.rewrap(&path, ACCOUNT, || Some(keys(version)));
                     let _files = halves.files.lock().unwrap();
-                    let local_half = store.read(ACCOUNT).unwrap();
-                    read_vault_file(&path, &local_half, &server_half)
-                        .expect("the file always matches the stored local half");
+                    opened(&store, &path);
                 }
             })
         };
         enroller.join().unwrap();
         rewriter.join().unwrap();
-        opened(&store, &path, &server_half);
+        opened(&store, &path);
+    }
+
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct LegacyFixture {
+        local_half: String,
+        server_half: String,
+        cases: Vec<LegacyCase>,
+    }
+
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct LegacyCase {
+        name: String,
+        vault_file: String,
+        messages: Vec<LegacyMessage>,
+    }
+
+    #[derive(Deserialize)]
+    struct LegacyMessage {
+        ciphertext: String,
+        plaintext: String,
+    }
+
+    fn decrypts_all(ks: &Keystore, case: &LegacyCase) {
+        for m in &case.messages {
+            let ciphertext = b64().decode(&m.ciphertext).unwrap();
+            let plain = ks
+                .decrypt_bytes(ACCOUNT, &ciphertext, None)
+                .unwrap_or_else(|code| panic!("{}: {code}", case.name));
+            assert_eq!(plain, m.plaintext.as_bytes(), "{}", case.name);
+        }
+    }
+
+    #[test]
+    fn a_vault_saved_by_an_earlier_build_unlocks_and_moves_to_the_new_format() {
+        let raw = std::fs::read(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../fixtures/vault/legacy-vault-files.json"
+        ))
+        .unwrap();
+        let fixture: LegacyFixture = serde_json::from_slice(&raw).unwrap();
+        let local_half = b64().decode(&fixture.local_half).unwrap();
+        let server_half = b64().decode(&fixture.server_half).unwrap();
+
+        for case in &fixture.cases {
+            let dir = tempfile::tempdir().unwrap();
+            let path = dir.path().join("vault.bin");
+            std::fs::write(&path, &case.vault_file).unwrap();
+            let store = MemoryHalves::default();
+            store.write(ACCOUNT, &local_half);
+            let halves = PersistentHalves::default();
+            let ks = Keystore::new();
+
+            let email = halves
+                .restore(&ks, &store, &path, ACCOUNT, &server_half)
+                .unwrap_or_else(|code| panic!("{}: {code}", case.name));
+            assert_eq!(email, "nora@thelemail.test");
+            decrypts_all(&ks, case);
+
+            let migrated = read_vault_file(&path).unwrap();
+            assert!(
+                migrated.wrapped.is_none() && migrated.session.is_some(),
+                "{}",
+                case.name
+            );
+            assert_ne!(*store.read(ACCOUNT).unwrap(), local_half);
+            let saved = std::fs::read_to_string(&path).unwrap();
+            assert!(
+                !saved.contains(&b64().encode([0x5au8; 32])),
+                "the master key reached the file in the clear"
+            );
+
+            ks.lock(ACCOUNT);
+            assert!(ks.decrypt_bytes(ACCOUNT, b"x", None).is_err());
+            halves
+                .restore(&ks, &store, &path, ACCOUNT, &server_half)
+                .unwrap_or_else(|code| panic!("{} after the move: {code}", case.name));
+            decrypts_all(&ks, case);
+
+            ks.lock(ACCOUNT);
+            let mut wrong = server_half.clone();
+            wrong[0] ^= 1;
+            assert_eq!(
+                halves.restore(&ks, &store, &path, ACCOUNT, &wrong),
+                Err("unwrap_failed")
+            );
+        }
     }
 }

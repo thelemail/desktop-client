@@ -12,4 +12,6 @@ unsafe extern "C" {
     pub fn ThelemailProof(request: *const c_char) -> *mut c_char;
     pub fn ThelemailVerifyTlogProof(request: *const c_char) -> *mut c_char;
     pub fn ThelemailFreeCString(response: *mut c_char);
+    #[cfg(feature = "testkit")]
+    pub fn ThelemailTestkit(request: *const c_char) -> *mut c_char;
 }
