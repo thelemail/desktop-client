@@ -62,6 +62,8 @@ jobs:
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: macos-15
     environment: release
+    outputs:
+      sums: ${{ steps.digests.outputs.sums }}
     permissions:
       contents: read
     steps:
@@ -134,6 +136,17 @@ jobs:
           ./scripts/release-macos.sh
           rm -P "$APPLE_API_KEY_PATH"
 
+      - name: Record the artifact digests
+        id: digests
+        run: |
+          set -euo pipefail
+          cd target/release
+          {
+            echo "sums<<EOF"
+            shasum -a 256 Thelemail_*_universal.dmg Thelemail_*_universal.app.tar.gz Thelemail_*_universal.app.tar.gz.sig
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: macos
@@ -149,6 +162,8 @@ jobs:
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: windows-2025
     environment: release
+    outputs:
+      sums: ${{ steps.digests.outputs.sums }}
     permissions:
       contents: read
     defaults:
@@ -204,6 +219,17 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: ./scripts/release-windows.sh
 
+      - name: Record the artifact digests
+        id: digests
+        run: |
+          set -euo pipefail
+          cd target/release/bundle/nsis
+          {
+            echo "sums<<EOF"
+            sha256sum Thelemail_*_x64-setup.exe Thelemail_*_x64-setup.exe.sig
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: windows
@@ -230,8 +256,23 @@ jobs:
 
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
+          name: macos
           path: built
-          merge-multiple: true
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: windows
+          path: built
+
+      - name: Confirm the artifacts are the bytes the build jobs signed
+        env:
+          MACOS_SUMS: ${{ needs.macos.outputs.sums }}
+          WINDOWS_SUMS: ${{ needs.windows.outputs.sums }}
+        run: |
+          set -euo pipefail
+          cd built
+          test -n "$MACOS_SUMS" && test -n "$WINDOWS_SUMS"
+          printf '%s\n%s\n' "$MACOS_SUMS" "$WINDOWS_SUMS" | sed 's/ \*/  /' | sha256sum --strict -c -
 
       - name: Assemble the release artifacts
         env:
