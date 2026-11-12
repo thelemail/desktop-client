@@ -1,3 +1,4 @@
+use base64::Engine as _;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -833,4 +834,62 @@ impl CommitKeyRotationResponse {
 pub struct ProductKeysRead {
     pub authority_key_id: String,
     pub state_revision: i64,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ListedTransition {
+    pub previous_key_fingerprint: String,
+    pub signature: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ListedKey {
+    pub key_version: i64,
+    pub key_fingerprint: String,
+    pub encrypted_private_key: Option<String>,
+    #[serde(default)]
+    pub is_current: bool,
+    #[serde(default)]
+    pub transitions: Vec<ListedTransition>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AccountKeyList {
+    pub current_version: i64,
+    pub keys: Vec<ListedKey>,
+}
+
+impl LoadAccountKeysArgs {
+    pub fn from_list(account_id: &str, list: AccountKeyList) -> Self {
+        let b64 = base64::engine::general_purpose::STANDARD;
+        Self {
+            account_id: account_id.to_owned(),
+            current_version: list.current_version,
+            keys: list
+                .keys
+                .into_iter()
+                .filter_map(|k| {
+                    Some(AccountKeyInput {
+                        key_version: k.key_version,
+                        fingerprint_hex: k.key_fingerprint,
+                        encrypted_private_key_armored: k.encrypted_private_key?,
+                        is_current: k.is_current,
+                        transitions: k
+                            .transitions
+                            .into_iter()
+                            .filter_map(|t| {
+                                Some(AccountKeyTransitionInput {
+                                    previous_key_fingerprint_hex: t.previous_key_fingerprint,
+                                    signature: b64.decode(t.signature).ok()?,
+                                })
+                            })
+                            .collect(),
+                    })
+                })
+                .collect(),
+        }
+    }
 }

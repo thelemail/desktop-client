@@ -5,7 +5,7 @@ use serde::Deserialize;
 use serde_json::Value;
 use tauri::{AppHandle, Manager};
 use thelemail_api::{ApiRequest, Net};
-use thelemail_keystore::Keystore;
+use thelemail_keystore::{AccountKeyList, Keystore, LoadAccountKeysArgs};
 
 use crate::keystore::{PersistentHalves, clear_account};
 
@@ -137,6 +137,18 @@ pub async fn verify(
             Fetched::Unreachable(err) => return Ok(Outcome::Unreachable(err)),
         }
     }
+    let keys = match get(net, account_id, token, "v1/me/keys").await {
+        Fetched::Body(v) => v,
+        Fetched::Refused(status) => {
+            return Ok(Outcome::Unreachable(format!(
+                "account keys returned {status}"
+            )));
+        }
+        Fetched::Unreachable(err) => return Ok(Outcome::Unreachable(err)),
+    };
+    let list: AccountKeyList = serde_json::from_value(keys)
+        .map_err(|_| Refused("account key list is malformed".to_owned()))?;
+    ks.load_account_keys(LoadAccountKeysArgs::from_list(account_id, list));
     ks.read_product_keys(account_id, &product_keys, &root, &bundles)
         .map_err(|err| Refused(err.message().to_owned()))?;
     Ok(Outcome::Verified)
@@ -218,23 +230,46 @@ mod tests {
     }
 
     struct Fixture {
+        ks: Keystore,
         account_id: String,
         routes: Routes,
     }
 
     fn fixture() -> Fixture {
+        let ks = Keystore::new();
         let account_id = uuid::Uuid::new_v4().to_string();
-        let opened = testkit(json!({
-            "op": "openSession",
-            "accountId": account_id,
-            "masterKey": true,
-            "email": "nora@thelemail.test",
-        }));
         let account = testkit(json!({
             "op": "productKeysAccount",
             "accountId": account_id,
-            "encryptedPrivateKey": opened["encryptedPrivateKey"],
+            "email": "nora@thelemail.test",
         }));
+        let half = [0x55u8; 32];
+        let persisted = thelemail_trust::call::<Value>(
+            Family::Session,
+            &json!({
+                "op": "persist",
+                "accountId": account_id,
+                "serverHalf": base64::engine::general_purpose::STANDARD.encode(half),
+            }),
+        )
+        .expect("persist");
+        let current = account["accountKeys"]["keys"][1]["encryptedPrivateKey"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        assert!(ks.restore(
+            &account_id,
+            "nora@thelemail.test".to_owned(),
+            &thelemail_keystore::SavedKeys {
+                encrypted_private_key: current,
+                key_version: 2,
+                key_anchored: false,
+                history_keys: Vec::new(),
+            },
+            &serde_json::from_value(persisted["wrapped"].clone()).unwrap(),
+            persisted["wrapVersion"].as_i64().unwrap(),
+            &half,
+        ));
         let mut routes = Routes::new();
         routes.insert(
             "/v1/me/product-keys/app".to_owned(),
@@ -243,6 +278,10 @@ mod tests {
         routes.insert(
             "/v1/me/product-keys/app/root-descriptor".to_owned(),
             (200, account["rootDescriptor"].clone()),
+        );
+        routes.insert(
+            "/v1/me/keys".to_owned(),
+            (200, account["accountKeys"].clone()),
         );
         for b in account["productBundles"].as_array().unwrap() {
             routes.insert(
@@ -254,15 +293,18 @@ mod tests {
                 (200, b.clone()),
             );
         }
-        Fixture { account_id, routes }
+        Fixture {
+            ks,
+            account_id,
+            routes,
+        }
     }
 
     fn run(f: &Fixture) -> Result<Outcome, Refused> {
         let net = net(&serve(f.routes.clone()));
-        let ks = Keystore::new();
         tokio::runtime::Runtime::new()
             .expect("runtime")
-            .block_on(verify(&net, &ks, &f.account_id, "token"))
+            .block_on(verify(&net, &f.ks, &f.account_id, "token"))
     }
 
     fn route<'a>(f: &'a mut Fixture, suffix: &str) -> &'a mut (u16, Value) {
@@ -274,8 +316,15 @@ mod tests {
     }
 
     #[test]
-    fn a_v2_account_verifies() {
+    fn a_v2_account_verifies_after_loading_its_rotated_key_list() {
         assert_eq!(run(&fixture()), Ok(Outcome::Verified));
+    }
+
+    #[test]
+    fn a_missing_key_list_is_not_a_refusal() {
+        let mut f = fixture();
+        route(&mut f, "/me/keys").0 = 503;
+        assert!(matches!(run(&f), Ok(Outcome::Unreachable(_))));
     }
 
     #[test]

@@ -37,26 +37,27 @@ struct V2Account {
 }
 
 fn v2_account() -> V2Account {
-    let account_id = new_account_id();
-    let opened = testkit(json!({
-        "op": "openSession",
-        "accountId": account_id,
-        "masterKey": true,
-        "email": EMAIL,
-    }));
-    let fixture = testkit(json!({
-        "op": "productKeysAccount",
-        "accountId": account_id,
-        "encryptedPrivateKey": opened["encryptedPrivateKey"],
-    }));
+    let ks = Keystore::new();
+    let (account_id, fixture) = open_product_keys_account(&ks);
     V2Account {
-        ks: Keystore::new(),
+        ks,
         account_id,
         fixture,
     }
 }
 
 impl V2Account {
+    fn load_key_list(&self) {
+        let list: AccountKeyList =
+            serde_json::from_value(self.fixture["accountKeys"].clone()).expect("key list");
+        let loaded = serde_json::to_value(
+            self.ks
+                .load_account_keys(LoadAccountKeysArgs::from_list(&self.account_id, list)),
+        )
+        .unwrap();
+        assert_eq!(loaded["ok"], true, "{loaded}");
+    }
+
     fn read(&self, product_keys: &Value) -> Result<ProductKeysRead, String> {
         let bundles = self.fixture["productBundles"].as_array().unwrap();
         self.ks
@@ -71,8 +72,10 @@ impl V2Account {
 }
 
 #[test]
-fn a_v2_account_reads_through_the_unlocked_session() {
+fn a_rotated_account_reads_once_its_key_list_is_loaded() {
     let a = v2_account();
+    assert!(a.read(&a.fixture["productKeys"]).is_err());
+    a.load_key_list();
     let read = a.read(&a.fixture["productKeys"]).expect("read");
     assert_eq!(read.state_revision, 1);
     assert_eq!(
@@ -84,6 +87,7 @@ fn a_v2_account_reads_through_the_unlocked_session() {
 #[test]
 fn a_forged_head_mac_is_refused() {
     let a = v2_account();
+    a.load_key_list();
     let mut forged = a.fixture["productKeys"].clone();
     forged["head"]["mac"] = json!(b64().encode([0u8; 32]));
     assert!(a.read(&forged).is_err());
@@ -92,6 +96,7 @@ fn a_forged_head_mac_is_refused() {
 #[test]
 fn an_authority_key_the_head_does_not_name_is_refused() {
     let a = v2_account();
+    a.load_key_list();
     let other = v2_account();
     let mut swapped = a.fixture["productKeys"].clone();
     swapped["authorityKey"] = other.fixture["productKeys"]["authorityKey"].clone();
@@ -101,9 +106,7 @@ fn an_authority_key_the_head_does_not_name_is_refused() {
 #[test]
 fn a_locked_account_cannot_read() {
     let a = v2_account();
-    trust(
-        thelemail_trust::Family::Session,
-        json!({"op": "lock", "accountId": a.account_id}),
-    );
+    a.load_key_list();
+    a.ks.lock(&a.account_id);
     assert!(a.read(&a.fixture["productKeys"]).is_err());
 }
