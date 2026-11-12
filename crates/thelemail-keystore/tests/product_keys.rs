@@ -68,6 +68,10 @@ impl V2Account {
                 bundles,
             )
             .map_err(|err| err.message().to_owned())
+            .and_then(|read| match read.refused.clone() {
+                Some(reason) => Err(reason),
+                None => Ok(read),
+            })
     }
 }
 
@@ -77,10 +81,10 @@ fn a_rotated_account_reads_once_its_key_list_is_loaded() {
     assert!(a.read(&a.fixture["productKeys"]).is_err());
     a.load_key_list();
     let read = a.read(&a.fixture["productKeys"]).expect("read");
-    assert_eq!(read.state_revision, 1);
+    assert_eq!(read.state_revision, Some(1));
     assert_eq!(
-        read.authority_key_id,
-        a.fixture["productKeys"]["authorityKey"]["keyId"]
+        read.authority_key_id.as_deref(),
+        a.fixture["productKeys"]["authorityKey"]["keyId"].as_str()
     );
 }
 
@@ -104,9 +108,18 @@ fn an_authority_key_the_head_does_not_name_is_refused() {
 }
 
 #[test]
-fn a_locked_account_cannot_read() {
+fn a_locked_account_is_an_error_not_a_refusal() {
     let a = v2_account();
     a.load_key_list();
     a.ks.lock(&a.account_id);
-    assert!(a.read(&a.fixture["productKeys"]).is_err());
+    let bundles = a.fixture["productBundles"].as_array().unwrap();
+    assert!(
+        a.ks.read_product_keys(
+            &a.account_id,
+            &a.fixture["productKeys"],
+            &a.fixture["rootDescriptor"],
+            bundles,
+        )
+        .is_err()
+    );
 }

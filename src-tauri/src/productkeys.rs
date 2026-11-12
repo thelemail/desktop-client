@@ -149,9 +149,13 @@ pub async fn verify(
     let list: AccountKeyList = serde_json::from_value(keys)
         .map_err(|_| Refused("account key list is malformed".to_owned()))?;
     ks.load_account_keys(LoadAccountKeysArgs::from_list(account_id, list));
-    ks.read_product_keys(account_id, &product_keys, &root, &bundles)
-        .map_err(|err| Refused(err.message().to_owned()))?;
-    Ok(Outcome::Verified)
+    match ks.read_product_keys(account_id, &product_keys, &root, &bundles) {
+        Ok(read) => match read.refused {
+            Some(reason) => Err(Refused(reason)),
+            None => Ok(Outcome::Verified),
+        },
+        Err(err) => Ok(Outcome::Unreachable(err.message().to_owned())),
+    }
 }
 
 pub async fn verify_or_clear(app: &AppHandle, account_id: &str, token: &str) -> bool {
@@ -318,6 +322,13 @@ mod tests {
     #[test]
     fn a_v2_account_verifies_after_loading_its_rotated_key_list() {
         assert_eq!(run(&fixture()), Ok(Outcome::Verified));
+    }
+
+    #[test]
+    fn a_locked_session_is_not_a_refusal() {
+        let f = fixture();
+        f.ks.lock(&f.account_id);
+        assert!(matches!(run(&f), Ok(Outcome::Unreachable(_))));
     }
 
     #[test]

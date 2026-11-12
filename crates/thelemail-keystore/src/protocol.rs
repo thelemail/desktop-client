@@ -832,8 +832,12 @@ impl CommitKeyRotationResponse {
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ProductKeysRead {
-    pub authority_key_id: String,
-    pub state_revision: i64,
+    #[serde(default)]
+    pub refused: Option<String>,
+    #[serde(default)]
+    pub authority_key_id: Option<String>,
+    #[serde(default)]
+    pub state_revision: Option<i64>,
 }
 
 #[derive(Debug, Deserialize)]
