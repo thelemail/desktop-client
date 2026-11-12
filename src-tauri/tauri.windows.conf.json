@@ -5,6 +5,9 @@
       "nsis"
     ],
     "publisher": "Thelemail",
+    "resources": {
+      "trust-lib/thelemail_trust.dll": "thelemail_trust.dll"
+    },
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",

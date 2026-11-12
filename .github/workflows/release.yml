@@ -54,6 +54,8 @@ jobs:
     permissions:
       contents: read
     uses: ./.github/workflows/ci.yml
+    secrets:
+      TRUST_READ_TOKEN: ${{ secrets.TRUST_READ_TOKEN }}
 
   macos:
     needs: [preflight, verify]
@@ -77,6 +79,15 @@ jobs:
           node-version-file: web-client/.nvmrc
 
       - run: corepack enable
+
+      - uses: actions/setup-go@d35c59abb061a4a6fb18e82ac0862c26744d6ab5 # v5.5.0
+        with:
+          go-version-file: trust/go.mod
+          cache-dependency-path: trust/go.sum
+
+      - uses: ./.github/actions/private-modules
+        with:
+          token: ${{ secrets.TRUST_READ_TOKEN }}
 
       - uses: Swatinem/rust-cache@98c8021b550208e191a6a3145459bfc9fb29c4c0 # v2.8.0
         with:
@@ -127,9 +138,9 @@ jobs:
         with:
           name: macos
           path: |
-            target/release/Thelemail_*_aarch64.dmg
-            target/release/Thelemail_*_aarch64.app.tar.gz
-            target/release/Thelemail_*_aarch64.app.tar.gz.sig
+            target/release/Thelemail_*_universal.dmg
+            target/release/Thelemail_*_universal.app.tar.gz
+            target/release/Thelemail_*_universal.app.tar.gz.sig
           if-no-files-found: error
           retention-days: 1
 
@@ -161,6 +172,21 @@ jobs:
           node-version-file: web-client/.nvmrc
 
       - run: corepack enable
+
+      - uses: actions/setup-go@d35c59abb061a4a6fb18e82ac0862c26744d6ab5 # v5.5.0
+        with:
+          go-version-file: trust/go.mod
+          cache-dependency-path: trust/go.sum
+
+      - uses: ./.github/actions/private-modules
+        with:
+          token: ${{ secrets.TRUST_READ_TOKEN }}
+
+      - name: Put MinGW in front for the trust library
+        run: |
+          set -euo pipefail
+          echo "/c/mingw64/bin" >> "$GITHUB_PATH"
+          echo "TRUST_MINGW_CC=gcc" >> "$GITHUB_ENV"
 
       - uses: Swatinem/rust-cache@98c8021b550208e191a6a3145459bfc9fb29c4c0 # v2.8.0
         with:
@@ -214,10 +240,10 @@ jobs:
           set -euo pipefail
           version="${TAG#v}"
           mkdir -p dist
-          updater="Thelemail_${version}_aarch64.app.tar.gz"
+          updater="Thelemail_${version}_universal.app.tar.gz"
           installer="Thelemail_${version}_x64-setup.exe"
           download="https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG}"
-          cp "built/Thelemail_${version}_aarch64.dmg" dist/
+          cp "built/Thelemail_${version}_universal.dmg" dist/
           cp "built/${updater}" "built/${updater}.sig" dist/
           cp "built/${installer}" "built/${installer}.sig" dist/
           jq -n --arg version "$version" \
@@ -229,13 +255,14 @@ jobs:
                 --rawfile windowsSignature "dist/${installer}.sig" \
                 '{version: $version, notes: $notes, pub_date: $pubDate, platforms: {
                     "darwin-aarch64": {signature: ($macSignature | rtrimstr("\n")), url: $macUrl},
+                    "darwin-x86_64": {signature: ($macSignature | rtrimstr("\n")), url: $macUrl},
                     "windows-x86_64": {signature: ($windowsSignature | rtrimstr("\n")), url: $windowsUrl}
                   }}' \
             > dist/latest.json
           jq -n --arg tag "$TAG" --arg commit "$GITHUB_SHA" \
                 --arg webClient "$(cat web-client.version)" \
                 --arg webClientCommit "$(git -C web-client rev-parse HEAD)" \
-                '{tag: $tag, commit: $commit, webClient: $webClient, webClientCommit: $webClientCommit, arch: "aarch64", targets: ["darwin-aarch64", "windows-x86_64"]}' \
+                '{tag: $tag, commit: $commit, webClient: $webClient, webClientCommit: $webClientCommit, arch: "universal", targets: ["darwin-aarch64", "darwin-x86_64", "windows-x86_64"]}' \
             > dist/release-metadata.json
           cd dist
           shasum -a 256 ./*.dmg ./*.app.tar.gz ./*.app.tar.gz.sig ./*-setup.exe ./*-setup.exe.sig latest.json release-metadata.json > SHA256SUMS

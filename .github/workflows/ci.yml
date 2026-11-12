@@ -5,6 +5,9 @@ on:
   push:
     branches: [main]
   workflow_call:
+    secrets:
+      TRUST_READ_TOKEN:
+        required: true
 
 permissions:
   contents: read
@@ -31,6 +34,17 @@ jobs:
 
       - run: corepack enable
 
+      - uses: actions/setup-go@d35c59abb061a4a6fb18e82ac0862c26744d6ab5 # v5.5.0
+        with:
+          go-version-file: trust/go.mod
+          cache-dependency-path: |
+            trust/go.sum
+            xtask/go/go.sum
+
+      - uses: ./.github/actions/private-modules
+        with:
+          token: ${{ secrets.TRUST_READ_TOKEN }}
+
       - uses: Swatinem/rust-cache@98c8021b550208e191a6a3145459bfc9fb29c4c0 # v2.8.0
         with:
           workspaces: src-tauri -> target
@@ -50,6 +64,17 @@ jobs:
       - run: cargo clippy --workspace --all-targets -- -D warnings
 
       - run: cargo test --workspace
+
+      - name: Build the universal app without test exports
+        run: |
+          set -euo pipefail
+          npx --yes @tauri-apps/cli@2.12.4 build --target universal-apple-darwin --bundles app --no-sign
+          binary=target/universal-apple-darwin/release/bundle/macos/Thelemail.app/Contents/MacOS/thelemail-desktop
+          lipo "$binary" -verify_arch arm64 x86_64
+          if grep -qa ThelemailTestkit "$binary"; then
+            echo "the release binary carries the trust testkit" >&2
+            exit 1
+          fi
 
   windows:
     runs-on: windows-2025
@@ -74,6 +99,29 @@ jobs:
 
       - run: corepack enable
 
+      - uses: actions/setup-go@d35c59abb061a4a6fb18e82ac0862c26744d6ab5 # v5.5.0
+        with:
+          go-version-file: trust/go.mod
+          cache-dependency-path: |
+            trust/go.sum
+            xtask/go/go.sum
+
+      - uses: ./.github/actions/private-modules
+        with:
+          token: ${{ secrets.TRUST_READ_TOKEN }}
+
+      - name: Put MinGW in front for the trust library
+        run: |
+          set -euo pipefail
+          echo "/c/mingw64/bin" >> "$GITHUB_PATH"
+          echo "TRUST_MINGW_CC=gcc" >> "$GITHUB_ENV"
+
+      - name: Check the MinGW toolchain
+        run: |
+          set -euo pipefail
+          gcc --version
+          dlltool --version
+
       - uses: Swatinem/rust-cache@98c8021b550208e191a6a3145459bfc9fb29c4c0 # v2.8.0
         with:
           workspaces: src-tauri -> target
@@ -93,6 +141,15 @@ jobs:
 
       - name: Build the installer
         run: npx --yes @tauri-apps/cli@2.12.4 build
+
+      - name: Check the installer carries the trust library without test exports
+        run: |
+          set -euo pipefail
+          test -f target/release/thelemail_trust.dll
+          if grep -qa ThelemailTestkit target/release/thelemail_trust.dll; then
+            echo "the release library carries the trust testkit" >&2
+            exit 1
+          fi
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
