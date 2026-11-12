@@ -19,7 +19,10 @@ pub enum Outcome {
 }
 
 #[derive(Debug, PartialEq, Eq)]
-pub struct Refused(pub String);
+pub struct Refused {
+    pub reason: String,
+    pub enforce: bool,
+}
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -68,16 +71,16 @@ async fn get(net: &Net, account_id: &str, token: &str, path: &str) -> Fetched {
     }
 }
 
-fn bundle_refs(product_keys: &Value) -> Result<Vec<BundleRef>, Refused> {
+fn bundle_refs(product_keys: &Value) -> Result<Vec<BundleRef>, String> {
     let record = product_keys
         .pointer("/identityManifest/record")
         .and_then(Value::as_str)
-        .ok_or_else(|| Refused("account head v2 without an identity manifest".to_owned()))?;
+        .ok_or("account head v2 without an identity manifest")?;
     let raw = base64::engine::general_purpose::STANDARD
         .decode(record)
-        .map_err(|_| Refused("identity manifest is not base64".to_owned()))?;
-    let manifest: IdentityManifest = serde_json::from_slice(&raw)
-        .map_err(|_| Refused("identity manifest is malformed".to_owned()))?;
+        .map_err(|_| "identity manifest is not base64")?;
+    let manifest: IdentityManifest =
+        serde_json::from_slice(&raw).map_err(|_| "identity manifest is malformed")?;
     Ok(manifest.bundles)
 }
 
@@ -110,7 +113,12 @@ pub async fn verify(
     {
         return Ok(Outcome::NoHead);
     }
-    let refs = bundle_refs(&product_keys)?;
+    let enforce = product_keys
+        .get("nativeEnforcement")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let refuse = |reason: String| Refused { reason, enforce };
+    let refs = bundle_refs(&product_keys).map_err(refuse)?;
     let root = match get(
         net,
         account_id,
@@ -120,7 +128,7 @@ pub async fn verify(
     .await
     {
         Fetched::Body(v) => v,
-        Fetched::Refused(status) => return Err(Refused(format!("product root returned {status}"))),
+        Fetched::Refused(status) => return Err(refuse(format!("product root returned {status}"))),
         Fetched::Unreachable(err) => return Ok(Outcome::Unreachable(err)),
     };
     let mut bundles = Vec::with_capacity(refs.len());
@@ -132,7 +140,7 @@ pub async fn verify(
         match get(net, account_id, token, &path).await {
             Fetched::Body(v) => bundles.push(v),
             Fetched::Refused(status) => {
-                return Err(Refused(format!("product bundle returned {status}")));
+                return Err(refuse(format!("product bundle returned {status}")));
             }
             Fetched::Unreachable(err) => return Ok(Outcome::Unreachable(err)),
         }
@@ -147,11 +155,11 @@ pub async fn verify(
         Fetched::Unreachable(err) => return Ok(Outcome::Unreachable(err)),
     };
     let list: AccountKeyList = serde_json::from_value(keys)
-        .map_err(|_| Refused("account key list is malformed".to_owned()))?;
+        .map_err(|_| refuse("account key list is malformed".to_owned()))?;
     ks.load_account_keys(LoadAccountKeysArgs::from_list(account_id, list));
     match ks.read_product_keys(account_id, &product_keys, &root, &bundles) {
         Ok(read) => match read.refused {
-            Some(reason) => Err(Refused(reason)),
+            Some(reason) => Err(refuse(reason)),
             None => Ok(Outcome::Verified),
         },
         Err(err) => Ok(Outcome::Unreachable(err.message().to_owned())),
@@ -167,7 +175,17 @@ pub async fn verify_or_clear(app: &AppHandle, account_id: &str, token: &str) -> 
             true
         }
         Ok(_) => true,
-        Err(Refused(reason)) => {
+        Err(Refused {
+            reason,
+            enforce: false,
+        }) => {
+            eprintln!("productkeys: {account_id} refused, not enforced: {reason}");
+            true
+        }
+        Err(Refused {
+            reason,
+            enforce: true,
+        }) => {
             eprintln!("productkeys: {account_id} refused: {reason}");
             clear_account(&ks, &app.state::<PersistentHalves>(), account_id);
             false
@@ -365,7 +383,21 @@ mod tests {
         let mut f = fixture();
         route(&mut f, "/product-keys/app").1["head"]["mac"] =
             json!(base64::engine::general_purpose::STANDARD.encode([0u8; 32]));
-        assert!(run(&f).is_err());
+        assert!(matches!(run(&f), Err(Refused { enforce: false, .. })));
+    }
+
+    #[test]
+    fn a_refusal_carries_the_server_enforcement_switch() {
+        let mut f = fixture();
+        let keys = &mut route(&mut f, "/product-keys/app").1;
+        keys["head"]["mac"] = json!(base64::engine::general_purpose::STANDARD.encode([0u8; 32]));
+        keys["nativeEnforcement"] = json!(true);
+        assert!(matches!(run(&f), Err(Refused { enforce: true, .. })));
+
+        let mut f = fixture();
+        route(&mut f, "/root-descriptor").0 = 403;
+        route(&mut f, "/product-keys/app").1["nativeEnforcement"] = json!(true);
+        assert!(matches!(run(&f), Err(Refused { enforce: true, .. })));
     }
 
     #[test]
