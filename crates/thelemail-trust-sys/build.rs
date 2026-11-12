@@ -39,7 +39,11 @@ fn main() {
         println!("cargo:rerun-if-env-changed={var}");
     }
     if let Some(work) = env::var_os("GOWORK").filter(|w| !w.is_empty() && w != "off") {
-        println!("cargo:rerun-if-changed={}", PathBuf::from(work).display());
+        let work = PathBuf::from(work);
+        println!("cargo:rerun-if-changed={}", work.display());
+        for replaced in replaced_modules(&work) {
+            println!("cargo:rerun-if-changed={}", replaced.display());
+        }
     }
 
     let goarch = match arch.as_str() {
@@ -54,6 +58,18 @@ fn main() {
         "linux" => build_linux(&module, &out, goarch),
         other => panic!("trust: unsupported target os {other}"),
     }
+}
+
+fn replaced_modules(work: &Path) -> Vec<PathBuf> {
+    let base = work.parent().unwrap_or(Path::new("."));
+    fs::read_to_string(work)
+        .unwrap_or_default()
+        .lines()
+        .filter_map(|line| line.split_once("=>").map(|(_, target)| target.trim()))
+        .filter_map(|target| target.split_whitespace().next())
+        .map(|target| base.join(target))
+        .filter(|path| path.is_dir())
+        .collect()
 }
 
 fn go() -> Command {

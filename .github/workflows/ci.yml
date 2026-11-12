@@ -68,9 +68,10 @@ jobs:
       - name: Build the universal app without test exports
         run: |
           set -euo pipefail
-          npx --yes @tauri-apps/cli@2.12.4 build --target universal-apple-darwin --bundles app --no-sign
-          binary=target/universal-apple-darwin/release/bundle/macos/Thelemail.app/Contents/MacOS/thelemail-desktop
-          lipo "$binary" -verify_arch arm64 x86_64
+          npx --yes @tauri-apps/cli@2.12.4 build --debug --target universal-apple-darwin --bundles app --no-sign
+          binary=target/universal-apple-darwin/debug/bundle/macos/Thelemail.app/Contents/MacOS/thelemail-desktop
+          archs="$(lipo -archs "$binary")"
+          [[ "$archs" == *arm64* && "$archs" == *x86_64* ]] || { echo "not universal: $archs" >&2; exit 1; }
           if grep -qa ThelemailTestkit "$binary"; then
             echo "the release binary carries the trust testkit" >&2
             exit 1

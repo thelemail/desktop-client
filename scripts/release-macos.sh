@@ -47,8 +47,9 @@ THELEMAIL_RELEASE=1 node scripts/build-frontend.mjs
 npx --yes "@tauri-apps/cli@${TAURI_CLI_VERSION:-2.12.4}" build --target universal-apple-darwin
 
 binary="$app/Contents/MacOS/thelemail-desktop"
-lipo "$binary" -verify_arch arm64 x86_64 \
-	|| { echo "release-macos: $binary is not universal" >&2; exit 1; }
+archs="$(lipo -archs "$binary")"
+[[ "$archs" == *arm64* && "$archs" == *x86_64* ]] \
+	|| { echo "release-macos: $binary is not universal ($archs)" >&2; exit 1; }
 if grep -qa ThelemailTestkit "$binary"; then
 	echo "release-macos: the binary carries the trust testkit" >&2
 	exit 1
