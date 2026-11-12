@@ -1,0 +1,10 @@
+[package]
+name = "thelemail-trust-sys"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+links = "thelemail_trust"
+build = "build.rs"
+
+[dependencies]

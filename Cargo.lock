@@ -5773,6 +5773,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "thelemail-trust"
+version = "0.22.1"
+dependencies = [
+ "serde",
+ "serde_json",
+ "thelemail-trust-sys",
+ "thiserror 2.0.20",
+ "zeroize",
+]
+
+[[package]]
+name = "thelemail-trust-sys"
+version = "0.22.1"
+
+[[package]]
 name = "thiserror"
 version = "1.0.69"
 source = "registry+https://github.com/rust-lang/crates.io-index"
