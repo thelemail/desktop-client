@@ -47,7 +47,7 @@ jobs:
 
       - uses: Swatinem/rust-cache@98c8021b550208e191a6a3145459bfc9fb29c4c0 # v2.8.0
         with:
-          workspaces: src-tauri -> target
+          workspaces: . -> target
 
       - name: Confirm the pinned web client matches web-client.version
         run: |
@@ -121,11 +121,11 @@ jobs:
         run: |
           set -euo pipefail
           gcc --version
-          dlltool --version
+          objdump --version
 
       - uses: Swatinem/rust-cache@98c8021b550208e191a6a3145459bfc9fb29c4c0 # v2.8.0
         with:
-          workspaces: src-tauri -> target
+          workspaces: . -> target
 
       - name: Build OpenSSL with Strawberry Perl
         run: |
