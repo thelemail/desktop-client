@@ -38,12 +38,8 @@ if (!existsSync(resolve(source, 'package.json'))) {
 if (override) {
 	warn(`building from a local checkout at ${source} instead of the pinned ${pinned}`);
 } else {
-	let describes = '';
-	try {
-		describes = git(source, ['describe', '--tags', '--exact-match']);
-	} catch {
-		describes = git(source, ['rev-parse', '--short', 'HEAD']);
-	}
+	const tags = git(source, ['tag', '--points-at', 'HEAD']).split('\n').filter(Boolean);
+	const describes = tags.includes(pinned) ? pinned : tags[0] || git(source, ['rev-parse', '--short', 'HEAD']);
 	if (describes !== pinned) {
 		warn(`the submodule is at ${describes} but web-client.version pins ${pinned}`);
 	}
