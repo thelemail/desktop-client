@@ -24,7 +24,7 @@ require (
 	github.com/gtank/ristretto255 v0.2.0 // indirect
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/thelemail/go-crypto v0.2.0 // indirect
-	github.com/thelemail/trust v0.4.0 // indirect
+	github.com/thelemail/trust v0.5.0 // indirect
 	golang.org/x/crypto v0.58.0 // indirect
 	golang.org/x/mod v0.42.0 // indirect
 	golang.org/x/sync v0.24.0 // indirect
