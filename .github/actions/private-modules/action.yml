@@ -1,0 +1,26 @@
+name: private-modules
+description: Let the Go toolchain fetch the private thelemail/trust module
+
+inputs:
+  token:
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      env:
+        TRUST_READ_TOKEN: ${{ inputs.token }}
+      run: |
+        set -euo pipefail
+        if [ -z "$TRUST_READ_TOKEN" ]; then
+          echo "TRUST_READ_TOKEN is not set" >&2
+          exit 1
+        fi
+        umask 077
+        line="machine github.com login x-access-token password $TRUST_READ_TOKEN"
+        printf '%s\n' "$line" >> "$HOME/.netrc"
+        if [ "${RUNNER_OS:-}" = "Windows" ]; then
+          printf '%s\n' "$line" >> "$HOME/_netrc"
+        fi
+        echo "GOPRIVATE=github.com/thelemail/trust" >> "$GITHUB_ENV"

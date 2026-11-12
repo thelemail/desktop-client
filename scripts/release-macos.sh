@@ -32,11 +32,11 @@ signing_key="$TAURI_SIGNING_PRIVATE_KEY"
 signing_password="$TAURI_SIGNING_PRIVATE_KEY_PASSWORD"
 unset TAURI_SIGNING_PRIVATE_KEY TAURI_SIGNING_PRIVATE_KEY_PASSWORD
 
-app="target/release/bundle/macos/Thelemail.app"
+app="target/universal-apple-darwin/release/bundle/macos/Thelemail.app"
 version="$(python3 -c "import json;print(json.load(open('src-tauri/tauri.conf.json'))['version'])")"
-dmg="target/release/Thelemail_${version}_aarch64.dmg"
-updater="target/release/Thelemail_${version}_aarch64.app.tar.gz"
-app_zip="target/release/Thelemail_${version}_aarch64.app.zip"
+dmg="target/release/Thelemail_${version}_universal.dmg"
+updater="target/release/Thelemail_${version}_universal.app.tar.gz"
+app_zip="target/release/Thelemail_${version}_universal.app.zip"
 
 python3 -c "import json,sys;sys.exit(0 if json.load(open('src-tauri/tauri.conf.json'))['plugins']['updater']['pubkey'].strip() else 1)" \
 	|| { echo "release-macos: plugins.updater.pubkey is empty in tauri.conf.json" >&2; exit 1; }
@@ -44,8 +44,18 @@ python3 -c "import json,sys;sys.exit(0 if json.load(open('src-tauri/tauri.conf.j
 [[ -f "$APPLE_API_KEY_PATH" ]] || { echo "release-macos: no key at $APPLE_API_KEY_PATH" >&2; exit 1; }
 
 THELEMAIL_RELEASE=1 node scripts/build-frontend.mjs
-npx --yes "@tauri-apps/cli@${TAURI_CLI_VERSION:-2.12.4}" build
+npx --yes "@tauri-apps/cli@${TAURI_CLI_VERSION:-2.12.4}" build --target universal-apple-darwin
 
+binary="$app/Contents/MacOS/thelemail-desktop"
+archs="$(lipo -archs "$binary")"
+[[ "$archs" == *arm64* && "$archs" == *x86_64* ]] \
+	|| { echo "release-macos: $binary is not universal ($archs)" >&2; exit 1; }
+if grep -qa ThelemailTestkit "$binary"; then
+	echo "release-macos: the binary carries the trust testkit" >&2
+	exit 1
+fi
+
+mkdir -p target/release
 codesign --force --options runtime --timestamp \
 	--sign "$APPLE_SIGNING_IDENTITY" \
 	"$app"

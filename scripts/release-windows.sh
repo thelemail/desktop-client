@@ -27,6 +27,11 @@ THELEMAIL_RELEASE=1 node scripts/build-frontend.mjs
 npx --yes "@tauri-apps/cli@${TAURI_CLI_VERSION:-2.12.4}" build
 
 [[ -f "$installer" ]] || { echo "release-windows: no installer at $installer" >&2; exit 1; }
+[[ -f target/release/thelemail_trust.dll ]] || { echo "release-windows: no trust library" >&2; exit 1; }
+if grep -qa ThelemailTestkit target/release/thelemail_trust.dll; then
+	echo "release-windows: the trust library carries the testkit" >&2
+	exit 1
+fi
 
 rm -f "$installer.sig"
 TAURI_SIGNING_PRIVATE_KEY="$signing_key" TAURI_SIGNING_PRIVATE_KEY_PASSWORD="$signing_password" \
