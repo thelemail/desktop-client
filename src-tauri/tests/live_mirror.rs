@@ -113,6 +113,64 @@ fn backfills_a_real_mailbox_and_searches_it_offline() {
     let key = thelemail_store::generate_db_key();
     let conn = thelemail_store::open_account_db(&db_path, &key, &account_id).expect("open mirror");
 
+    let mut key_headers = std::collections::HashMap::new();
+    key_headers.insert("Authorization".to_owned(), format!("Bearer {access_token}"));
+    key_headers.insert("X-Account-Id".to_owned(), account_id.clone());
+    let keys = rt
+        .block_on(net.request(thelemail_api::ApiRequest {
+            url: format!("{}v1/me/keys", net.config().api_base),
+            method: "GET".to_owned(),
+            headers: key_headers,
+            body: None,
+        }))
+        .expect("list account keys");
+    assert_eq!(keys.status, 200, "listing the account keys must succeed");
+    let list: serde_json::Value =
+        serde_json::from_slice(&keys.body.expect("body")).expect("parse keys");
+    let b64 = base64::engine::general_purpose::STANDARD;
+    let loaded = ks.load_account_keys(LoadAccountKeysArgs {
+        account_id: account_id.clone(),
+        current_version: list["currentVersion"].as_i64().expect("currentVersion"),
+        keys: list["keys"]
+            .as_array()
+            .expect("keys")
+            .iter()
+            .map(|k| AccountKeyInput {
+                key_version: k["keyVersion"].as_i64().expect("keyVersion"),
+                fingerprint_hex: k["keyFingerprint"]
+                    .as_str()
+                    .expect("fingerprint")
+                    .to_lowercase(),
+                encrypted_private_key_armored: k["encryptedPrivateKey"]
+                    .as_str()
+                    .expect("encrypted key")
+                    .to_owned(),
+                is_current: k["isCurrent"].as_bool().unwrap_or(false),
+                transitions: k["transitions"]
+                    .as_array()
+                    .map(|ts| {
+                        ts.iter()
+                            .map(|t| AccountKeyTransitionInput {
+                                previous_key_fingerprint_hex: t["previousKeyFingerprint"]
+                                    .as_str()
+                                    .unwrap_or_default()
+                                    .to_lowercase(),
+                                signature: base64::Engine::decode(
+                                    &b64,
+                                    t["signature"].as_str().unwrap_or_default(),
+                                )
+                                .unwrap_or_default(),
+                            })
+                            .collect()
+                    })
+                    .unwrap_or_default(),
+            })
+            .collect(),
+    });
+    assert!(
+        matches!(loaded, LoadAccountKeysResponse::Ok { .. }),
+        "the account keys must load: {loaded:?}"
+    );
     let url = format!(
         "{}v1/messages?mailbox=inbox&sort=oldest&limit=100",
         net.config().api_base
