@@ -827,3 +827,10 @@ impl CommitKeyRotationResponse {
         Self::Err { ok: false, code }
     }
 }
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProductKeysRead {
+    pub authority_key_id: String,
+    pub state_revision: i64,
+}

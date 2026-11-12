@@ -1750,6 +1750,25 @@ impl Keystore {
         }
     }
 
+    pub fn read_product_keys(
+        &self,
+        account_id: &str,
+        product_keys: &serde_json::Value,
+        root_descriptor: &serde_json::Value,
+        product_bundles: &[serde_json::Value],
+    ) -> Result<ProductKeysRead, TrustError> {
+        trust(
+            Family::Session,
+            &json!({
+                "op": "readProductKeys",
+                "accountId": account_id,
+                "productKeys": product_keys,
+                "rootDescriptor": root_descriptor,
+                "productBundles": product_bundles,
+            }),
+        )
+    }
+
     pub fn load_account_keys(&self, args: LoadAccountKeysArgs) -> LoadAccountKeysResponse {
         match self
             .accounts
