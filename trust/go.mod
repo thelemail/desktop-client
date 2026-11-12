@@ -21,10 +21,11 @@ require (
 	github.com/bytemare/secp256k1 v0.3.0 // indirect
 	github.com/cloudflare/circl v1.6.5 // indirect
 	github.com/cronokirby/saferith v0.33.0 // indirect
+	github.com/google/uuid v1.6.0 // indirect
 	github.com/gtank/ristretto255 v0.2.0 // indirect
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/thelemail/go-crypto v0.2.0 // indirect
-	github.com/thelemail/trust v0.5.0 // indirect
+	github.com/thelemail/trust v0.6.0 // indirect
 	golang.org/x/crypto v0.58.0 // indirect
 	golang.org/x/mod v0.42.0 // indirect
 	golang.org/x/sync v0.24.0 // indirect
