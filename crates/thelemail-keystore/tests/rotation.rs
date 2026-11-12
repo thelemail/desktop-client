@@ -1,47 +1,89 @@
-use base64::Engine as _;
-use serde_json::Value;
-use thelemail_crypto::amk::{Amk, derive_pgp_passphrase};
-use thelemail_crypto::keytransition;
-use thelemail_crypto::openpgp::{GeneratedKey, UnlockedKey, generate_account_key_for};
-use thelemail_keystore::*;
+mod support;
 
-const ACCOUNT: &str = "58dd106c-1b2a-4c3d-8e4f-5a6b7c8d9e0f";
-const EMAIL: &str = "nora@thelemail.test";
+use std::cell::Cell;
+
+use serde_json::{Value, json};
+use support::*;
+use thelemail_keystore::*;
+use thelemail_trust::Family;
+
+thread_local! {
+    static ACCOUNT_ID: Cell<Option<&'static str>> = const { Cell::new(None) };
+}
+
+fn acct() -> &'static str {
+    ACCOUNT_ID.with(|cell| match cell.get() {
+        Some(id) => id,
+        None => {
+            let id: &'static str = Box::leak(new_account_id().into_boxed_str());
+            cell.set(Some(id));
+            id
+        }
+    })
+}
 
 struct Account {
     ks: Keystore,
-    amk: Amk,
-    first: GeneratedKey,
+    pass: Pass,
+    first: Key,
 }
 
-fn generate(amk: &Amk, emails: &[&str]) -> GeneratedKey {
-    let passphrase = derive_pgp_passphrase(amk);
-    let emails: Vec<String> = emails.iter().map(|e| (*e).to_owned()).collect();
-    generate_account_key_for(&emails, passphrase.expose(), 0).expect("generate")
-}
-
-fn persisted_for(amk: &Amk, key: &GeneratedKey) -> PersistedVault {
-    let passphrase = derive_pgp_passphrase(amk);
-    let unlocked =
-        UnlockedKey::open(&key.encrypted_private_key_armored, passphrase.expose()).expect("open");
-    serde_json::from_value(serde_json::json!({
-        "email": EMAIL,
-        "authScheme": "opaque_v1",
-        "secretKeyArmored": unlocked.secret_key_armored().expect("armor"),
-        "amk": base64::engine::general_purpose::STANDARD.encode(amk.expose()),
-    }))
-    .expect("persisted vault")
+fn generate(pass: &Pass, emails: &[&str]) -> Key {
+    support::generate(pass, emails[0])
 }
 
 fn account() -> Account {
-    let amk = Amk::generate();
-    let first = generate(&amk, &[EMAIL]);
+    let pass = Pass::generate();
+    let first = generate(&pass, &[EMAIL]);
     let ks = Keystore::new();
-    assert!(ks.adopt_persisted(ACCOUNT, persisted_for(&amk, &first)));
-    Account { ks, amk, first }
+    open_with_passphrase(&ks, acct(), &pass, &first, 0);
+    Account { ks, pass, first }
 }
 
-fn input(version: i64, key: &GeneratedKey) -> AccountKeyInput {
+fn device_with(pass: &Pass, key: &Key) -> Keystore {
+    let ks = Keystore::new();
+    open_with_passphrase(&ks, acct(), pass, key, 0);
+    ks
+}
+
+fn fingerprint_of(armored: &str) -> String {
+    trust(Family::Keys, json!({"op": "inspect", "armored": armored}))["fingerprint"]
+        .as_str()
+        .unwrap()
+        .to_owned()
+}
+
+fn opens_with(pass: &Pass, encrypted: &str) -> String {
+    testkit(json!({
+        "op": "signTransition",
+        "accountId": acct(),
+        "encryptedPrivateKey": encrypted,
+        "passphrase": pass.0,
+        "newKeyFingerprint": "00".repeat(32),
+    }))["previousKeyFingerprint"]
+        .as_str()
+        .unwrap()
+        .to_owned()
+}
+
+fn endorsement_verifies(new_fp: &str, previous: &Key, signature: &[u8]) -> bool {
+    use base64::Engine as _;
+    trust(
+        Family::Trust,
+        json!({
+            "op": "keyTransition",
+            "accountId": acct(),
+            "newKeyFingerprint": new_fp,
+            "previousKeyFingerprint": previous.fingerprint_hex,
+            "signature": b64().encode(signature),
+            "previousPublicKey": previous.public_key_armored,
+        }),
+    )
+    .get("failure")
+    .is_none()
+}
+
+fn input(version: i64, key: &Key) -> AccountKeyInput {
     AccountKeyInput {
         key_version: version,
         fingerprint_hex: key.fingerprint_hex.clone(),
@@ -51,33 +93,18 @@ fn input(version: i64, key: &GeneratedKey) -> AccountKeyInput {
     }
 }
 
-fn current(version: i64, key: &GeneratedKey) -> AccountKeyInput {
+fn current(version: i64, key: &Key) -> AccountKeyInput {
     AccountKeyInput {
         is_current: true,
         ..input(version, key)
     }
 }
 
-fn endorsement(amk: &Amk, by: &GeneratedKey, new_fp: &str) -> AccountKeyTransitionInput {
-    endorsement_for(ACCOUNT, amk, by, new_fp)
+fn endorsement(pass: &Pass, by: &Key, new_fp: &str) -> AccountKeyTransitionInput {
+    endorsement_for(acct(), pass, by, new_fp)
 }
 
-fn endorsement_for(
-    account_id: &str,
-    amk: &Amk,
-    by: &GeneratedKey,
-    new_fp: &str,
-) -> AccountKeyTransitionInput {
-    let passphrase = derive_pgp_passphrase(amk);
-    let signer =
-        UnlockedKey::open(&by.encrypted_private_key_armored, passphrase.expose()).expect("open");
-    AccountKeyTransitionInput {
-        previous_key_fingerprint_hex: by.fingerprint_hex.clone(),
-        signature: keytransition::endorse(&signer, account_id, new_fp).expect("endorse"),
-    }
-}
-
-fn history(amk: &Amk, keys: &[&GeneratedKey]) -> Vec<AccountKeyInput> {
+fn history(pass: &Pass, keys: &[&Key]) -> Vec<AccountKeyInput> {
     keys.iter()
         .enumerate()
         .map(|(i, key)| AccountKeyInput {
@@ -86,7 +113,7 @@ fn history(amk: &Amk, keys: &[&GeneratedKey]) -> Vec<AccountKeyInput> {
                 .iter()
                 .rev()
                 .take(16)
-                .map(|by| endorsement(amk, by, &key.fingerprint_hex))
+                .map(|by| endorsement(pass, by, &key.fingerprint_hex))
                 .collect(),
             ..input(i as i64 + 1, key)
         })
@@ -100,7 +127,7 @@ fn load(ks: &Keystore, keys: Vec<AccountKeyInput>) -> Value {
 
 fn load_with(ks: &Keystore, current_version: i64, keys: Vec<AccountKeyInput>) -> Value {
     serde_json::to_value(ks.load_account_keys(LoadAccountKeysArgs {
-        account_id: ACCOUNT.to_owned(),
+        account_id: acct().to_owned(),
         current_version,
         keys,
     }))
@@ -110,7 +137,7 @@ fn load_with(ks: &Keystore, current_version: i64, keys: Vec<AccountKeyInput>) ->
 fn prepare_with(ks: &Keystore, expected_key_version: i64, emails: &[&str]) -> Value {
     serde_json::to_value(ks.prepare_key_rotation(
         PrepareKeyRotationArgs {
-            account_id: ACCOUNT.to_owned(),
+            account_id: acct().to_owned(),
             emails: emails.iter().map(|e| (*e).to_owned()).collect(),
             expected_key_version,
         },
@@ -126,7 +153,7 @@ fn prepare(ks: &Keystore) -> Value {
 
 fn commit(ks: &Keystore, fingerprint: &str) -> Value {
     serde_json::to_value(ks.commit_key_rotation(CommitKeyRotationArgs {
-        account_id: ACCOUNT.to_owned(),
+        account_id: acct().to_owned(),
         fingerprint_hex: fingerprint.to_owned(),
     }))
     .expect("json")
@@ -160,7 +187,7 @@ fn endorsers(prepared: &Value) -> Vec<String> {
 
 fn encrypt_to(ks: &Keystore, public_key_armored: &str, plaintext: &[u8]) -> Vec<u8> {
     match ks.encrypt(EncryptArgs {
-        account_id: ACCOUNT.to_owned(),
+        account_id: acct().to_owned(),
         recipient_public_key_armored: public_key_armored.to_owned(),
         plaintext: plaintext.to_vec(),
         sign_with_vault_key: false,
@@ -173,7 +200,7 @@ fn encrypt_to(ks: &Keystore, public_key_armored: &str, plaintext: &[u8]) -> Vec<
 
 fn decrypt(ks: &Keystore, ciphertext: &[u8], hint: Option<&str>) -> Value {
     serde_json::to_value(ks.decrypt(DecryptArgs {
-        account_id: ACCOUNT.to_owned(),
+        account_id: acct().to_owned(),
         ciphertext_armored: None,
         ciphertext_binary: Some(ciphertext.to_vec()),
         binary: false,
@@ -184,7 +211,7 @@ fn decrypt(ks: &Keystore, ciphertext: &[u8], hint: Option<&str>) -> Value {
 }
 
 fn current_public(ks: &Keystore) -> (String, Option<i64>) {
-    match ks.get_public_key(ACCOUNT) {
+    match ks.get_public_key(acct()) {
         GetPublicKeyResponse::Ok {
             public_key_armored,
             key_version,
@@ -223,18 +250,17 @@ fn a_rotation_endorses_with_the_retired_key_and_keeps_old_mail_readable() {
         first_fp.as_str()
     );
     let signature = signature_bytes(&transitions[0]["signature"]);
-    let message = keytransition::payload(ACCOUNT, &new_fp, &first_fp).unwrap();
-    keytransition::verify(message.as_bytes(), &signature, &a.first.public_key_armored)
-        .expect("the endorsement verifies against the retired key");
+    assert!(
+        endorsement_verifies(&new_fp, &a.first, &signature),
+        "the endorsement verifies against the retired key"
+    );
 
     let new_public = prepared["publicKeyArmored"].as_str().unwrap();
-    let passphrase = derive_pgp_passphrase(&a.amk);
-    let reopened = UnlockedKey::open(
-        prepared["encryptedPrivateKey"].as_str().unwrap(),
-        passphrase.expose(),
-    )
-    .expect("the new key is locked under the same passphrase");
-    assert_eq!(reopened.fingerprint_hex(), new_fp);
+    assert_eq!(
+        opens_with(&a.pass, prepared["encryptedPrivateKey"].as_str().unwrap()),
+        new_fp,
+        "the new key is locked under the same passphrase"
+    );
     assert!(new_public.contains("BEGIN PGP PUBLIC KEY BLOCK"));
 
     let committed = commit(&a.ks, &new_fp);
@@ -249,7 +275,7 @@ fn a_rotation_endorses_with_the_retired_key_and_keeps_old_mail_readable() {
             current_changed,
             changed,
         } => {
-            assert_eq!(account_id, ACCOUNT);
+            assert_eq!(account_id, acct());
             assert!(current_changed);
             assert!(changed);
             assert_eq!(current_fingerprint_hex, new_fp);
@@ -265,10 +291,7 @@ fn a_rotation_endorses_with_the_retired_key_and_keeps_old_mail_readable() {
 
     let (public, version) = current_public(&a.ks);
     assert_eq!(version, Some(2));
-    assert_eq!(
-        thelemail_crypto::openpgp::public_key_fingerprint_hex(&public).unwrap(),
-        new_fp
-    );
+    assert_eq!(fingerprint_of(&public), new_fp);
 
     for hint in [None, Some(first_fp.as_str()), Some(new_fp.as_str())] {
         let out = decrypt(&a.ks, &old_mail, hint);
@@ -283,7 +306,7 @@ fn a_rotation_endorses_with_the_retired_key_and_keeps_old_mail_readable() {
         "written to the new key"
     );
     assert_eq!(
-        a.ks.decrypt_bytes(ACCOUNT, &old_mail, None).unwrap(),
+        a.ks.decrypt_bytes(acct(), &old_mail, None).unwrap(),
         b"written to the first key"
     );
 
@@ -297,17 +320,17 @@ fn a_rotation_waits_until_the_key_history_is_known() {
     let a = account();
     assert_eq!(prepare(&a.ks)["code"], "key_history_incomplete");
 
-    let older = generate(&a.amk, &[EMAIL]);
-    let oldest = generate(&a.amk, &[EMAIL]);
-    let stranger = generate(&Amk::generate(), &[EMAIL]);
-    let mut locked_out = history(&a.amk, &[&oldest, &older, &a.first]);
+    let older = generate(&a.pass, &[EMAIL]);
+    let oldest = generate(&a.pass, &[EMAIL]);
+    let stranger = generate(&Pass::generate(), &[EMAIL]);
+    let mut locked_out = history(&a.pass, &[&oldest, &older, &a.first]);
     locked_out[0].encrypted_private_key_armored = stranger.encrypted_private_key_armored.clone();
     let loaded = load(&a.ks, locked_out);
     assert_eq!(loaded["keyVersion"], 3);
     assert_eq!(loaded["failed"], serde_json::json!([1]));
     assert_eq!(prepare(&a.ks)["code"], "key_history_incomplete");
 
-    load(&a.ks, history(&a.amk, &[&oldest, &older, &a.first]));
+    load(&a.ks, history(&a.pass, &[&oldest, &older, &a.first]));
     let prepared = prepare(&a.ks);
     assert_eq!(prepared["ok"], true, "{prepared}");
     assert_eq!(prepared["transitions"].as_array().unwrap().len(), 3);
@@ -316,9 +339,9 @@ fn a_rotation_waits_until_the_key_history_is_known() {
 #[test]
 fn loading_keys_adopts_an_endorsed_newer_key_and_never_moves_back() {
     let a = account();
-    let newer = generate(&a.amk, &[EMAIL]);
+    let newer = generate(&a.pass, &[EMAIL]);
 
-    let loaded = load(&a.ks, history(&a.amk, &[&a.first, &newer]));
+    let loaded = load(&a.ks, history(&a.pass, &[&a.first, &newer]));
     assert_eq!(loaded["currentChanged"], true);
     assert_eq!(
         loaded["currentFingerprintHex"],
@@ -344,12 +367,12 @@ fn loading_keys_adopts_an_endorsed_newer_key_and_never_moves_back() {
 #[test]
 fn keys_that_fail_to_open_are_reported_by_their_own_version() {
     let a = account();
-    let stranger = generate(&Amk::generate(), &[EMAIL]);
-    let locked = generate(&a.amk, &[EMAIL]);
-    let second = generate(&a.amk, &[EMAIL]);
-    let third = generate(&a.amk, &[EMAIL]);
-    let fourth = generate(&a.amk, &[EMAIL]);
-    let mut keys = history(&a.amk, &[&a.first, &locked, &second, &third, &fourth]);
+    let stranger = generate(&Pass::generate(), &[EMAIL]);
+    let locked = generate(&a.pass, &[EMAIL]);
+    let second = generate(&a.pass, &[EMAIL]);
+    let third = generate(&a.pass, &[EMAIL]);
+    let fourth = generate(&a.pass, &[EMAIL]);
+    let mut keys = history(&a.pass, &[&a.first, &locked, &second, &third, &fourth]);
     keys[1].encrypted_private_key_armored = stranger.encrypted_private_key_armored.clone();
     keys[3].encrypted_private_key_armored = fourth.encrypted_private_key_armored.clone();
     let loaded = load(&a.ks, keys);
@@ -363,16 +386,28 @@ fn keys_that_fail_to_open_are_reported_by_their_own_version() {
 }
 
 #[test]
-fn a_key_list_without_the_current_key_is_refused() {
+fn a_key_list_without_the_current_key_adopts_nothing() {
     let a = account();
-    let other = generate(&a.amk, &[EMAIL]);
+    let other = generate(&a.pass, &[EMAIL]);
     let mut events = a.ks.subscribe();
-    let refused = load(&a.ks, vec![current(1, &other)]);
+    let ignored = load(&a.ks, vec![current(1, &other)]);
+    assert_eq!(ignored["ok"], true, "{ignored}");
+    assert_eq!(ignored["unverified"], serde_json::json!([1]));
+    assert_eq!(ignored["loaded"], serde_json::json!([]));
+    assert_eq!(ignored["keyVersion"], 0);
+    assert_eq!(ignored["currentChanged"], false);
     assert_eq!(
-        refused,
-        serde_json::json!({ "ok": false, "code": "key_list_invalid" })
+        ignored["currentFingerprintHex"],
+        a.first.fingerprint_hex.as_str()
     );
-    assert!(events.try_recv().is_err());
+    while let Ok(event) = events.try_recv() {
+        let event = serde_json::to_value(event).unwrap();
+        assert_eq!(event["currentChanged"], false, "{event}");
+        assert_eq!(
+            event["fingerprints"],
+            serde_json::json!([a.first.fingerprint_hex])
+        );
+    }
 
     load(&a.ks, vec![current(1, &a.first)]);
     let mut events = a.ks.subscribe();
@@ -381,10 +416,7 @@ fn a_key_list_without_the_current_key_is_refused() {
     assert!(events.try_recv().is_err());
     let (public, version) = current_public(&a.ks);
     assert_eq!(version, Some(1));
-    assert_eq!(
-        thelemail_crypto::openpgp::public_key_fingerprint_hex(&public).unwrap(),
-        a.first.fingerprint_hex
-    );
+    assert_eq!(fingerprint_of(&public), a.first.fingerprint_hex);
 }
 
 #[test]
@@ -393,11 +425,11 @@ fn an_alias_grant_wrapped_to_the_retired_key_still_unwraps() {
     load(&a.ks, vec![current(1, &a.first)]);
     let created = serde_json::to_value(a.ks.create_alias_key(
         CreateAliasKeyArgs {
-            account_id: ACCOUNT.to_owned(),
+            account_id: acct().to_owned(),
             email: "team@thelemail.test".to_owned(),
             display_name: "Team".to_owned(),
             recipients: vec![CreateAliasKeyRecipient {
-                account_id: ACCOUNT.to_owned(),
+                account_id: acct().to_owned(),
                 public_key_armored: a.first.public_key_armored.clone(),
             }],
         },
@@ -419,9 +451,9 @@ fn an_alias_grant_wrapped_to_the_retired_key_still_unwraps() {
     rotate(&a.ks);
 
     for hint in [Some(a.first.fingerprint_hex.clone()), None] {
-        a.ks.unload_alias_keys(ACCOUNT);
+        a.ks.unload_alias_keys(acct());
         let loaded = serde_json::to_value(a.ks.load_alias_keys(LoadAliasKeysArgs {
-            account_id: ACCOUNT.to_owned(),
+            account_id: acct().to_owned(),
             grants: vec![AliasKeyGrantInput {
                 alias_id: "alias-1".to_owned(),
                 key_version: 1,
@@ -449,14 +481,14 @@ fn an_alias_grant_wrapped_to_the_retired_key_still_unwraps() {
 #[test]
 fn an_alias_grant_for_a_key_loaded_later_opens_once_that_key_arrives() {
     let a = account();
-    let retired = generate(&a.amk, &[EMAIL]);
+    let retired = generate(&a.pass, &[EMAIL]);
     let created = serde_json::to_value(a.ks.create_alias_key(
         CreateAliasKeyArgs {
-            account_id: ACCOUNT.to_owned(),
+            account_id: acct().to_owned(),
             email: "team@thelemail.test".to_owned(),
             display_name: "Team".to_owned(),
             recipients: vec![CreateAliasKeyRecipient {
-                account_id: ACCOUNT.to_owned(),
+                account_id: acct().to_owned(),
                 public_key_armored: retired.public_key_armored.clone(),
             }],
         },
@@ -478,7 +510,7 @@ fn an_alias_grant_for_a_key_loaded_later_opens_once_that_key_arrives() {
     };
 
     let early = serde_json::to_value(a.ks.load_alias_keys(LoadAliasKeysArgs {
-        account_id: ACCOUNT.to_owned(),
+        account_id: acct().to_owned(),
         grants: vec![grant()],
     }))
     .unwrap();
@@ -487,29 +519,24 @@ fn an_alias_grant_for_a_key_loaded_later_opens_once_that_key_arrives() {
     let alias_mail = encrypt_to(&a.ks, &alias_public, b"to the team");
     assert_eq!(decrypt(&a.ks, &alias_mail, None)["code"], "no_matching_key");
 
-    load(&a.ks, history(&a.amk, &[&retired, &a.first]));
+    load(&a.ks, history(&a.pass, &[&retired, &a.first]));
     assert_eq!(
         decrypt(&a.ks, &alias_mail, Some(&alias_fp))["plaintext"],
         "to the team"
     );
 
-    a.ks.unload_alias_keys(ACCOUNT);
+    a.ks.unload_alias_keys(acct());
     let fresh = Account {
-        ks: Keystore::new(),
-        amk: a.amk,
+        ks: device_with(&a.pass, &a.first),
+        pass: a.pass,
         first: a.first,
     };
-    assert!(
-        fresh
-            .ks
-            .adopt_persisted(ACCOUNT, persisted_for(&fresh.amk, &fresh.first))
-    );
     fresh.ks.load_alias_keys(LoadAliasKeysArgs {
-        account_id: ACCOUNT.to_owned(),
+        account_id: acct().to_owned(),
         grants: vec![grant()],
     });
-    fresh.ks.unload_alias_keys(ACCOUNT);
-    load(&fresh.ks, history(&fresh.amk, &[&retired, &fresh.first]));
+    fresh.ks.unload_alias_keys(acct());
+    load(&fresh.ks, history(&fresh.pass, &[&retired, &fresh.first]));
     assert_eq!(
         decrypt(&fresh.ks, &alias_mail, None)["code"],
         "no_matching_key",
@@ -518,24 +545,13 @@ fn an_alias_grant_for_a_key_loaded_later_opens_once_that_key_arrives() {
 }
 
 #[test]
-fn a_persisted_vault_written_before_rotation_still_restores() {
-    let amk = Amk::generate();
-    let key = generate(&amk, &[EMAIL]);
-    let persisted = persisted_for(&amk, &key);
-    let legacy = serde_json::json!({
-        "email": persisted.email,
-        "authScheme": "opaque_v1",
-        "secretKeyArmored": persisted.secret_key_armored,
-        "amk": persisted.amk,
-    });
-    let restored: PersistedVault = serde_json::from_value(legacy).expect("legacy vault parses");
-    assert_eq!(restored.key_version, 0);
-    assert!(restored.history.is_empty());
-
-    let ks = Keystore::new();
-    assert!(ks.adopt_persisted(ACCOUNT, restored));
-    let (_, version) = current_public(&ks);
+fn a_saved_session_without_a_key_version_restores_unversioned() {
+    let a = account();
+    let (_, version) = current_public(&a.ks);
     assert_eq!(version, None);
+    let saved = a.ks.saved_keys(acct()).expect("saved keys");
+    assert_eq!(saved.key_version, 0);
+    assert!(saved.history_keys.is_empty());
 }
 
 #[test]
@@ -545,15 +561,24 @@ fn a_persisted_vault_carries_the_key_history() {
     let old_mail = encrypt_to(&a.ks, &a.first.public_key_armored, b"before the rotation");
     rotate(&a.ks);
 
-    let persisted = a.ks.persistable(ACCOUNT).expect("persistable");
-    let encoded = serde_json::to_vec(&persisted).unwrap();
-    let decoded: PersistedVault = serde_json::from_slice(&encoded).unwrap();
+    let server_half = [0x5cu8; 32];
+    let persisted = a.ks.persist(acct(), &server_half).expect("persist");
+    let encoded = serde_json::to_vec(&persisted.keys).unwrap();
+    let decoded: SavedKeys = serde_json::from_slice(&encoded).unwrap();
     assert_eq!(decoded.key_version, 2);
-    assert_eq!(decoded.history.len(), 1);
-    assert_eq!(decoded.history[0].key_version, 1);
+    assert_eq!(decoded.history_keys.len(), 1);
+    assert_eq!(decoded.history_keys[0].key_version, 1);
+    a.ks.lock(acct());
 
     let restored = Keystore::new();
-    assert!(restored.adopt_persisted(ACCOUNT, decoded));
+    assert!(restored.restore(
+        acct(),
+        persisted.email,
+        &decoded,
+        &persisted.wrapped,
+        persisted.wrap_version,
+        &server_half,
+    ));
     let (_, version) = current_public(&restored);
     assert_eq!(version, Some(2));
     assert_eq!(
@@ -565,7 +590,7 @@ fn a_persisted_vault_carries_the_key_history() {
 #[test]
 fn mail_for_a_key_this_vault_never_held_reports_no_matching_key() {
     let a = account();
-    let stranger = generate(&Amk::generate(), &["someone@example.com"]);
+    let stranger = generate(&Pass::generate(), &["someone@example.com"]);
     let mail = encrypt_to(&a.ks, &stranger.public_key_armored, b"not for us");
     assert_eq!(decrypt(&a.ks, &mail, None)["code"], "no_matching_key");
     assert_eq!(
@@ -573,11 +598,11 @@ fn mail_for_a_key_this_vault_never_held_reports_no_matching_key() {
         "no_matching_key"
     );
     assert_eq!(
-        a.ks.decrypt_bytes(ACCOUNT, &mail, None),
+        a.ks.decrypt_bytes(acct(), &mail, None),
         Err("no_matching_key")
     );
     assert_eq!(
-        a.ks.decrypt_bytes(ACCOUNT, b"not a pgp message", None),
+        a.ks.decrypt_bytes(acct(), b"not a pgp message", None),
         Err("invalid_ciphertext")
     );
 }
@@ -598,7 +623,7 @@ fn a_commit_needs_the_prepared_key_at_the_next_version() {
         "no_pending_rotation"
     );
 
-    a.ks.abandon_key_rotation(ACCOUNT);
+    a.ks.abandon_key_rotation(acct());
     assert_eq!(commit(&a.ks, &fp)["code"], "no_pending_rotation");
     let (_, version) = current_public(&a.ks);
     assert_eq!(version, Some(1));
@@ -611,17 +636,14 @@ fn a_rotation_overtaken_by_another_device_is_not_committed() {
     let prepared = prepare(&a.ks);
     let fp = prepared["fingerprintHex"].as_str().unwrap().to_owned();
 
-    let elsewhere = generate(&a.amk, &[EMAIL]);
-    let loaded = load(&a.ks, history(&a.amk, &[&a.first, &elsewhere]));
+    let elsewhere = generate(&a.pass, &[EMAIL]);
+    let loaded = load(&a.ks, history(&a.pass, &[&a.first, &elsewhere]));
     assert_eq!(loaded["keyVersion"], 2);
 
     assert_eq!(commit(&a.ks, &fp)["code"], "no_pending_rotation");
     let (public, version) = current_public(&a.ks);
     assert_eq!(version, Some(2));
-    assert_eq!(
-        thelemail_crypto::openpgp::public_key_fingerprint_hex(&public).unwrap(),
-        elsewhere.fingerprint_hex
-    );
+    assert_eq!(fingerprint_of(&public), elsewhere.fingerprint_hex);
 }
 
 #[test]
@@ -644,9 +666,9 @@ fn a_rotation_is_refused_for_a_stale_version_or_no_addresses() {
 #[test]
 fn only_the_sixteen_newest_keys_endorse_newest_first() {
     let a = account();
-    let older: Vec<GeneratedKey> = std::thread::scope(|scope| {
+    let older: Vec<Key> = std::thread::scope(|scope| {
         let workers: Vec<_> = (0..17)
-            .map(|_| scope.spawn(|| generate(&a.amk, &[EMAIL])))
+            .map(|_| scope.spawn(|| generate(&a.pass, &[EMAIL])))
             .collect();
         workers.into_iter().map(|w| w.join().unwrap()).collect()
     });
@@ -683,20 +705,17 @@ fn only_the_sixteen_newest_keys_endorse_newest_first() {
         .iter()
         .zip(signers)
     {
-        let message = keytransition::payload(ACCOUNT, &new_fp, &key.fingerprint_hex).unwrap();
-        keytransition::verify(
-            message.as_bytes(),
-            &signature_bytes(&transition["signature"]),
-            &key.public_key_armored,
-        )
-        .expect("each endorsement verifies against its own key");
+        assert!(
+            endorsement_verifies(&new_fp, key, &signature_bytes(&transition["signature"])),
+            "each endorsement verifies against its own key"
+        );
     }
 }
 
 #[test]
 fn the_web_keystore_payloads_deserialize() {
     let load: LoadAccountKeysArgs = serde_json::from_value(serde_json::json!({
-        "accountId": ACCOUNT,
+        "accountId": acct(),
         "currentVersion": 2,
         "keys": [{
             "keyVersion": 2,
@@ -719,7 +738,7 @@ fn the_web_keystore_payloads_deserialize() {
     assert_eq!(load.keys[0].transitions[0].signature, vec![1, 2, 255]);
 
     let prepare: PrepareKeyRotationArgs = serde_json::from_value(serde_json::json!({
-        "accountId": ACCOUNT,
+        "accountId": acct(),
         "emails": [EMAIL],
         "expectedKeyVersion": 3,
         "serverClockOffsetMs": 120
@@ -728,16 +747,16 @@ fn the_web_keystore_payloads_deserialize() {
     assert_eq!(prepare.expected_key_version, 3);
 
     let commit: CommitKeyRotationArgs = serde_json::from_value(serde_json::json!({
-        "accountId": ACCOUNT,
+        "accountId": acct(),
         "fingerprintHex": "AB"
     }))
     .expect("commitKeyRotation args");
     assert_eq!(commit.fingerprint_hex, "AB");
 
     let list: AccountScopedArgs =
-        serde_json::from_value(serde_json::json!({ "accountId": ACCOUNT }))
+        serde_json::from_value(serde_json::json!({ "accountId": acct() }))
             .expect("listAccountKeys args");
-    assert_eq!(list.account_id, ACCOUNT);
+    assert_eq!(list.account_id, acct());
 
     let grant: AliasKeyGrantInput = serde_json::from_value(serde_json::json!({
         "aliasId": "alias-1",
@@ -767,7 +786,7 @@ fn the_responses_use_the_web_keystore_field_names() {
         assert!(loaded.get(field).is_some(), "loadAccountKeys lacks {field}");
     }
 
-    let listed = serde_json::to_value(a.ks.list_account_keys(ACCOUNT)).unwrap();
+    let listed = serde_json::to_value(a.ks.list_account_keys(acct())).unwrap();
     assert_eq!(
         listed,
         serde_json::json!({
@@ -804,7 +823,7 @@ fn the_responses_use_the_web_keystore_field_names() {
         event,
         serde_json::json!({
             "type": "accountKeysChanged",
-            "accountId": ACCOUNT,
+            "accountId": acct(),
             "fingerprints": [fp, a.first.fingerprint_hex],
             "currentFingerprintHex": fp,
             "keyVersion": 2,
@@ -812,12 +831,12 @@ fn the_responses_use_the_web_keystore_field_names() {
         })
     );
 
-    let listed = serde_json::to_value(a.ks.list_account_keys(ACCOUNT)).unwrap();
+    let listed = serde_json::to_value(a.ks.list_account_keys(acct())).unwrap();
     assert_eq!(listed["keys"][0]["isCurrent"], true);
     assert_eq!(listed["keys"][1]["keyVersion"], 1);
     assert_eq!(listed["keys"][1]["isCurrent"], false);
     assert_eq!(
-        serde_json::to_value(Keystore::new().list_account_keys(ACCOUNT)).unwrap(),
+        serde_json::to_value(Keystore::new().list_account_keys(acct())).unwrap(),
         serde_json::json!({ "ok": false, "code": "locked" })
     );
 }
@@ -855,14 +874,20 @@ fn a_key_adopted_after_a_lost_commit_clears_the_pending_rotation() {
 
 #[test]
 fn an_srp_vault_cannot_rotate() {
-    let amk = Amk::generate();
-    let key = generate(&amk, &[EMAIL]);
-    let mut persisted = persisted_for(&amk, &key);
-    persisted.auth_scheme = AuthScheme::SrpV1;
-    let ks = Keystore::new();
-    assert!(ks.adopt_persisted(ACCOUNT, persisted));
-    assert_eq!(load(&ks, vec![])["code"], "not_opaque");
-    assert_eq!(prepare(&ks)["code"], "not_opaque");
+    let r = registered();
+    let device = Keystore::new();
+    let unlocked = sign_in_as(
+        &device,
+        &r.server,
+        &r.account,
+        PASSWORD,
+        &r.account.encrypted_private_key,
+        Vec::new(),
+        AuthScheme::SrpV1,
+    );
+    assert_eq!(unlocked["ok"], true, "{unlocked}");
+    assert_eq!(load(&device, vec![])["code"], "not_opaque");
+    assert_eq!(prepare(&device)["code"], "not_opaque");
 }
 
 fn copy(transitions: &[AccountKeyTransitionInput]) -> Vec<AccountKeyTransitionInput> {
@@ -877,15 +902,12 @@ fn copy(transitions: &[AccountKeyTransitionInput]) -> Vec<AccountKeyTransitionIn
 
 fn current_fingerprint(ks: &Keystore) -> (String, Option<i64>) {
     let (public, version) = current_public(ks);
-    (
-        thelemail_crypto::openpgp::public_key_fingerprint_hex(&public).unwrap(),
-        version,
-    )
+    (fingerprint_of(&public), version)
 }
 
 fn assert_refused(ks: &Keystore, current_version: i64, keys: Vec<AccountKeyInput>, why: &str) {
     let before = current_fingerprint(ks);
-    let listed = serde_json::to_value(ks.list_account_keys(ACCOUNT)).unwrap();
+    let listed = serde_json::to_value(ks.list_account_keys(acct())).unwrap();
     let mut events = ks.subscribe();
     assert_eq!(
         load_with(ks, current_version, keys),
@@ -895,7 +917,7 @@ fn assert_refused(ks: &Keystore, current_version: i64, keys: Vec<AccountKeyInput
     assert!(events.try_recv().is_err(), "{why} broadcast");
     assert_eq!(current_fingerprint(ks), before, "{why}");
     assert_eq!(
-        serde_json::to_value(ks.list_account_keys(ACCOUNT)).unwrap(),
+        serde_json::to_value(ks.list_account_keys(acct())).unwrap(),
         listed,
         "{why}"
     );
@@ -904,17 +926,16 @@ fn assert_refused(ks: &Keystore, current_version: i64, keys: Vec<AccountKeyInput
 #[test]
 fn a_fresh_sign_in_never_promotes_a_replayed_retired_key() {
     let a = account();
-    let second = generate(&a.amk, &[EMAIL]);
-    let third = generate(&a.amk, &[EMAIL]);
-    let real = history(&a.amk, &[&a.first, &second, &third]);
+    let second = generate(&a.pass, &[EMAIL]);
+    let third = generate(&a.pass, &[EMAIL]);
+    let real = history(&a.pass, &[&a.first, &second, &third]);
 
-    let device = Keystore::new();
-    assert!(device.adopt_persisted(ACCOUNT, persisted_for(&a.amk, &third)));
+    let device = device_with(&a.pass, &third);
     let mut replayed = vec![input(1, &second), input(2, &third), current(3, &a.first)];
     replayed[1].transitions = copy(&real[2].transitions);
     let loaded = load(&device, replayed);
     assert_eq!(loaded["ok"], true, "{loaded}");
-    assert_eq!(loaded["unverified"], serde_json::json!([3]));
+    assert_eq!(loaded["unverified"], serde_json::json!([1, 3]));
     assert_eq!(loaded["currentChanged"], false);
     assert_eq!(
         loaded["currentFingerprintHex"],
@@ -926,14 +947,14 @@ fn a_fresh_sign_in_never_promotes_a_replayed_retired_key() {
 #[test]
 fn a_device_never_takes_a_known_key_at_another_version() {
     let a = account();
-    let second = generate(&a.amk, &[EMAIL]);
-    let third = generate(&a.amk, &[EMAIL]);
-    let filler = generate(&a.amk, &[EMAIL]);
-    let loaded = load(&a.ks, history(&a.amk, &[&a.first, &second, &third]));
+    let second = generate(&a.pass, &[EMAIL]);
+    let third = generate(&a.pass, &[EMAIL]);
+    let filler = generate(&a.pass, &[EMAIL]);
+    let loaded = load(&a.ks, history(&a.pass, &[&a.first, &second, &third]));
     assert_eq!(loaded["keyVersion"], 3);
 
-    let mut replayed = history(&a.amk, &[&filler, &second, &third, &a.first]);
-    replayed[3].transitions = vec![endorsement(&a.amk, &third, &a.first.fingerprint_hex)];
+    let mut replayed = history(&a.pass, &[&filler, &second, &third, &a.first]);
+    replayed[3].transitions = vec![endorsement(&a.pass, &third, &a.first.fingerprint_hex)];
     assert_refused(&a.ks, 4, replayed, "v1 replayed at version 4");
     assert_refused(
         &a.ks,
@@ -953,36 +974,36 @@ fn a_device_never_takes_a_known_key_at_another_version() {
 #[test]
 fn an_unknown_key_without_an_endorsement_from_the_key_below_is_unverified() {
     let a = account();
-    let second = generate(&a.amk, &[EMAIL]);
-    let third = generate(&a.amk, &[EMAIL]);
-    let elsewhere = generate(&a.amk, &[EMAIL]);
-    load(&a.ks, history(&a.amk, &[&a.first, &second]));
+    let second = generate(&a.pass, &[EMAIL]);
+    let third = generate(&a.pass, &[EMAIL]);
+    let elsewhere = generate(&a.pass, &[EMAIL]);
+    load(&a.ks, history(&a.pass, &[&a.first, &second]));
 
     let variants = [
         ("no endorsement", Vec::new()),
         (
             "endorsed only by v1",
-            vec![endorsement(&a.amk, &a.first, &third.fingerprint_hex)],
+            vec![endorsement(&a.pass, &a.first, &third.fingerprint_hex)],
         ),
         (
             "endorsement for another key",
             vec![AccountKeyTransitionInput {
                 previous_key_fingerprint_hex: second.fingerprint_hex.clone(),
-                ..endorsement(&a.amk, &second, &elsewhere.fingerprint_hex)
+                ..endorsement(&a.pass, &second, &elsewhere.fingerprint_hex)
             }],
         ),
         (
             "endorsement for another account",
             vec![endorsement_for(
                 "another-account",
-                &a.amk,
+                &a.pass,
                 &second,
                 &third.fingerprint_hex,
             )],
         ),
     ];
     for (why, transitions) in variants {
-        let mut keys = history(&a.amk, &[&a.first, &second, &third]);
+        let mut keys = history(&a.pass, &[&a.first, &second, &third]);
         keys[2].transitions = transitions;
         let loaded = load(&a.ks, keys);
         assert_eq!(loaded["ok"], true, "{why}: {loaded}");
@@ -1003,14 +1024,14 @@ fn an_unknown_key_without_an_endorsement_from_the_key_below_is_unverified() {
 #[test]
 fn a_device_offline_across_two_rotations_follows_the_chain() {
     let a = account();
-    let second = generate(&a.amk, &[EMAIL]);
-    let third = generate(&a.amk, &[EMAIL]);
-    let fourth = generate(&a.amk, &[EMAIL]);
-    load(&a.ks, history(&a.amk, &[&a.first, &second]));
+    let second = generate(&a.pass, &[EMAIL]);
+    let third = generate(&a.pass, &[EMAIL]);
+    let fourth = generate(&a.pass, &[EMAIL]);
+    load(&a.ks, history(&a.pass, &[&a.first, &second]));
 
     let mut events = a.ks.subscribe();
-    let mut keys = history(&a.amk, &[&a.first, &second, &third, &fourth]);
-    keys[3].transitions = vec![endorsement(&a.amk, &third, &fourth.fingerprint_hex)];
+    let mut keys = history(&a.pass, &[&a.first, &second, &third, &fourth]);
+    keys[3].transitions = vec![endorsement(&a.pass, &third, &fourth.fingerprint_hex)];
     let loaded = load(&a.ks, keys);
     assert_eq!(loaded["currentChanged"], true);
     assert_eq!(loaded["keyVersion"], 4);
@@ -1058,9 +1079,9 @@ fn a_device_offline_across_two_rotations_follows_the_chain() {
 #[test]
 fn a_fresh_sign_in_climbs_the_chain_from_the_key_it_was_given() {
     let a = account();
-    let second = generate(&a.amk, &[EMAIL]);
-    let third = generate(&a.amk, &[EMAIL]);
-    let keys = || history(&a.amk, &[&a.first, &second, &third]);
+    let second = generate(&a.pass, &[EMAIL]);
+    let third = generate(&a.pass, &[EMAIL]);
+    let keys = || history(&a.pass, &[&a.first, &second, &third]);
 
     let loaded = load(&a.ks, keys());
     assert_eq!(loaded["currentChanged"], true);
@@ -1070,8 +1091,7 @@ fn a_fresh_sign_in_climbs_the_chain_from_the_key_it_was_given() {
         third.fingerprint_hex.as_str()
     );
 
-    let device = Keystore::new();
-    assert!(device.adopt_persisted(ACCOUNT, persisted_for(&a.amk, &second)));
+    let device = device_with(&a.pass, &second);
     assert_eq!(current_public(&device).1, None);
     let loaded = load(&device, keys());
     assert_eq!(loaded["keyVersion"], 3);
@@ -1079,15 +1099,14 @@ fn a_fresh_sign_in_climbs_the_chain_from_the_key_it_was_given() {
         current_fingerprint(&device),
         (third.fingerprint_hex.clone(), Some(3))
     );
-    let listed = serde_json::to_value(device.list_account_keys(ACCOUNT)).unwrap();
+    let listed = serde_json::to_value(device.list_account_keys(acct())).unwrap();
     assert_eq!(
         listed["keys"][1]["fingerprintHex"],
         second.fingerprint_hex.as_str()
     );
     assert_eq!(listed["keys"][1]["keyVersion"], 2);
 
-    let device = Keystore::new();
-    assert!(device.adopt_persisted(ACCOUNT, persisted_for(&a.amk, &third)));
+    let device = device_with(&a.pass, &third);
     let loaded = load(&device, keys());
     assert_eq!(loaded["currentChanged"], false);
     assert_eq!(loaded["keyVersion"], 3);
@@ -1096,10 +1115,10 @@ fn a_fresh_sign_in_climbs_the_chain_from_the_key_it_was_given() {
 #[test]
 fn malformed_key_lists_are_refused_without_changing_anything() {
     let a = account();
-    let second = generate(&a.amk, &[EMAIL]);
-    let third = generate(&a.amk, &[EMAIL]);
-    load(&a.ks, history(&a.amk, &[&a.first, &second]));
-    let full = || history(&a.amk, &[&a.first, &second, &third]);
+    let second = generate(&a.pass, &[EMAIL]);
+    let third = generate(&a.pass, &[EMAIL]);
+    load(&a.ks, history(&a.pass, &[&a.first, &second]));
+    let full = || history(&a.pass, &[&a.first, &second, &third]);
 
     let mut gap = full();
     gap.remove(1);
@@ -1139,7 +1158,7 @@ fn malformed_key_lists_are_refused_without_changing_anything() {
     assert_refused(&a.ks, 3, self_endorsed, "a key endorsing itself");
 
     let mut flooded = full();
-    let endorsement = endorsement(&a.amk, &second, &third.fingerprint_hex);
+    let endorsement = endorsement(&a.pass, &second, &third.fingerprint_hex);
     flooded[2].transitions = (0..17)
         .map(|_| AccountKeyTransitionInput {
             previous_key_fingerprint_hex: endorsement.previous_key_fingerprint_hex.clone(),
@@ -1183,8 +1202,8 @@ fn every_accepted_key_list_is_announced_once() {
 #[test]
 fn a_key_list_that_changes_nothing_is_not_marked_as_a_change() {
     let a = account();
-    let second = generate(&a.amk, &[EMAIL]);
-    let keys = || history(&a.amk, &[&a.first, &second]);
+    let second = generate(&a.pass, &[EMAIL]);
+    let keys = || history(&a.pass, &[&a.first, &second]);
     load(&a.ks, keys());
     let mut events = a.ks.subscribe();
     for _ in 0..3 {
@@ -1195,7 +1214,7 @@ fn a_key_list_that_changes_nothing_is_not_marked_as_a_change() {
         ));
     }
     let event = serde_json::to_value(Broadcast::AccountKeysChanged {
-        account_id: ACCOUNT.to_owned(),
+        account_id: acct().to_owned(),
         fingerprints: Vec::new(),
         current_fingerprint_hex: String::new(),
         key_version: 2,
@@ -1206,105 +1225,105 @@ fn a_key_list_that_changes_nothing_is_not_marked_as_a_change() {
     assert!(event.get("changed").is_none(), "{event}");
 }
 
-const PASSWORD: &str = "a long and sturdy passphrase";
-
-fn sign_in(amk: &Amk, key: &GeneratedKey, stored: Vec<StoredAccountKey>) -> Keystore {
-    sign_in_as(amk, key, stored, AuthScheme::OpaqueV1)
+struct Registry {
+    ks: Keystore,
+    server: OpaqueServer,
+    account: Registered,
+    keys: Vec<Key>,
+    transitions: Vec<Vec<AccountKeyTransitionInput>>,
 }
 
-fn sign_in_as(
-    amk: &Amk,
-    key: &GeneratedKey,
+fn registered() -> Registry {
+    let server = OpaqueServer::start();
+    let ks = Keystore::new();
+    let account = register(&ks, &server, acct());
+    let first = Key {
+        fingerprint_hex: fingerprint_of(&account.public_key),
+        encrypted_private_key_armored: account.encrypted_private_key.clone(),
+        public_key_armored: account.public_key.clone(),
+    };
+    Registry {
+        ks,
+        server,
+        account,
+        keys: vec![first],
+        transitions: vec![Vec::new()],
+    }
+}
+
+impl Registry {
+    fn prepare_next(&mut self) -> Key {
+        let prepared = prepare(&self.ks);
+        assert_eq!(prepared["ok"], true, "{prepared}");
+        let key = Key {
+            fingerprint_hex: prepared["fingerprintHex"].as_str().unwrap().to_owned(),
+            encrypted_private_key_armored: prepared["encryptedPrivateKey"]
+                .as_str()
+                .unwrap()
+                .to_owned(),
+            public_key_armored: prepared["publicKeyArmored"].as_str().unwrap().to_owned(),
+        };
+        self.transitions.push(
+            prepared["transitions"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|t| AccountKeyTransitionInput {
+                    previous_key_fingerprint_hex: t["previousKeyFingerprintHex"]
+                        .as_str()
+                        .unwrap()
+                        .to_owned(),
+                    signature: signature_bytes(&t["signature"]),
+                })
+                .collect(),
+        );
+        self.keys.push(key.clone());
+        key
+    }
+
+    fn rotate(&mut self) -> Key {
+        let key = self.prepare_next();
+        assert_eq!(commit(&self.ks, &key.fingerprint_hex)["ok"], true);
+        key
+    }
+
+    fn chain(&self, upto: usize) -> Vec<AccountKeyInput> {
+        (0..upto)
+            .map(|i| AccountKeyInput {
+                is_current: i + 1 == upto,
+                transitions: copy(&self.transitions[i]),
+                ..input(i as i64 + 1, &self.keys[i])
+            })
+            .collect()
+    }
+}
+
+fn signed_in_as(
+    r: &Registry,
+    key: &Key,
     stored: Vec<StoredAccountKey>,
     scheme: AuthScheme,
 ) -> Keystore {
-    use opaque_ke::{
-        CredentialRequest, Identifiers, RegistrationRequest, RegistrationUpload, ServerLogin,
-        ServerLoginParameters, ServerRegistration, ServerSetup,
-    };
-    use thelemail_crypto::amk::{derive_master_key_id, wrap_master_key};
-    use thelemail_crypto::opaque::{ThelemailSuite, finish_registration, start_registration};
-
-    let b64 = base64::engine::general_purpose::STANDARD;
-    let mut rng = rand::rngs::OsRng;
-    let identity = format!("thelemail/auth/opaque/v1:{ACCOUNT}");
-    let identifiers = || Identifiers {
-        client: Some(identity.as_bytes()),
-        server: Some(b"thelemail.com"),
-    };
-    let setup = ServerSetup::<ThelemailSuite>::new(&mut rng);
-    let registration = start_registration(PASSWORD).expect("registration start");
-    let response = ServerRegistration::<ThelemailSuite>::start(
-        &setup,
-        RegistrationRequest::deserialize(&registration.request).expect("request"),
-        ACCOUNT.as_bytes(),
-    )
-    .expect("server registration");
-    let registered = finish_registration(
-        registration.state,
+    let device = Keystore::new();
+    let unlocked = sign_in_as(
+        &device,
+        &r.server,
+        &r.account,
         PASSWORD,
-        &response.message.serialize(),
-        &identity,
-        "thelemail.com",
-    )
-    .expect("registration finish");
-    let record = ServerRegistration::<ThelemailSuite>::finish(
-        RegistrationUpload::deserialize(&registered.record).expect("upload"),
-    );
-
-    let ks = Keystore::new();
-    let runtime = tokio::runtime::Runtime::new().expect("runtime");
-    let started = runtime
-        .block_on(ks.opaque_start_auth(OpaqueStartAuthArgs {
-            password: PASSWORD.to_owned(),
-            email: Some(EMAIL.to_owned()),
-            recovery: false,
-        }))
-        .expect("auth start");
-    let ke1 = b64.decode(&started.ke1).expect("ke1");
-    let ke2 = ServerLogin::start(
-        &mut rng,
-        &setup,
-        Some(record),
-        CredentialRequest::deserialize(&ke1).expect("credential request"),
-        ACCOUNT.as_bytes(),
-        ServerLoginParameters {
-            context: None,
-            identifiers: identifiers(),
-        },
-    )
-    .expect("server login")
-    .message
-    .serialize();
-    let finished = runtime.block_on(ks.opaque_finish_auth(OpaqueFinishAuthArgs {
-        operation_id: started.operation_id.clone(),
-        account_id: ACCOUNT.to_owned(),
-        ke2: b64.encode(ke2),
-        recovery: false,
-    }));
-    assert!(matches!(finished, OpaqueFinishAuthResponse::Ok { .. }));
-
-    let unlocked = ks.opaque_complete_login_unlock(
-        OpaqueCompleteLoginUnlockArgs {
-            operation_id: started.operation_id,
-            account_id: ACCOUNT.to_owned(),
-            encrypted_private_key: key.encrypted_private_key_armored.clone(),
-            wrapped_master_key: b64.encode(wrap_master_key(&registered.export_key, amk, false)),
-            master_key_id: b64.encode(derive_master_key_id(amk)),
-            opaque_params_version: 1,
-            server_auth_scheme: scheme,
-        },
+        &key.encrypted_private_key_armored,
         stored,
+        scheme,
     );
-    assert!(
-        matches!(unlocked, OpaqueCompleteLoginUnlockResponse::Ok { .. }),
-        "sign-in unlocks"
-    );
-    ks
+    assert_eq!(unlocked["ok"], true, "sign-in unlocks: {unlocked}");
+    device
+}
+
+fn signed_in(r: &Registry, key: &Key, stored: Vec<StoredAccountKey>) -> Keystore {
+    signed_in_as(r, key, stored, AuthScheme::OpaqueV1)
 }
 
 fn stored_versions(ks: &Keystore) -> Vec<(i64, String, bool)> {
-    ks.stored_account_keys(ACCOUNT)
+    ks.stored_account_keys(acct())
         .expect("stored keys")
         .into_iter()
         .map(|k| {
@@ -1319,26 +1338,27 @@ fn stored_versions(ks: &Keystore) -> Vec<(i64, String, bool)> {
 
 #[test]
 fn a_sign_in_keeps_the_stored_newest_key_current_when_the_server_replays_a_retired_one() {
-    let a = account();
-    let second = generate(&a.amk, &[EMAIL]);
-    let third = generate(&a.amk, &[EMAIL]);
-    load(&a.ks, history(&a.amk, &[&a.first, &second, &third]));
+    let mut r = registered();
+    let first = r.keys[0].clone();
+    let second = r.rotate();
+    let third = r.rotate();
+    let before = stored_versions(&r.ks);
     assert_eq!(
-        stored_versions(&a.ks),
+        before,
         vec![
             (3, third.fingerprint_hex.clone(), true),
             (2, second.fingerprint_hex.clone(), true),
-            (1, a.first.fingerprint_hex.clone(), true),
+            (1, first.fingerprint_hex.clone(), true),
         ]
     );
 
-    let device = sign_in(&a.amk, &a.first, a.ks.stored_account_keys(ACCOUNT).unwrap());
+    let device = signed_in(&r, &first, r.ks.stored_account_keys(acct()).unwrap());
     assert_eq!(
         current_fingerprint(&device),
         (third.fingerprint_hex.clone(), Some(3))
     );
 
-    let loaded = load(&device, vec![current(1, &a.first)]);
+    let loaded = load(&device, vec![current(1, &first)]);
     assert_eq!(loaded["ok"], true, "{loaded}");
     assert_eq!(loaded["currentChanged"], false);
     assert_eq!(loaded["keyVersion"], 3);
@@ -1346,10 +1366,10 @@ fn a_sign_in_keeps_the_stored_newest_key_current_when_the_server_replays_a_retir
         current_fingerprint(&device),
         (third.fingerprint_hex.clone(), Some(3))
     );
-    assert_eq!(stored_versions(&device), stored_versions(&a.ks));
+    assert_eq!(stored_versions(&device), before);
 
-    let mut replayed = history(&a.amk, &[&second, &third, &a.first]);
-    replayed[2].transitions = vec![endorsement(&a.amk, &third, &a.first.fingerprint_hex)];
+    let mut replayed = vec![input(1, &second), input(2, &third), current(3, &first)];
+    replayed[1].transitions = copy(&r.transitions[2]);
     assert_refused(&device, 3, replayed, "v1 relabelled above the stored v3");
 
     let mail = encrypt_to(&device, &second.public_key_armored, b"kept across sign-in");
@@ -1361,24 +1381,25 @@ fn a_sign_in_keeps_the_stored_newest_key_current_when_the_server_replays_a_retir
 
 #[test]
 fn a_sign_in_with_a_newer_key_climbs_the_chain_from_the_stored_one() {
-    let a = account();
-    let second = generate(&a.amk, &[EMAIL]);
-    let third = generate(&a.amk, &[EMAIL]);
-    load(&a.ks, history(&a.amk, &[&a.first, &second]));
+    let mut r = registered();
+    let second = r.rotate();
+    let stored = r.ks.stored_account_keys(acct()).unwrap();
+    let third = r.prepare_next();
+    r.ks.abandon_key_rotation(acct());
 
-    let device = sign_in(&a.amk, &third, a.ks.stored_account_keys(ACCOUNT).unwrap());
+    let device = signed_in(&r, &third, stored);
     assert_eq!(
         current_fingerprint(&device),
         (second.fingerprint_hex.clone(), Some(2))
     );
 
-    let mut unendorsed = history(&a.amk, &[&a.first, &second, &third]);
+    let mut unendorsed = r.chain(3);
     unendorsed[2].transitions = Vec::new();
     let loaded = load(&device, unendorsed);
     assert_eq!(loaded["unverified"], serde_json::json!([3]));
     assert_eq!(current_fingerprint(&device).0, second.fingerprint_hex);
 
-    let loaded = load(&device, history(&a.amk, &[&a.first, &second, &third]));
+    let loaded = load(&device, r.chain(3));
     assert_eq!(loaded["currentChanged"], true);
     assert_eq!(
         current_fingerprint(&device),
@@ -1388,48 +1409,35 @@ fn a_sign_in_with_a_newer_key_climbs_the_chain_from_the_stored_one() {
 
 #[test]
 fn a_sign_in_without_stored_keys_starts_from_the_key_it_was_given() {
-    let a = account();
-    let device = sign_in(&a.amk, &a.first, Vec::new());
+    let r = registered();
+    let first = r.keys[0].clone();
+    let device = signed_in(&r, &first, Vec::new());
     assert_eq!(current_public(&device).1, None);
-    assert!(device.stored_account_keys(ACCOUNT).unwrap().is_empty());
-    let loaded = load(&device, vec![current(1, &a.first)]);
+    assert!(device.stored_account_keys(acct()).unwrap().is_empty());
+    let loaded = load(&device, vec![current(1, &first)]);
     assert_eq!(loaded["keyVersion"], 1);
     assert_eq!(
         stored_versions(&device),
-        vec![(1, a.first.fingerprint_hex.clone(), true)]
+        vec![(1, first.fingerprint_hex.clone(), true)]
     );
 }
 
 #[test]
-fn a_version_learned_from_one_list_follows_a_later_list_in_the_same_order() {
+fn a_version_learned_from_one_list_is_not_renumbered_by_a_later_list() {
     let a = account();
-    let second = generate(&a.amk, &[EMAIL]);
-    let third = generate(&a.amk, &[EMAIL]);
-    let real = || history(&a.amk, &[&a.first, &second, &third]);
+    let second = generate(&a.pass, &[EMAIL]);
+    let third = generate(&a.pass, &[EMAIL]);
+    let real = || history(&a.pass, &[&a.first, &second, &third]);
 
-    let device = Keystore::new();
-    assert!(device.adopt_persisted(ACCOUNT, persisted_for(&a.amk, &third)));
+    let device = device_with(&a.pass, &third);
     let loaded = load(&device, vec![input(1, &a.first), current(2, &third)]);
     assert_eq!(loaded["keyVersion"], 2, "{loaded}");
 
-    let loaded = load(&device, real());
-    assert_eq!(loaded["ok"], true, "{loaded}");
-    assert_eq!(loaded["keyVersion"], 3);
-    assert_eq!(loaded["currentChanged"], false);
+    assert_refused(&device, 3, real(), "a learned version renumbered");
     assert_eq!(
         current_fingerprint(&device),
-        (third.fingerprint_hex.clone(), Some(3))
+        (third.fingerprint_hex.clone(), Some(2))
     );
-    assert_eq!(
-        stored_versions(&device),
-        vec![
-            (3, third.fingerprint_hex.clone(), true),
-            (2, second.fingerprint_hex.clone(), true),
-            (1, a.first.fingerprint_hex.clone(), true),
-        ]
-    );
-    assert_eq!(prepare(&device)["keyVersion"], 4);
-
     assert_refused(
         &device,
         3,
@@ -1451,7 +1459,7 @@ fn a_version_this_device_rotated_to_never_moves() {
         is_current: true,
         transitions: Vec::new(),
     };
-    let filler = generate(&a.amk, &[EMAIL]);
+    let filler = generate(&a.pass, &[EMAIL]);
     assert_refused(
         &a.ks,
         3,
@@ -1465,24 +1473,24 @@ fn scheme_of(ks: &Keystore) -> Option<AuthScheme> {
     ks.status()
         .accounts
         .into_iter()
-        .find(|a| a.account_id == ACCOUNT)
+        .find(|a| a.account_id == acct())
         .map(|a| a.auth_scheme)
 }
 
 fn finalized(ks: &Keystore, stored: Vec<StoredAccountKey>) -> Value {
-    serde_json::to_value(ks.migration_finalized(ACCOUNT, stored)).unwrap()
+    serde_json::to_value(ks.migration_finalized(acct(), stored)).unwrap()
 }
 
 #[test]
 fn a_staged_sign_in_stays_on_the_password_scheme_until_finalized() {
-    let a = account();
-    let second = generate(&a.amk, &[EMAIL]);
-    load(&a.ks, history(&a.amk, &[&a.first, &second]));
-    let stored = a.ks.stored_account_keys(ACCOUNT).unwrap();
+    let mut r = registered();
+    let first = r.keys[0].clone();
+    let second = r.rotate();
+    let stored = r.ks.stored_account_keys(acct()).unwrap();
 
-    let device = sign_in_as(&a.amk, &a.first, stored.clone(), AuthScheme::SrpV1);
+    let device = signed_in_as(&r, &first, stored.clone(), AuthScheme::SrpV1);
     assert_eq!(scheme_of(&device), Some(AuthScheme::SrpV1));
-    assert!(device.stored_account_keys(ACCOUNT).is_none());
+    assert!(device.stored_account_keys(acct()).is_none());
 
     assert_eq!(
         finalized(&device, stored),
@@ -1497,8 +1505,9 @@ fn a_staged_sign_in_stays_on_the_password_scheme_until_finalized() {
 
 #[test]
 fn finalizing_an_opaque_vault_again_is_refused() {
-    let a = account();
-    let device = sign_in(&a.amk, &a.first, Vec::new());
+    let r = registered();
+    let first = r.keys[0].clone();
+    let device = signed_in(&r, &first, Vec::new());
 
     assert_eq!(
         finalized(&device, Vec::new()),

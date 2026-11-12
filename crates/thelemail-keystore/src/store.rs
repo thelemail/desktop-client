@@ -382,15 +382,24 @@ fn rewrap_response(registered: Registered) -> RewrapResponse {
     }
 }
 
-fn seeded_keys(login_encrypted: &str, stored: &[StoredAccountKey]) -> SavedKeys {
+struct LoginKeys {
+    opened: SavedKeys,
+    promoted: Option<SavedKeys>,
+}
+
+fn login_keys(login_encrypted: &str, stored: &[StoredAccountKey]) -> LoginKeys {
     let login_only = SavedKeys {
         encrypted_private_key: login_encrypted.to_owned(),
         key_version: 0,
         key_anchored: false,
         history_keys: Vec::new(),
     };
+    let unseeded = || LoginKeys {
+        opened: login_only.clone(),
+        promoted: None,
+    };
     let Some(login_fp) = fingerprint_of(login_encrypted) else {
-        return login_only;
+        return unseeded();
     };
     let mut versions = HashSet::new();
     let mut seen = HashSet::from([login_fp.clone()]);
@@ -399,7 +408,7 @@ fn seeded_keys(login_encrypted: &str, stored: &[StoredAccountKey]) -> SavedKeys 
     for entry in stored {
         let fingerprint_hex = entry.fingerprint_hex.to_lowercase();
         if entry.key_version < 1 || !versions.insert(entry.key_version) {
-            return login_only;
+            return unseeded();
         }
         if fingerprint_hex == login_fp {
             login = Some(entry);
@@ -409,44 +418,66 @@ fn seeded_keys(login_encrypted: &str, stored: &[StoredAccountKey]) -> SavedKeys 
             continue;
         };
         if !seen.insert(fingerprint_hex) {
-            return login_only;
+            return unseeded();
         }
         others.push((entry.key_version, entry.fixed, encrypted));
     }
-    let history = |entries: Vec<(i64, bool, String)>| {
+    others.sort_by_key(|(version, _, _)| *version);
+    let history = |entries: &[(i64, bool, String)]| {
         entries
-            .into_iter()
+            .iter()
             .map(|(key_version, _, encrypted_private_key)| HistoryKey {
-                key_version,
-                encrypted_private_key,
+                key_version: *key_version,
+                encrypted_private_key: encrypted_private_key.clone(),
             })
-            .collect()
+            .collect::<Vec<_>>()
     };
 
-    let Some(login) = login else {
-        return SavedKeys {
-            history_keys: history(others),
-            ..login_only
+    let (login_version, login_fixed) = login.map_or((0, false), |l| (l.key_version, l.fixed));
+    let opened = SavedKeys {
+        encrypted_private_key: login_encrypted.to_owned(),
+        key_version: login_version,
+        key_anchored: login_fixed,
+        history_keys: history(&others),
+    };
+    let Some((best_version, best_fixed, best_encrypted)) = others
+        .last()
+        .filter(|(version, _, _)| *version > login_version)
+        .cloned()
+    else {
+        return LoginKeys {
+            opened,
+            promoted: None,
         };
     };
-    others.sort_by_key(|(version, _, _)| *version);
-    match others.pop_if(|(version, _, _)| *version > login.key_version) {
-        Some((key_version, fixed, encrypted_private_key)) => {
-            others.push((login.key_version, login.fixed, login_encrypted.to_owned()));
-            SavedKeys {
-                encrypted_private_key,
-                key_version,
-                key_anchored: fixed,
-                history_keys: history(others),
-            }
-        }
-        None => SavedKeys {
-            encrypted_private_key: login_encrypted.to_owned(),
-            key_version: login.key_version,
-            key_anchored: login.fixed,
-            history_keys: history(others),
-        },
+    let mut rest = others[..others.len() - 1].to_vec();
+    if login.is_some() {
+        rest.push((login_version, login_fixed, login_encrypted.to_owned()));
     }
+    LoginKeys {
+        opened,
+        promoted: Some(SavedKeys {
+            encrypted_private_key: best_encrypted,
+            key_version: best_version,
+            key_anchored: best_fixed,
+            history_keys: history(&rest),
+        }),
+    }
+}
+
+fn reopen(account_id: &str, keys: &SavedKeys) -> bool {
+    trust::<Empty>(
+        Family::Session,
+        &json!({
+            "op": "reopen",
+            "accountId": account_id,
+            "encryptedPrivateKey": keys.encrypted_private_key,
+            "keyVersion": keys.key_version,
+            "keyAnchored": keys.key_anchored,
+            "historyKeys": keys.history_keys,
+        }),
+    )
+    .is_ok()
 }
 
 fn verdict(v: Verdict) -> SignatureVerdict {
@@ -617,9 +648,9 @@ impl Keystore {
         }
 
         let keys = if args.server_auth_scheme == AuthScheme::OpaqueV1 {
-            seeded_keys(&args.encrypted_private_key, &stored)
+            login_keys(&args.encrypted_private_key, &stored)
         } else {
-            seeded_keys(&args.encrypted_private_key, &[])
+            login_keys(&args.encrypted_private_key, &[])
         };
         let unlocked = trust::<Empty>(
             Family::Opaque,
@@ -629,10 +660,10 @@ impl Keystore {
                 "accountId": args.account_id,
                 "wrappedMasterKey": args.wrapped_master_key,
                 "masterKeyId": args.master_key_id,
-                "encryptedPrivateKey": keys.encrypted_private_key,
-                "keyVersion": keys.key_version,
-                "keyAnchored": keys.key_anchored,
-                "historyKeys": keys.history_keys,
+                "encryptedPrivateKey": keys.opened.encrypted_private_key,
+                "keyVersion": keys.opened.key_version,
+                "keyAnchored": keys.opened.key_anchored,
+                "historyKeys": keys.opened.history_keys,
             }),
         );
         if let Err(err) = unlocked {
@@ -645,6 +676,9 @@ impl Keystore {
             );
         }
 
+        if let Some(promoted) = &keys.promoted {
+            reopen(&args.account_id, promoted);
+        }
         let email = op.email.unwrap_or_default();
         self.adopt(&args.account_id, email.clone(), args.server_auth_scheme);
         OpaqueCompleteLoginUnlockResponse::ok(args.account_id, email)
@@ -653,7 +687,7 @@ impl Keystore {
     pub fn migration_finalized(
         &self,
         account_id: &str,
-        _stored: Vec<StoredAccountKey>,
+        stored: Vec<StoredAccountKey>,
     ) -> PlainOkResponse {
         let mut accounts = self.accounts.lock().expect("keystore accounts");
         let Some(account) = accounts.get_mut(account_id) else {
@@ -665,6 +699,12 @@ impl Keystore {
         account.auth_scheme = AuthScheme::OpaqueV1;
         let email = account.email.clone();
         drop(accounts);
+
+        if let Some(state) = account_keys(account_id) {
+            let keys = login_keys(&state.current.encrypted_private_key, &stored);
+            let seeded = keys.promoted.unwrap_or(keys.opened);
+            reopen(account_id, &seeded);
+        }
 
         self.emit(Broadcast::VaultChanged {
             account_id: account_id.to_owned(),
