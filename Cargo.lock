@@ -4546,7 +4546,7 @@ dependencies = [
 
 [[package]]
 name = "thelemail-api"
-version = "0.22.1"
+version = "0.23.0"
 dependencies = [
  "bytes",
  "futures-util",
@@ -4563,7 +4563,7 @@ dependencies = [
 
 [[package]]
 name = "thelemail-desktop"
-version = "0.22.1"
+version = "0.23.0"
 dependencies = [
  "base64 0.22.1",
  "block2",
@@ -4610,7 +4610,7 @@ dependencies = [
 
 [[package]]
 name = "thelemail-keystore"
-version = "0.22.1"
+version = "0.23.0"
 dependencies = [
  "base64 0.22.1",
  "hex",
@@ -4627,7 +4627,7 @@ dependencies = [
 
 [[package]]
 name = "thelemail-mime"
-version = "0.22.1"
+version = "0.23.0"
 dependencies = [
  "base64 0.22.1",
  "mail-parser",
@@ -4637,7 +4637,7 @@ dependencies = [
 
 [[package]]
 name = "thelemail-release"
-version = "0.22.1"
+version = "0.23.0"
 dependencies = [
  "base64 0.22.1",
  "minisign-verify",
@@ -4646,7 +4646,7 @@ dependencies = [
 
 [[package]]
 name = "thelemail-store"
-version = "0.22.1"
+version = "0.23.0"
 dependencies = [
  "hex",
  "rand 0.8.8",
@@ -4659,7 +4659,7 @@ dependencies = [
 
 [[package]]
 name = "thelemail-trust"
-version = "0.22.1"
+version = "0.23.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -4670,7 +4670,7 @@ dependencies = [
 
 [[package]]
 name = "thelemail-trust-sys"
-version = "0.22.1"
+version = "0.23.0"
 
 [[package]]
 name = "thiserror"
