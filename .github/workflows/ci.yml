@@ -53,8 +53,7 @@ jobs:
         run: |
           set -euo pipefail
           pinned="$(cat web-client.version)"
-          actual="$(git -C web-client describe --tags --exact-match)"
-          test "$pinned" = "$actual"
+          git -C web-client tag --points-at HEAD | grep -qxF "$pinned"
 
       - name: Build the frontend from the pin
         run: THELEMAIL_RELEASE=1 node scripts/build-frontend.mjs

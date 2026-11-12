@@ -19,4 +19,5 @@ zeroize.workspace = true
 thelemail-trust = { path = "../thelemail-trust", features = ["testkit"] }
 uuid.workspace = true
 reqwest = { workspace = true, features = ["blocking", "json"] }
+sha2.workspace = true
 tokio = { workspace = true, features = ["rt-multi-thread"] }

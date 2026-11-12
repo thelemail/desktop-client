@@ -285,3 +285,36 @@ pub fn sign_in(
         AuthScheme::OpaqueV1,
     )
 }
+
+pub fn open_product_keys_account(ks: &Keystore) -> (String, Value) {
+    let account_id = new_account_id();
+    let account = testkit(json!({
+        "op": "productKeysAccount",
+        "accountId": account_id,
+        "email": EMAIL,
+    }));
+    let server_half = [0x44u8; 32];
+    let persisted = trust(
+        Family::Session,
+        json!({"op": "persist", "accountId": account_id, "serverHalf": b64().encode(server_half)}),
+    );
+    let wrapped: WrappedSecret = serde_json::from_value(persisted["wrapped"].clone()).unwrap();
+    let keys = SavedKeys {
+        encrypted_private_key: account["accountKeys"]["keys"][1]["encryptedPrivateKey"]
+            .as_str()
+            .unwrap()
+            .to_owned(),
+        key_version: 2,
+        key_anchored: false,
+        history_keys: Vec::new(),
+    };
+    assert!(ks.restore(
+        &account_id,
+        EMAIL.to_owned(),
+        &keys,
+        &wrapped,
+        persisted["wrapVersion"].as_i64().unwrap(),
+        &server_half,
+    ));
+    (account_id, account)
+}
