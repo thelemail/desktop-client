@@ -7,6 +7,8 @@ use thelemail_ui::theme::{ActiveTokens, Theme};
 use thelemail_ui::tokens::ColorToken;
 
 #[cfg(debug_assertions)]
+use crate::icon_gallery::IconGallery;
+#[cfg(debug_assertions)]
 use crate::motion_gallery::MotionGallery;
 use crate::nav::{Navigator, navigator};
 #[cfg(debug_assertions)]
@@ -18,7 +20,9 @@ pub struct Shell {
     nav: Entity<Navigator>,
     frame: FrameSaver,
     #[cfg(debug_assertions)]
-    motion: Option<Entity<crate::motion_gallery::MotionGallery>>,
+    motion: Option<Entity<MotionGallery>>,
+    #[cfg(debug_assertions)]
+    icons: Option<Entity<IconGallery>>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -35,6 +39,8 @@ impl Shell {
             frame: FrameSaver::default(),
             #[cfg(debug_assertions)]
             motion: None,
+            #[cfg(debug_assertions)]
+            icons: None,
             _subscriptions: subscriptions,
         }
     }
@@ -54,6 +60,14 @@ impl Render for Shell {
                 .get_or_insert_with(|| cx.new(|cx| MotionGallery::new(window, cx)))
                 .clone();
             return root.child(motion);
+        }
+        #[cfg(debug_assertions)]
+        if route == Route::Debug(DebugPage::Tokens(GalleryTab::Icons)) {
+            let icons = self
+                .icons
+                .get_or_insert_with(|| cx.new(|_| IconGallery::new()))
+                .clone();
+            return root.child(icons);
         }
         let _ = window;
         root.child(screens::render(&route, cx))

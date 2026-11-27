@@ -31,14 +31,14 @@ struct Play {
 }
 
 #[derive(Default)]
-struct FrameMeter {
+pub(crate) struct FrameMeter {
     last: Option<Instant>,
     intervals: VecDeque<Duration>,
     frames: u64,
 }
 
 impl FrameMeter {
-    fn tick(&mut self, now: Instant) {
+    pub(crate) fn tick(&mut self, now: Instant) {
         if let Some(last) = self.last.replace(now) {
             let gap = now.saturating_duration_since(last);
             if gap < IDLE_GAP {
@@ -54,7 +54,7 @@ impl FrameMeter {
         }
     }
 
-    fn summary(&self) -> String {
+    pub(crate) fn summary(&self) -> String {
         if self.intervals.is_empty() {
             return "no animation frames yet".into();
         }

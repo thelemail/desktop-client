@@ -3,11 +3,15 @@
   "private": true,
   "version": "0.8.6",
   "type": "module",
+  "packageManager": "pnpm@11.21.0+sha512.521705bce689924eac72f5a3587122f362689ef6571e55ba80076fd637c11132ecffada26fad4ea79c485bfddbfd3d5a2a5b05805a77e893de71ec8a6cca3bb1",
   "scripts": {
     "frontend:build": "node scripts/build-frontend.mjs",
     "tauri": "cargo tauri"
   },
   "dependencies": {
+    "@fortawesome/free-brands-svg-icons": "7.3.1",
+    "@fortawesome/pro-regular-svg-icons": "7.3.1",
+    "@fortawesome/pro-solid-svg-icons": "7.3.1",
     "@tauri-apps/api": "^2.12.4"
   }
 }

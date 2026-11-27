@@ -226,16 +226,18 @@ pub enum GalleryTab {
     Shapes,
     Type,
     Motion,
+    Icons,
 }
 
 #[cfg(debug_assertions)]
 impl GalleryTab {
-    pub const ALL: [(&'static str, Self); 5] = [
+    pub const ALL: [(&'static str, Self); 6] = [
         ("colours", Self::Colours),
         ("shadows", Self::Shadows),
         ("shapes", Self::Shapes),
         ("type", Self::Type),
         ("motion", Self::Motion),
+        ("icons", Self::Icons),
     ];
 
     pub fn slug(self) -> &'static str {
