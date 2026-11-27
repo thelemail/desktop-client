@@ -314,3 +314,38 @@ async fn paths_must_stay_on_the_api_origin() {
     assert_eq!(err, ApiError::Request);
     assert!(rig.stub.requests().is_empty());
 }
+
+#[tokio::test]
+async fn a_public_call_names_no_account_and_sends_no_token() {
+    let rig = Rig::new(|_, _| json("200 OK", r#"{"challengeId":"c"}"#))
+        .await
+        .signed_in("t");
+    let v: serde_json::Value = rig
+        .api()
+        .public(Call::post("/v1/auth/login/init").json(&serde_json::json!({"email": "a"})))
+        .await
+        .unwrap();
+    assert_eq!(v["challengeId"], "c");
+    let seen = &rig.stub.requests()[0];
+    assert_eq!(seen.header("x-account-id"), None);
+    assert_eq!(seen.header("authorization"), None);
+    assert_eq!(seen.header("x-client"), Some("desktop"));
+    assert!(seen.header("x-device-id").is_some());
+}
+
+#[tokio::test]
+async fn signing_in_again_wakes_whoever_waits_on_a_lost_session() {
+    let rig = Rig::new(|_, _| error("401 Unauthorized", "invalid_credentials")).await;
+    let revived = rig.auth.revived(ACCOUNT);
+    assert_eq!(
+        rig.api().empty(ACCOUNT, Call::get("/v1/me")).await,
+        Err(ApiError::SessionLost)
+    );
+    let waiter = tokio::spawn(async move { revived.notified().await });
+    tokio::task::yield_now().await;
+    rig.auth.adopt(ACCOUNT, "t", Duration::from_secs(900), None);
+    tokio::time::timeout(Duration::from_secs(2), waiter)
+        .await
+        .expect("woken in time")
+        .unwrap();
+}

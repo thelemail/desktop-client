@@ -8,13 +8,14 @@ use std::time::Duration;
 
 use base64::Engine as _;
 use serde::Deserialize;
-use thelemail_api::{ApiRequest, ApiResponse};
+
 use thelemail_store::avatars::{CachedAvatar, cached_avatar, prune_avatars, store_avatar};
 use tokio::sync::Notify;
 
 use policy::ImageFormat;
 pub use thelemail_store::avatars::AvatarKind;
 
+use crate::api::{ApiError, Call, Response};
 use crate::{Core, CoreEvent};
 
 const BATCH_WINDOW: Duration = Duration::from_millis(20);
@@ -387,16 +388,15 @@ async fn process(core: Arc<Core>, account: String, generation: u64, jobs: Vec<Jo
     if network.is_empty() || !avatars.current(&account, generation) {
         return;
     }
-    let Some(token) = core.mirror().token(&account) else {
+    if core.auth().is_lost(&account) {
         for item in &network {
             avatars.finish(&account, generation, item.kind, &item.key, Outcome::Failed);
         }
         return;
-    };
+    }
     let client = Client {
         core: &core,
         account: &account,
-        token: &token,
     };
     let mut people = Vec::new();
     let mut results = Vec::new();
@@ -432,7 +432,6 @@ fn requeue(avatars: &Avatars, account: &str, generation: u64, kind: AvatarKind, 
 
 enum Fetched {
     Found(CachedAvatar),
-    Unauthorized,
     Failed,
 }
 
@@ -447,7 +446,6 @@ async fn persist(
         return;
     }
     let mut stored = Vec::new();
-    let mut expired = false;
     for (kind, key, fetched) in results {
         match fetched {
             Fetched::Found(cached) => {
@@ -459,17 +457,8 @@ async fn persist(
                 avatars.finish(account, generation, kind, &key, Outcome::Known(entry));
                 stored.push((kind, key, cached));
             }
-            Fetched::Unauthorized => {
-                expired = true;
-                avatars.finish(account, generation, kind, &key, Outcome::Failed);
-            }
             Fetched::Failed => avatars.finish(account, generation, kind, &key, Outcome::Failed),
         }
-    }
-    if expired {
-        core.emit(CoreEvent::TokenExpired {
-            account_id: account.to_owned(),
-        });
     }
     if stored.is_empty() {
         return;
@@ -517,7 +506,6 @@ struct LogoResponse {
 struct Client<'a> {
     core: &'a Core,
     account: &'a str,
-    token: &'a str,
 }
 
 fn negative(source: &str) -> CachedAvatar {
@@ -530,33 +518,11 @@ fn negative(source: &str) -> CachedAvatar {
 }
 
 impl Client<'_> {
-    fn headers(&self, json: bool) -> HashMap<String, String> {
-        let mut headers = crate::mirror::auth_headers(self.account, self.token);
-        if json {
-            headers.insert("Content-Type".to_owned(), "application/json".to_owned());
-        }
-        headers
-    }
-
-    fn url(&self, path: &str) -> Option<String> {
-        let mut url = self.core.net().config().api_base.clone();
-        url.set_path(path);
-        Some(url.to_string())
-    }
-
-    async fn post(&self, path: &str, body: serde_json::Value) -> Option<ApiResponse> {
-        let url = self.url(path)?;
-        crate::net::api_request(
-            self.core,
-            ApiRequest {
-                url,
-                method: "POST".to_owned(),
-                headers: self.headers(true),
-                body: Some(body.to_string()),
-            },
-        )
-        .await
-        .ok()
+    async fn post(&self, path: &str, body: serde_json::Value) -> Result<Response, ApiError> {
+        self.core
+            .api()
+            .send(self.account, Call::post(path).json(&body))
+            .await
     }
 
     async fn people(&self, items: &[Pending]) -> Vec<(String, Fetched)> {
@@ -568,16 +534,7 @@ impl Client<'_> {
             )
             .await;
         let found: HashMap<String, Option<String>> = match resp {
-            Some(r) if r.status == 401 => {
-                return items
-                    .iter()
-                    .map(|i| (i.key.clone(), Fetched::Unauthorized))
-                    .collect();
-            }
-            Some(r) if r.status == 200 => match r
-                .body
-                .and_then(|b| serde_json::from_slice::<ResolveResponse>(&b).ok())
-            {
+            Ok(r) => match serde_json::from_slice::<ResolveResponse>(&r.body).ok() {
                 Some(parsed) => parsed
                     .avatars
                     .into_iter()
@@ -618,24 +575,15 @@ impl Client<'_> {
             kept.checked_at = now_unix();
             return Fetched::Found(kept);
         }
-        let Some(url) = self.url(path) else {
-            return Fetched::Failed;
-        };
-        let resp = crate::net::blob_request(
-            self.core,
-            ApiRequest {
-                url,
-                method: "GET".to_owned(),
-                headers: self.headers(false),
-                body: None,
-            },
-        )
-        .await;
-        match resp {
-            Ok(r) if r.status == 401 => Fetched::Unauthorized,
-            Ok(r) if r.status == 404 => Fetched::Found(negative(path)),
-            Ok(r) if r.status == 200 => {
-                let bytes = r.body.unwrap_or_default();
+        let url = format!(
+            "{}{}",
+            self.core.net().config().api_base,
+            path.trim_start_matches('/')
+        );
+        match self.core.api().send(self.account, Call::blob(url)).await {
+            Err(ApiError::NotFound(_)) => Fetched::Found(negative(path)),
+            Ok(r) => {
+                let bytes = r.body;
                 Fetched::Found(normalized(
                     path,
                     off_thread(move || normalize::photo(&bytes)).await,
@@ -650,12 +598,10 @@ impl Client<'_> {
             .post("/v1/bimi/logo", serde_json::json!({ "domain": domain }))
             .await;
         match resp {
-            Some(r) if r.status == 401 => Fetched::Unauthorized,
-            Some(r) if r.status == 404 => Fetched::Found(negative("")),
-            Some(r) if r.status == 200 => {
-                let svg = r
-                    .body
-                    .and_then(|b| serde_json::from_slice::<LogoResponse>(&b).ok())
+            Err(ApiError::NotFound(_)) => Fetched::Found(negative("")),
+            Ok(r) => {
+                let svg = serde_json::from_slice::<LogoResponse>(&r.body)
+                    .ok()
                     .and_then(|l| base64::engine::general_purpose::STANDARD.decode(l.svg).ok());
                 let png = match svg {
                     Some(svg) => off_thread(move || normalize::logo(&svg)).await,

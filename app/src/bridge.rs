@@ -51,7 +51,7 @@ impl Generations {
 
     fn observe(&mut self, event: &CoreEvent) {
         match event {
-            CoreEvent::TokenExpired { account_id }
+            CoreEvent::SessionLost { account_id }
             | CoreEvent::Keystore(
                 Broadcast::Cleared { account_id } | Broadcast::Locked { account_id },
             ) => self.invalidate(account_id),
@@ -206,7 +206,7 @@ mod tests {
     #[test]
     fn sign_out_lock_and_expiry_invalidate_the_account() {
         for event in [
-            CoreEvent::TokenExpired {
+            CoreEvent::SessionLost {
                 account_id: A.into(),
             },
             CoreEvent::Keystore(Broadcast::Cleared {

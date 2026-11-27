@@ -1,12 +1,10 @@
-use std::collections::HashMap;
-
 use base64::Engine as _;
 use serde::Deserialize;
 use serde_json::Value;
-use thelemail_api::{ApiRequest, Net};
 use thelemail_keystore::{AccountKeyList, Keystore, LoadAccountKeysArgs};
 
 use crate::Core;
+use crate::api::{Api, Call};
 use crate::keystore::clear_account;
 
 const PRODUCT: &str = "app";
@@ -42,32 +40,19 @@ enum Fetched {
     Unreachable(String),
 }
 
-async fn get(net: &Net, account_id: &str, token: &str, path: &str) -> Fetched {
-    let mut headers = HashMap::new();
-    headers.insert("Authorization".to_owned(), format!("Bearer {token}"));
-    headers.insert("X-Account-Id".to_owned(), account_id.to_owned());
-    headers.insert("X-Client".to_owned(), "desktop".to_owned());
-    let resp = match net
-        .request(ApiRequest {
-            url: format!("{}{path}", net.config().api_base),
-            method: "GET".to_owned(),
-            headers,
-            body: None,
-        })
+async fn get(api: Api<'_>, account_id: &str, path: &str) -> Fetched {
+    match api
+        .json::<Value>(account_id, Call::get(format!("/{path}")))
         .await
     {
-        Ok(resp) => resp,
-        Err(err) => return Fetched::Unreachable(err.to_string()),
-    };
-    match resp.status {
-        200 => match serde_json::from_slice(&resp.body.unwrap_or_default()) {
-            Ok(v) => Fetched::Body(v),
-            Err(err) => Fetched::Unreachable(err.to_string()),
+        Ok(v) => Fetched::Body(v),
+        Err(err) => match err.status() {
+            Some(status @ (401 | 408 | 429 | 500..=599)) => {
+                Fetched::Unreachable(format!("{path} returned {status}"))
+            }
+            Some(status) => Fetched::Refused(status),
+            None => Fetched::Unreachable(err.to_string()),
         },
-        401 | 408 | 429 | 500..=599 => {
-            Fetched::Unreachable(format!("{path} returned {}", resp.status))
-        }
-        status => Fetched::Refused(status),
     }
 }
 
@@ -84,20 +69,8 @@ fn bundle_refs(product_keys: &Value) -> Result<Vec<BundleRef>, String> {
     Ok(manifest.bundles)
 }
 
-pub async fn verify(
-    net: &Net,
-    ks: &Keystore,
-    account_id: &str,
-    token: &str,
-) -> Result<Outcome, Refused> {
-    let product_keys = match get(
-        net,
-        account_id,
-        token,
-        &format!("v1/me/product-keys/{PRODUCT}"),
-    )
-    .await
-    {
+pub async fn verify(api: Api<'_>, ks: &Keystore, account_id: &str) -> Result<Outcome, Refused> {
+    let product_keys = match get(api, account_id, &format!("v1/me/product-keys/{PRODUCT}")).await {
         Fetched::Body(v) => v,
         Fetched::Refused(status) => {
             return Ok(Outcome::Unreachable(format!(
@@ -120,9 +93,8 @@ pub async fn verify(
     let refuse = |reason: String| Refused { reason, enforce };
     let refs = bundle_refs(&product_keys).map_err(refuse)?;
     let root = match get(
-        net,
+        api,
         account_id,
-        token,
         &format!("v1/me/product-keys/{PRODUCT}/root-descriptor"),
     )
     .await
@@ -137,7 +109,7 @@ pub async fn verify(
             "v1/me/product-keys/{PRODUCT}/bundles/{}/revisions/{}",
             r.bundle_id, r.revision
         );
-        match get(net, account_id, token, &path).await {
+        match get(api, account_id, &path).await {
             Fetched::Body(v) => bundles.push(v),
             Fetched::Refused(status) => {
                 return Err(refuse(format!("product bundle returned {status}")));
@@ -145,7 +117,7 @@ pub async fn verify(
             Fetched::Unreachable(err) => return Ok(Outcome::Unreachable(err)),
         }
     }
-    let keys = match get(net, account_id, token, "v1/me/keys").await {
+    let keys = match get(api, account_id, "v1/me/keys").await {
         Fetched::Body(v) => v,
         Fetched::Refused(status) => {
             return Ok(Outcome::Unreachable(format!(
@@ -166,8 +138,8 @@ pub async fn verify(
     }
 }
 
-pub async fn verify_or_clear(core: &Core, account_id: &str, token: &str) -> bool {
-    match verify(core.net(), core.keystore(), account_id, token).await {
+pub async fn verify_or_clear(core: &Core, account_id: &str) -> bool {
+    match verify(core.api(), core.keystore(), account_id).await {
         Ok(Outcome::Unreachable(err)) => {
             tracing::warn!("productkeys: could not check {account_id}: {err}");
             true
@@ -193,11 +165,12 @@ pub async fn verify_or_clear(core: &Core, account_id: &str, token: &str) -> bool
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
     use std::io::{BufRead, BufReader, Write};
     use std::net::TcpListener;
 
     use serde_json::json;
-    use thelemail_api::ApiConfig;
+    use thelemail_api::{ApiConfig, Net};
     use thelemail_trust::Family;
     use url::Url;
 
@@ -322,9 +295,17 @@ mod tests {
 
     fn run(f: &Fixture) -> Result<Outcome, Refused> {
         let net = net(&serve(f.routes.clone()));
+        let (events, _) = tokio::sync::broadcast::channel(4);
+        let auth = crate::api::Auth::new(events);
+        auth.adopt(
+            &f.account_id,
+            "token",
+            std::time::Duration::from_secs(900),
+            None,
+        );
         tokio::runtime::Runtime::new()
             .expect("runtime")
-            .block_on(verify(&net, &f.ks, &f.account_id, "token"))
+            .block_on(verify(Api::new(&net, &auth), &f.ks, &f.account_id))
     }
 
     fn route<'a>(f: &'a mut Fixture, suffix: &str) -> &'a mut (u16, Value) {

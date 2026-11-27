@@ -43,9 +43,6 @@ pub enum CoreEvent {
         scope: Option<String>,
         error: String,
     },
-    TokenExpired {
-        account_id: String,
-    },
     SessionLost {
         account_id: String,
     },

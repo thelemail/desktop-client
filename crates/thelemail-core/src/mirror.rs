@@ -6,13 +6,13 @@ use std::sync::{Arc, Mutex};
 use futures_util::{StreamExt, stream};
 use rusqlite::{Connection, params};
 use serde::{Deserialize, Serialize};
-use thelemail_api::{ApiRequest, Net};
 use thelemail_keystore::Keystore;
 use thelemail_store::list::{MirrorMessage, MirrorRow, get_message, get_thread, list_mailbox};
 use thelemail_store::search::{SearchHit, search_messages};
 use thelemail_store::{account_db_path, open_account_db};
 use tokio::sync::Notify;
 
+use crate::api::{Api, ApiError, Call};
 use crate::{Core, CoreEvent, keychain};
 
 const SCOPES: &[&str] = &["inbox", "archive", "folder", "spam", "trash"];
@@ -160,8 +160,7 @@ pub struct SyncProgress {
 pub struct Mirror {
     connections: Mutex<HashMap<String, Connection>>,
     running: Mutex<HashMap<String, bool>>,
-    tokens: Mutex<HashMap<String, String>>,
-    token_wakers: Mutex<HashMap<String, Arc<Notify>>>,
+    wakers: Mutex<HashMap<String, Arc<Notify>>>,
     pokes: Mutex<HashSet<String>>,
     watching: Mutex<HashMap<String, bool>>,
     notify_armed: Mutex<HashMap<String, bool>>,
@@ -175,8 +174,7 @@ impl Default for Mirror {
         Self {
             connections: Mutex::default(),
             running: Mutex::default(),
-            tokens: Mutex::default(),
-            token_wakers: Mutex::default(),
+            wakers: Mutex::default(),
             pokes: Mutex::default(),
             watching: Mutex::default(),
             notify_armed: Mutex::default(),
@@ -247,10 +245,6 @@ impl Mirror {
         crate::ids::account_id(account_id)?;
         self.close(account_id);
         self.stop_watch(account_id);
-        self.tokens
-            .lock()
-            .expect("mirror tokens")
-            .remove(account_id);
         self.running
             .lock()
             .expect("mirror running")
@@ -259,7 +253,7 @@ impl Mirror {
             .lock()
             .expect("mirror notify")
             .remove(account_id);
-        self.token_wakers
+        self.wakers
             .lock()
             .expect("mirror wakers")
             .remove(account_id);
@@ -311,7 +305,7 @@ impl Mirror {
             watching.keys().cloned().collect()
         };
         for account_id in watched {
-            self.token_waker(&account_id).notify_one();
+            self.waker(&account_id).notify_one();
         }
         let drained: Vec<(String, Connection)> = self
             .connections
@@ -344,21 +338,6 @@ impl Mirror {
         search_messages(conn, query, limit).map_err(|e| e.to_string())
     }
 
-    pub fn set_token(&self, account_id: &str, token: &str) {
-        let changed = {
-            let mut tokens = self.tokens.lock().expect("mirror tokens");
-            if tokens.get(account_id).map(String::as_str) == Some(token) {
-                false
-            } else {
-                tokens.insert(account_id.to_owned(), token.to_owned());
-                true
-            }
-        };
-        if changed && self.is_watching(account_id) {
-            self.token_waker(account_id).notify_one();
-        }
-    }
-
     fn begin_poke(&self, account_id: &str) -> bool {
         self.pokes
             .lock()
@@ -369,25 +348,17 @@ impl Mirror {
     fn finish_poke(&self, account_id: &str) {
         self.pokes.lock().expect("mirror pokes").remove(account_id);
         if self.is_watching(account_id) {
-            self.token_waker(account_id).notify_one();
+            self.waker(account_id).notify_one();
         }
     }
 
-    pub fn token_waker(&self, account_id: &str) -> Arc<Notify> {
-        self.token_wakers
+    pub fn waker(&self, account_id: &str) -> Arc<Notify> {
+        self.wakers
             .lock()
             .expect("mirror wakers")
             .entry(account_id.to_owned())
             .or_default()
             .clone()
-    }
-
-    pub fn token(&self, account_id: &str) -> Option<String> {
-        self.tokens
-            .lock()
-            .expect("mirror tokens")
-            .get(account_id)
-            .cloned()
     }
 
     pub fn arm_notifications(&self, account_id: &str) {
@@ -709,12 +680,12 @@ enum RetryPass {
 }
 
 async fn retry_pass(core: &Arc<Core>, account_id: &str) -> RetryPass {
-    let net = core.net();
+    let api = core.api();
     let ks = core.keystore();
     let mirror = core.mirror();
-    let Some(token) = mirror.token(account_id) else {
+    if core.auth().is_lost(account_id) {
         return RetryPass::Deferred;
-    };
+    }
     let Ok(ids) = mirror.with_conn(account_id, undecryptable_messages) else {
         return RetryPass::Deferred;
     };
@@ -727,7 +698,7 @@ async fn retry_pass(core: &Arc<Core>, account_id: &str) -> RetryPass {
         let pending: Vec<_> = chunk
             .iter()
             .map(|id| async {
-                let detail = get_detail(net, account_id, &token, id).await;
+                let detail = get_detail(api, account_id, id).await;
                 (id.clone(), detail)
             })
             .collect();
@@ -778,23 +749,21 @@ async fn retry_pass(core: &Arc<Core>, account_id: &str) -> RetryPass {
         account_id: account_id.to_string(),
         arrived: 0,
     });
-    if let Err(err) = prefetch_bodies(net, ks, mirror, account_id, &token, |_, _| {}).await {
+    if let Err(err) = prefetch_bodies(api, ks, mirror, account_id, |_, _| {}).await {
         tracing::warn!("mirror: fetching recovered bodies for {account_id} failed: {err}");
     }
     RetryPass::Done
 }
 
-pub fn start_sync(core: &Arc<Core>, account_id: &str, access_token: &str) -> Result<(), String> {
+pub fn start_sync(core: &Arc<Core>, account_id: &str) -> Result<(), String> {
     crate::ids::account_id(account_id)?;
-    core.mirror().set_token(account_id, access_token);
     let core = core.clone();
     let account_id = account_id.to_owned();
-    let access_token = access_token.to_owned();
     tokio::spawn(async move {
-        if !crate::productkeys::verify_or_clear(&core, &account_id, &access_token).await {
+        if !crate::productkeys::verify_or_clear(&core, &account_id).await {
             return;
         }
-        tokio::spawn(backfill(core.clone(), account_id.clone(), access_token));
+        tokio::spawn(backfill(core.clone(), account_id.clone()));
         tokio::spawn(watch_inbox(core, account_id));
     });
     Ok(())
@@ -827,7 +796,7 @@ pub fn now_iso() -> String {
         .unwrap_or_default()
 }
 
-pub async fn backfill(core: Arc<Core>, account_id: String, access_token: String) {
+pub async fn backfill(core: Arc<Core>, account_id: String) {
     let mirror = core.mirror();
     if !mirror.claim(&account_id) {
         return;
@@ -837,10 +806,9 @@ pub async fn backfill(core: Arc<Core>, account_id: String, access_token: String)
     }
 
     for scope in SCOPES {
-        let net = core.net();
         let ks = core.keystore();
         let mirror = core.mirror();
-        let result = sync_scope(net, ks, mirror, &account_id, scope, &access_token, |done| {
+        let result = sync_scope(core.api(), ks, mirror, &account_id, scope, |done| {
             core.emit(CoreEvent::MirrorProgress(SyncProgress {
                 account_id: account_id.clone(),
                 scope: scope.to_string(),
@@ -867,27 +835,19 @@ pub async fn backfill(core: Arc<Core>, account_id: String, access_token: String)
     core.mirror().arm_notifications(&account_id);
 
     {
-        let net = core.net();
         let ks = core.keystore();
         let mirror = core.mirror();
-        let result = prefetch_bodies(
-            net,
-            ks,
-            mirror,
-            &account_id,
-            &access_token,
-            |done, total| {
-                core.emit(CoreEvent::MirrorProgress(SyncProgress {
-                    account_id: account_id.clone(),
-                    scope: "all".to_owned(),
-                    phase: "bodies".to_owned(),
-                    previews_done: 0,
-                    bodies_done: done,
-                    bodies_total: total,
-                    complete: false,
-                }));
-            },
-        )
+        let result = prefetch_bodies(core.api(), ks, mirror, &account_id, |done, total| {
+            core.emit(CoreEvent::MirrorProgress(SyncProgress {
+                account_id: account_id.clone(),
+                scope: "all".to_owned(),
+                phase: "bodies".to_owned(),
+                previews_done: 0,
+                bodies_done: done,
+                bodies_total: total,
+                complete: false,
+            }));
+        })
         .await;
         if let Err(err) = result {
             core.emit(CoreEvent::MirrorError {
@@ -1046,12 +1006,11 @@ fn announce(core: &Arc<Core>, account_id: &str, fresh: &[crate::notify::NewMail]
 }
 
 pub async fn sync_scope(
-    net: &Net,
+    api: Api<'_>,
     ks: &Keystore,
     mirror: &Mirror,
     account_id: &str,
     scope: &str,
-    access_token: &str,
     mut on_progress: impl FnMut(u64),
 ) -> Result<(u64, Vec<crate::notify::NewMail>), String> {
     let since = mirror.started_at;
@@ -1069,34 +1028,14 @@ pub async fn sync_scope(
     let mut previews_done: u64 = 0;
 
     loop {
-        let mut url = format!(
-            "{}v1/messages?mailbox={scope}&sort=oldest&limit={PAGE_LIMIT}",
-            net.config().api_base
-        );
+        let mut path = format!("/v1/messages?mailbox={scope}&sort=oldest&limit={PAGE_LIMIT}");
         if let Some(c) = &cursor {
-            url.push_str(&format!("&cursor={}", urlencode(c)));
+            path.push_str(&format!("&cursor={}", urlencode(c)));
         }
-
-        let mut headers = HashMap::new();
-        headers.insert("Authorization".to_owned(), format!("Bearer {access_token}"));
-        headers.insert("X-Account-Id".to_owned(), account_id.to_owned());
-        headers.insert("X-Client".to_owned(), "desktop".to_owned());
-
-        let resp = net
-            .request(ApiRequest {
-                url,
-                method: "GET".to_owned(),
-                headers,
-                body: None,
-            })
+        let page: MessageListResponse = api
+            .json(account_id, Call::get(path))
             .await
-            .map_err(|e| e.to_string())?;
-
-        if resp.status != 200 {
-            return Err(format!("list {scope} returned {}", resp.status));
-        }
-        let body = resp.body.unwrap_or_default();
-        let page: MessageListResponse = serde_json::from_slice(&body).map_err(|e| e.to_string())?;
+            .map_err(|e| api_failure(&format!("list {scope}"), e))?;
 
         if page.items.is_empty() {
             break;
@@ -1202,9 +1141,9 @@ pub async fn watch_inbox(core: Arc<Core>, account_id: String) {
             break;
         }
 
-        let token = core.mirror().token(&account_id);
-        if let Some(token) = token {
-            match poll_changes(&core, &account_id, &token).await {
+        let lost = core.auth().is_lost(&account_id);
+        if !lost {
+            match poll_changes(&core, &account_id).await {
                 Ok(arrivals) => {
                     failures = 0;
                     tracing::info!(
@@ -1216,11 +1155,6 @@ pub async fn watch_inbox(core: Arc<Core>, account_id: String) {
                 Err(err) => {
                     failures = failures.saturating_add(1);
                     tracing::warn!("mirror: poll for {account_id} failed ({failures}): {err}");
-                    if err == SESSION_EXPIRED {
-                        core.emit(CoreEvent::TokenExpired {
-                            account_id: account_id.to_string(),
-                        });
-                    }
                     core.emit(CoreEvent::MirrorError {
                         account_id: account_id.to_string(),
                         scope: None,
@@ -1230,8 +1164,15 @@ pub async fn watch_inbox(core: Arc<Core>, account_id: String) {
             }
         }
 
-        let waker = core.mirror().token_waker(&account_id);
-        if tokio::time::timeout(next_delay(failures), waker.notified())
+        let waker = core.mirror().waker(&account_id);
+        if core.auth().is_lost(&account_id) {
+            let revived = core.auth().revived(&account_id);
+            tokio::select! {
+                () = waker.notified() => {}
+                () = revived.notified() => {}
+            }
+            failures = 0;
+        } else if tokio::time::timeout(next_delay(failures), waker.notified())
             .await
             .is_ok()
         {
@@ -1716,32 +1657,11 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_changed_token_wakes_the_watcher_and_an_unchanged_one_does_not() {
-        let mirror = Mirror::default();
-        let account = "acct";
-        assert!(mirror.claim_watch(account));
-        let waker = mirror.token_waker(account);
-        let wait = || tokio::time::timeout(std::time::Duration::from_millis(20), waker.notified());
-
-        mirror.set_token(account, "first");
-        assert!(wait().await.is_ok(), "a new token must wake the watcher");
-
-        mirror.set_token(account, "first");
-        assert!(
-            wait().await.is_err(),
-            "pushing the same token again must not wake it"
-        );
-
-        mirror.set_token(account, "second");
-        assert!(wait().await.is_ok());
-    }
-
-    #[tokio::test]
     async fn a_hint_wakes_the_watcher_once_and_only_while_it_runs() {
         let mirror = Mirror::default();
         let account = "acct";
         assert!(mirror.claim_watch(account));
-        let waker = mirror.token_waker(account);
+        let waker = mirror.waker(account);
         assert!(mirror.begin_poke(account));
         assert!(!mirror.begin_poke(account), "a pending poke must coalesce");
         mirror.finish_poke(account);
@@ -1754,21 +1674,6 @@ mod tests {
             mirror.begin_poke(account),
             "a finished poke must allow the next one"
         );
-    }
-
-    #[test]
-    fn a_token_set_before_the_watcher_starts_leaves_no_permit() {
-        let mirror = Mirror::default();
-        mirror.set_token("acct", "first");
-        let waker = mirror.token_waker("acct");
-        let rt = tokio::runtime::Builder::new_current_thread()
-            .enable_time()
-            .build()
-            .expect("runtime");
-        let woke = rt.block_on(async {
-            tokio::time::timeout(std::time::Duration::from_millis(20), waker.notified()).await
-        });
-        assert!(woke.is_err());
     }
 
     fn item(
@@ -1891,7 +1796,7 @@ mod tests {
         let mirror = Mirror::default();
         mirror.adopt_connection(account, conn).expect("adopt");
         assert!(mirror.claim_watch(account));
-        let waker = mirror.token_waker(account);
+        let waker = mirror.waker(account);
 
         mirror.shutdown();
 
@@ -2003,11 +1908,10 @@ fn days_from_civil(y: i64, m: i64, d: i64) -> i64 {
 }
 
 pub async fn prefetch_bodies(
-    net: &Net,
+    api: Api<'_>,
     ks: &Keystore,
     mirror: &Mirror,
     account_id: &str,
-    access_token: &str,
     mut on_progress: impl FnMut(u64, u64),
 ) -> Result<u64, String> {
     let work = mirror.with_conn(account_id, pending_bodies)?;
@@ -2021,9 +1925,7 @@ pub async fn prefetch_bodies(
     for chunk in work.chunks(BODY_BATCH) {
         let pending: Vec<_> = chunk
             .iter()
-            .map(|(rowid, message_id)| {
-                fetch_one_body(net, ks, account_id, access_token, *rowid, message_id)
-            })
+            .map(|(rowid, message_id)| fetch_one_body(api, ks, account_id, *rowid, message_id))
             .collect();
         let results: Vec<Result<FetchedBody, String>> = stream::iter(pending)
             .buffer_unordered(BODY_CONCURRENCY)
@@ -2034,7 +1936,7 @@ pub async fn prefetch_bodies(
         for result in results {
             match result {
                 Ok(body) => fetched.push(body),
-                Err(err) if err == "session expired" => return Err(err),
+                Err(err) if err == SESSION_EXPIRED => return Err(err),
                 Err(_) => {}
             }
         }
@@ -2082,37 +1984,26 @@ fn pending_bodies(conn: &Connection) -> Result<Vec<(i64, String)>, String> {
 }
 
 async fn fetch_one_body(
-    net: &Net,
+    api: Api<'_>,
     ks: &Keystore,
     account_id: &str,
-    access_token: &str,
     rowid: i64,
     message_id: &str,
 ) -> Result<FetchedBody, String> {
-    let detail = get_detail(net, account_id, access_token, message_id).await?;
-    let url = net
+    let detail = get_detail(api, account_id, message_id).await?;
+    let url = api
+        .net()
         .config()
         .api_base
         .join(&detail.body.path)
         .map_err(|e| e.to_string())?;
-    let resp = net
-        .fetch_blob(ApiRequest {
-            url: url.to_string(),
-            method: "GET".to_owned(),
-            headers: auth_headers(account_id, access_token),
-            body: None,
-        })
+    let resp = api
+        .send(account_id, Call::blob(url.to_string()))
         .await
-        .map_err(|e| e.to_string())?;
-    if resp.status == 401 {
-        return Err("session expired".to_owned());
-    }
-    if resp.status != 200 {
-        return Err(format!("message body returned {}", resp.status));
-    }
+        .map_err(|e| api_failure("message body", e))?;
 
     let plain = ks
-        .decrypt_bytes(account_id, &resp.body.unwrap_or_default(), None)
+        .decrypt_bytes(account_id, &resp.body, None)
         .map_err(|code| code.to_owned())?;
     let mime = unwrap_pgp_layers(ks, account_id, plain)?;
     let extracted = thelemail_mime::extract(&mime, thelemail_mime::DEFAULT_MAX_TEXT_BYTES);
@@ -2129,37 +2020,24 @@ async fn fetch_one_body(
     })
 }
 
-pub(crate) fn auth_headers(account_id: &str, access_token: &str) -> HashMap<String, String> {
-    let mut headers = HashMap::new();
-    headers.insert("Authorization".to_owned(), format!("Bearer {access_token}"));
-    headers.insert("X-Account-Id".to_owned(), account_id.to_owned());
-    headers.insert("X-Client".to_owned(), "desktop".to_owned());
-    headers
+fn api_failure(context: &str, err: ApiError) -> String {
+    match err {
+        ApiError::SessionLost => SESSION_EXPIRED.to_owned(),
+        err => format!("{context}: {err}"),
+    }
 }
 
 async fn get_detail(
-    net: &Net,
+    api: Api<'_>,
     account_id: &str,
-    access_token: &str,
     message_id: &str,
 ) -> Result<MessageDetailResponse, String> {
-    let resp = net
-        .request(ApiRequest {
-            url: format!("{}v1/messages/{message_id}", net.config().api_base),
-            method: "GET".to_owned(),
-            headers: auth_headers(account_id, access_token),
-            body: None,
-        })
-        .await
-        .map_err(|e| e.to_string())?;
-
-    if resp.status == 401 {
-        return Err("session expired".to_owned());
-    }
-    if resp.status != 200 {
-        return Err(format!("message detail returned {}", resp.status));
-    }
-    serde_json::from_slice(&resp.body.unwrap_or_default()).map_err(|e| e.to_string())
+    api.json(
+        account_id,
+        Call::get(format!("/v1/messages/{}", urlencode(message_id))),
+    )
+    .await
+    .map_err(|e| api_failure("message detail", e))
 }
 
 fn unwrap_pgp_layers(ks: &Keystore, account_id: &str, outer: Vec<u8>) -> Result<Vec<u8>, String> {
@@ -2309,9 +2187,8 @@ pub fn apply_changes(
 async fn poll_changes(
     core: &Arc<Core>,
     account_id: &str,
-    access_token: &str,
 ) -> Result<Vec<crate::notify::NewMail>, String> {
-    let net = core.net();
+    let api = core.api();
     let ks = core.keystore();
     let mirror = core.mirror();
 
@@ -2327,49 +2204,21 @@ async fn poll_changes(
                 .unwrap_or(None))
         })?;
 
-        let mut url = format!(
-            "{}v1/messages/changes?limit={DELTA_LIMIT}",
-            net.config().api_base
-        );
+        let mut path = format!("/v1/messages/changes?limit={DELTA_LIMIT}");
         if let Some(c) = &cursor {
-            url.push_str(&format!("&cursor={}", urlencode(c)));
+            path.push_str(&format!("&cursor={}", urlencode(c)));
         }
-
-        let mut headers = HashMap::new();
-        headers.insert("Authorization".to_owned(), format!("Bearer {access_token}"));
-        headers.insert("X-Account-Id".to_owned(), account_id.to_owned());
-        headers.insert("X-Client".to_owned(), "desktop".to_owned());
-
-        let resp = net
-            .request(ApiRequest {
-                url,
-                method: "GET".to_owned(),
-                headers,
-                body: None,
-            })
+        let page: MessageChangesResponse = api
+            .json(account_id, Call::get(path))
             .await
-            .map_err(|e| e.to_string())?;
-
-        if resp.status == 401 {
-            return Err(SESSION_EXPIRED.to_owned());
-        }
-        if resp.status != 200 {
-            return Err(format!("changes returned {}", resp.status));
-        }
-
-        let page: MessageChangesResponse =
-            serde_json::from_slice(&resp.body.unwrap_or_default()).map_err(|e| e.to_string())?;
+            .map_err(|e| api_failure("changes", e))?;
 
         if page.resync_required {
             mirror.with_conn(account_id, |conn| reset_for_resync(conn, &page.next_cursor))?;
             tracing::info!(
                 "mirror: {account_id} is past the change horizon, rebuilding from the watermark"
             );
-            tokio::spawn(backfill(
-                core.clone(),
-                account_id.to_owned(),
-                access_token.to_owned(),
-            ));
+            tokio::spawn(backfill(core.clone(), account_id.to_owned()));
             return Ok(arrivals);
         }
 

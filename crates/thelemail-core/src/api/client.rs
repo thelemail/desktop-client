@@ -196,11 +196,25 @@ impl<'a> Api<'a> {
         self.send(account_id, call).await.map(drop)
     }
 
+    pub async fn public<T: DeserializeOwned>(&self, call: Call) -> Result<T, ApiError> {
+        let call = call.anonymous();
+        let (resp, _) = self.attempt(None, &call).await?;
+        if !(200..300).contains(&resp.status) {
+            return Err(ApiError::from_status(
+                resp.status,
+                header(&resp, "retry-after"),
+                resp.body.as_deref(),
+            ));
+        }
+        serde_json::from_slice(&resp.body.unwrap_or_default())
+            .map_err(|e| ApiError::Decode(e.to_string()))
+    }
+
     pub async fn send(&self, account_id: &str, mut call: Call) -> Result<Response, ApiError> {
         crate::ids::account_id(account_id).map_err(|_| ApiError::Request)?;
         let mut renewed = false;
         loop {
-            let (resp, generation) = self.attempt(account_id, &call).await?;
+            let (resp, generation) = self.attempt(Some(account_id), &call).await?;
             if (200..300).contains(&resp.status) {
                 return Ok(Response {
                     status: resp.status,
@@ -208,12 +222,11 @@ impl<'a> Api<'a> {
                     body: resp.body.unwrap_or_default(),
                 });
             }
-            let retry_after = resp
-                .headers
-                .iter()
-                .find(|(n, _)| n.eq_ignore_ascii_case("retry-after"))
-                .map(|(_, v)| v.as_str());
-            let err = ApiError::from_status(resp.status, retry_after, resp.body.as_deref());
+            let err = ApiError::from_status(
+                resp.status,
+                header(&resp, "retry-after"),
+                resp.body.as_deref(),
+            );
             if resp.status == 401 && call.auth && call.retry_unauthorized && !renewed {
                 renewed = true;
                 if let Some(generation) = generation {
@@ -273,18 +286,22 @@ impl<'a> Api<'a> {
 
     async fn attempt(
         &self,
-        account_id: &str,
+        account_id: Option<&str>,
         call: &Call,
     ) -> Result<(ApiResponse, Option<u64>), ApiError> {
-        let token = if call.auth {
-            Some(self.auth.fresh(self.net, account_id).await?)
-        } else {
-            None
+        let token = match account_id {
+            Some(id) if call.auth => Some(self.auth.fresh(self.net, id).await?),
+            _ => None,
         };
         let mut headers: HashMap<String, String> = call.headers.iter().cloned().collect();
         headers.insert(CLIENT_HEADER.to_owned(), CLIENT.to_owned());
-        headers.insert("X-Device-Id".to_owned(), self.auth.device(account_id));
-        headers.insert("X-Account-Id".to_owned(), account_id.to_owned());
+        headers.insert(
+            "X-Device-Id".to_owned(),
+            self.auth.device(account_id.unwrap_or_default()),
+        );
+        if let Some(id) = account_id {
+            headers.insert("X-Account-Id".to_owned(), id.to_owned());
+        }
         if let Some(token) = &token {
             headers.insert(
                 "Authorization".to_owned(),
@@ -295,7 +312,7 @@ impl<'a> Api<'a> {
             headers.insert("Content-Type".to_owned(), "application/json".to_owned());
         }
         if call.csrf
-            && let Some(csrf) = self.auth.csrf(account_id)
+            && let Some(csrf) = account_id.and_then(|id| self.auth.csrf(id))
         {
             headers.insert("X-CSRF-Token".to_owned(), csrf.as_str().to_owned());
         }
@@ -310,9 +327,19 @@ impl<'a> Api<'a> {
             Target::Submission => self.net.submit(req).await?,
             Target::Blob => self.net.fetch_blob(req).await?,
         };
-        if call.target == Target::Api && call.path.starts_with("/v1/auth/") {
-            crate::session::sync_persisted(self.net, account_id);
+        if let Some(id) = account_id
+            && call.target == Target::Api
+            && call.path.starts_with("/v1/auth/")
+        {
+            crate::session::sync_persisted(self.net, id);
         }
         Ok((resp, token.map(|t| t.generation)))
     }
+}
+
+fn header<'r>(resp: &'r ApiResponse, name: &str) -> Option<&'r str> {
+    resp.headers
+        .iter()
+        .find(|(n, _)| n.eq_ignore_ascii_case(name))
+        .map(|(_, v)| v.as_str())
 }

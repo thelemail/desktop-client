@@ -151,7 +151,12 @@ async fn photos_and_logos_are_fetched_checked_cached_and_served_offline() {
         .mirror()
         .adopt_connection(ACCOUNT, mirror_db())
         .expect("adopt");
-    online.mirror().set_token(ACCOUNT, "token-1");
+    online.auth().adopt(
+        ACCOUNT,
+        "token-1",
+        std::time::Duration::from_secs(900),
+        None,
+    );
 
     let avatars = online.avatars();
     assert!(matches!(
@@ -258,7 +263,12 @@ async fn locking_an_account_drops_its_images_from_memory() {
     core.mirror()
         .adopt_connection(ACCOUNT, mirror_db())
         .expect("adopt");
-    core.mirror().set_token(ACCOUNT, "token-1");
+    core.auth().adopt(
+        ACCOUNT,
+        "token-1",
+        std::time::Duration::from_secs(900),
+        None,
+    );
     core.avatars().person(ACCOUNT, "ada@acme.test");
     settle(&core, |c| {
         ready(c.avatars().person(ACCOUNT, "ada@acme.test")).is_some()

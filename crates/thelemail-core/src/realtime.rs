@@ -4,9 +4,9 @@ use std::time::Duration;
 
 use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
-use thelemail_api::ApiRequest;
 use tokio::sync::oneshot;
 
+use crate::api::{ApiError, Call};
 use crate::{Core, CoreEvent};
 
 const BASE_DELAY: Duration = Duration::from_secs(1);
@@ -82,7 +82,7 @@ pub fn next_delay(attempt: u32, random: f64) -> Duration {
 
 enum Ticket {
     Minted(String),
-    Unauthorized,
+    Lost,
     Unavailable,
     Retry,
 }
@@ -92,28 +92,16 @@ struct TicketResponse {
     ticket: String,
 }
 
-async fn mint(core: &Core, account_id: &str, token: &str) -> Ticket {
-    let mut headers = HashMap::new();
-    headers.insert("Authorization".to_owned(), format!("Bearer {token}"));
-    headers.insert("X-Account-Id".to_owned(), account_id.to_owned());
-    headers.insert("X-Client".to_owned(), "desktop".to_owned());
-    let resp = core
-        .net()
-        .request(ApiRequest {
-            url: format!("{}v1/realtime/ticket", core.net().config().api_base),
-            method: "POST".to_owned(),
-            headers,
-            body: None,
-        })
-        .await;
-    match resp {
-        Ok(resp) if resp.status == 401 => Ticket::Unauthorized,
-        Ok(resp) if resp.status == 404 => Ticket::Unavailable,
-        Ok(resp) if (200..300).contains(&resp.status) => resp
-            .body
-            .and_then(|body| serde_json::from_slice::<TicketResponse>(&body).ok())
-            .map_or(Ticket::Retry, |t| Ticket::Minted(t.ticket)),
-        _ => Ticket::Retry,
+async fn mint(core: &Core, account_id: &str) -> Ticket {
+    match core
+        .api()
+        .json::<TicketResponse>(account_id, Call::post("/v1/realtime/ticket"))
+        .await
+    {
+        Ok(t) => Ticket::Minted(t.ticket),
+        Err(ApiError::SessionLost) => Ticket::Lost,
+        Err(ApiError::NotFound(_)) => Ticket::Unavailable,
+        Err(_) => Ticket::Retry,
     }
 }
 
@@ -143,24 +131,14 @@ async fn run(core: Arc<Core>, account_id: String, mut stopped: oneshot::Receiver
     let mut attempt: u32 = 0;
     let mut since: Option<String> = None;
     loop {
-        let Some(token) = core.mirror().token(&account_id) else {
-            let waker = core.mirror().token_waker(&account_id);
-            tokio::select! {
-                _ = &mut stopped => return,
-                _ = waker.notified() => continue,
-            }
-        };
-        let ticket = match mint(&core, &account_id, &token).await {
+        let ticket = match mint(&core, &account_id).await {
             Ticket::Minted(ticket) => ticket,
             Ticket::Unavailable => break,
-            Ticket::Unauthorized => {
-                core.emit(CoreEvent::TokenExpired {
-                    account_id: account_id.clone(),
-                });
-                let waker = core.mirror().token_waker(&account_id);
+            Ticket::Lost => {
+                let revived = core.auth().revived(&account_id);
                 tokio::select! {
                     _ = &mut stopped => return,
-                    _ = waker.notified() => continue,
+                    () = revived.notified() => continue,
                 }
             }
             Ticket::Retry => {
@@ -357,7 +335,8 @@ mod tests {
             web_origin: "http://127.0.0.1".to_owned(),
         })
         .unwrap();
-        core.mirror().set_token(ACCOUNT, "token");
+        core.auth()
+            .adopt(ACCOUNT, "token", Duration::from_secs(900), None);
         core
     }
 
@@ -419,17 +398,20 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_refused_ticket_reports_the_expired_token_and_waits_for_a_new_one() {
+    async fn a_lost_session_stops_minting_until_the_account_signs_in_again() {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let core = core_for(&listener).await;
         let mut seen = core.subscribe();
         let server = tokio::spawn(serve(
             listener,
-            vec![("POST /v1/realtime/ticket", json("401 Unauthorized", "{}"))],
+            vec![
+                ("POST /v1/realtime/ticket", json("401 Unauthorized", "{}")),
+                ("POST /v1/auth/refresh", json("401 Unauthorized", "{}")),
+            ],
         ));
         open(&core, ACCOUNT).unwrap();
         loop {
-            if let CoreEvent::TokenExpired { account_id } = next_frame(&mut seen).await {
+            if let CoreEvent::SessionLost { account_id } = next_frame(&mut seen).await {
                 assert_eq!(account_id, ACCOUNT);
                 break;
             }
