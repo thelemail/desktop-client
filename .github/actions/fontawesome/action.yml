@@ -1,0 +1,22 @@
+name: fontawesome
+description: Install the Font Awesome Pro icon packages the UI crate embeds at build time
+
+inputs:
+  token:
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      env:
+        FONTAWESOME_NPM_AUTH_TOKEN: ${{ inputs.token }}
+      run: |
+        set -euo pipefail
+        if [ -z "$FONTAWESOME_NPM_AUTH_TOKEN" ]; then
+          echo "FONTAWESOME_NPM_AUTH_TOKEN is not set" >&2
+          exit 1
+        fi
+        umask 077
+        echo '//npm.fontawesome.com/:_authToken=${FONTAWESOME_NPM_AUTH_TOKEN}' >> "$HOME/.npmrc"
+        pnpm install --frozen-lockfile --ignore-scripts

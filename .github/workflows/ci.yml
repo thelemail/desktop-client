@@ -9,6 +9,8 @@ on:
     secrets:
       TRUST_READ_TOKEN:
         required: true
+      FONTAWESOME_NPM_AUTH_TOKEN:
+        required: true
 
 permissions:
   contents: read
@@ -45,6 +47,10 @@ jobs:
       - uses: ./.github/actions/private-modules
         with:
           token: ${{ secrets.TRUST_READ_TOKEN }}
+
+      - uses: ./.github/actions/fontawesome
+        with:
+          token: ${{ secrets.FONTAWESOME_NPM_AUTH_TOKEN }}
 
       - uses: Swatinem/rust-cache@98c8021b550208e191a6a3145459bfc9fb29c4c0 # v2.8.0
         with:
@@ -93,6 +99,10 @@ jobs:
       - uses: ./.github/actions/private-modules
         with:
           token: ${{ secrets.TRUST_READ_TOKEN }}
+
+      - uses: ./.github/actions/fontawesome
+        with:
+          token: ${{ secrets.FONTAWESOME_NPM_AUTH_TOKEN }}
 
       - name: Put MinGW in front for the trust library
         run: |
