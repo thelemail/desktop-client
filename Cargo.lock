@@ -7462,6 +7462,7 @@ name = "thelemail-ui"
 version = "0.24.0"
 dependencies = [
  "gpui-kit",
+ "tracing",
 ]
 
 [[package]]
