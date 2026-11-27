@@ -1,4 +1,4 @@
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use gpui_kit::{
     App, ElementId, InteractiveElement, IntoElement, ParentElement, RenderOnce, Role, SharedString,
@@ -9,8 +9,8 @@ use thelemail_i18n::m;
 use super::layer::{self, Layer};
 use super::toast::{Toast, Toasts};
 use crate::a11y::A11yStateExt as _;
+use crate::load_state::indicator;
 use crate::spinner::Spinner;
-use crate::state::{Delayed, INDICATOR_DELAY};
 use crate::theme::{ActiveTokens, Theme};
 use crate::tokens::{ColorToken, FONT_SANS};
 
@@ -92,29 +92,21 @@ impl AccountTransition {
 impl RenderOnce for AccountTransition {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
         let theme = self.theme.unwrap_or(*cx.tokens());
-        let delayed = window.use_keyed_state(self.child_id("delayed"), cx, |_, _| {
-            Delayed::<Option<Transition>>::with_timing(INDICATOR_DELAY, Duration::ZERO)
-        });
-        let now = Instant::now();
         let current = self.current.clone();
-        let wake = delayed.update(cx, |delayed, _| {
-            delayed.update(current.is_some(), current.clone(), now)
-        });
-        if let Some(at) = wake {
-            let wait = at.saturating_duration_since(now);
-            window
-                .spawn(cx, async move |cx| {
-                    cx.background_executor().timer(wait).await;
-                    let _ = cx.update(|window, _| window.refresh());
-                })
-                .detach();
-        }
+        let visible = indicator(
+            self.child_id("delayed"),
+            current.is_some(),
+            current.clone(),
+            Duration::ZERO,
+            window,
+            cx,
+        );
         let cover = layer::cover(&self.id, window, cx);
         let Some(transition) = current else {
             cover.clear(window, cx);
             return div().into_any_element();
         };
-        let status = delayed.read(cx).visible().then(|| {
+        let status = visible.then(|| {
             div()
                 .id(self.child_id("status"))
                 .flex()
