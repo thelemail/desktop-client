@@ -9,6 +9,8 @@ use thelemail_ui::tokens::ColorToken;
 #[cfg(debug_assertions)]
 use crate::button_gallery::ButtonGallery;
 #[cfg(debug_assertions)]
+use crate::choice_gallery::ChoiceGallery;
+#[cfg(debug_assertions)]
 use crate::field_gallery::FieldGallery;
 #[cfg(debug_assertions)]
 use crate::icon_gallery::IconGallery;
@@ -31,6 +33,8 @@ pub struct Shell {
     buttons: Option<Entity<ButtonGallery>>,
     #[cfg(debug_assertions)]
     fields: Option<Entity<FieldGallery>>,
+    #[cfg(debug_assertions)]
+    choices: Option<Entity<ChoiceGallery>>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -53,6 +57,8 @@ impl Shell {
             buttons: None,
             #[cfg(debug_assertions)]
             fields: None,
+            #[cfg(debug_assertions)]
+            choices: None,
             _subscriptions: subscriptions,
         }
     }
@@ -96,6 +102,14 @@ impl Render for Shell {
                 .get_or_insert_with(|| cx.new(|cx| FieldGallery::new(window, cx)))
                 .clone();
             return root.child(fields);
+        }
+        #[cfg(debug_assertions)]
+        if route == Route::Debug(DebugPage::Tokens(GalleryTab::Choices)) {
+            let choices = self
+                .choices
+                .get_or_insert_with(|| cx.new(|cx| ChoiceGallery::new(window, cx)))
+                .clone();
+            return root.child(choices);
         }
         let _ = window;
         root.child(screens::render(&route, cx))

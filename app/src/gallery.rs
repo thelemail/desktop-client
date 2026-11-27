@@ -1,7 +1,8 @@
 use gpui_kit::{
-    AnyElement, App, Div, FontWeight, InteractiveElement, IntoElement, ParentElement,
+    AnyElement, App, Div, ElementId, FontWeight, InteractiveElement, IntoElement, ParentElement,
     StatefulInteractiveElement, Styled, div, px, relative,
 };
+use thelemail_ui::choice::{SegmentOption, Segmented};
 use thelemail_ui::text::{TextTokens, cased};
 use thelemail_ui::theme::{ActiveTokens, Appearance, Theme, ThemeChoice};
 use thelemail_ui::tokens::{
@@ -78,6 +79,7 @@ fn tab_label(tab: GalleryTab) -> &'static str {
         GalleryTab::Language => "Language",
         GalleryTab::Buttons => "Buttons",
         GalleryTab::Fields => "Fields",
+        GalleryTab::Choices => "Choices",
     }
 }
 
@@ -111,6 +113,7 @@ fn header(current: &Theme, tab: GalleryTab, language: Language) -> impl IntoElem
                 .child(format!("Tokens from web-client {SOURCE_TAG}")),
         )
         .child(segmented(
+            "gallery-tabs",
             GalleryTab::ALL.into_iter().map(|(_, each)| {
                 (tab_label(each), each == tab, move |cx: &mut App| {
                     navigator(cx).update(cx, |nav, cx| {
@@ -121,6 +124,7 @@ fn header(current: &Theme, tab: GalleryTab, language: Language) -> impl IntoElem
             current,
         ))
         .child(segmented(
+            "gallery-theme",
             choices.into_iter().map(|(choice, label)| {
                 (label, current.choice == choice, move |cx: &mut App| {
                     appearance::set(choice, cx)
@@ -129,6 +133,7 @@ fn header(current: &Theme, tab: GalleryTab, language: Language) -> impl IntoElem
             current,
         ))
         .child(segmented(
+            "gallery-language",
             language_gallery::choices()
                 .into_iter()
                 .map(|(choice, label)| {
@@ -141,42 +146,28 @@ fn header(current: &Theme, tab: GalleryTab, language: Language) -> impl IntoElem
 }
 
 pub fn segmented<F: Fn(&mut App) + 'static>(
+    id: impl Into<ElementId>,
     items: impl Iterator<Item = (&'static str, bool, F)>,
     current: &Theme,
 ) -> impl IntoElement {
-    div()
-        .flex()
-        .gap(px(4.0))
-        .p(px(2.0))
-        .rounded(px(RADIUS_MD))
-        .bg(current.color(ColorToken::NeutralFill))
-        .children(items.map(|(label, active, pick)| {
-            div()
-                .id(label)
-                .px(px(12.0))
-                .py(px(4.0))
-                .rounded(px(RADIUS_MD - 2.0))
-                .cursor_pointer()
-                .when_active(active, current)
-                .text_token(&T_LABEL, current)
-                .child(label)
-                .on_click(move |_, _, cx| pick(cx))
-        }))
-}
-
-trait Segment {
-    fn when_active(self, active: bool, theme: &Theme) -> Self;
-}
-
-impl<E: Styled> Segment for E {
-    fn when_active(self, active: bool, theme: &Theme) -> Self {
+    let mut options = Vec::new();
+    let mut picks = Vec::new();
+    let mut value = None;
+    for (label, active, pick) in items {
+        options.push(SegmentOption::new(label, label));
         if active {
-            self.bg(theme.color(ColorToken::Surface))
-                .shadow(theme.shadow(ShadowToken::Sm))
-        } else {
-            self
+            value = Some(label);
         }
+        picks.push((label, pick));
     }
+    Segmented::new(id, options)
+        .value(value)
+        .theme(*current)
+        .on_change(move |picked, _, cx| {
+            if let Some((_, pick)) = picks.iter().find(|(label, _)| picked == *label) {
+                pick(cx);
+            }
+        })
 }
 
 fn column(theme: Theme, content: &mut impl FnMut(&Theme) -> AnyElement) -> Div {
@@ -212,7 +203,11 @@ fn tokens(theme: &Theme, tab: GalleryTab) -> AnyElement {
             .child(section("Type scale", type_scale(&theme), &theme))
             .child(section("Weights", weights(&theme), &theme)),
         GalleryTab::Language => body.child(language_gallery::render(&theme)),
-        GalleryTab::Motion | GalleryTab::Icons | GalleryTab::Buttons | GalleryTab::Fields => body,
+        GalleryTab::Motion
+        | GalleryTab::Icons
+        | GalleryTab::Buttons
+        | GalleryTab::Fields
+        | GalleryTab::Choices => body,
     }
     .into_any_element()
 }
