@@ -4,7 +4,9 @@ mod focus;
 pub mod layer;
 mod menu;
 mod popover;
+mod toast;
 mod tooltip;
+mod transition;
 
 use gpui_kit::{App, KeyBinding, actions};
 
@@ -12,8 +14,13 @@ pub use dialog::{Dialog, DialogSize, NARROW, Presentation, Sheet, Tone};
 pub use layer::{Layer, Z_TRANSITION, covered, native_surface};
 pub use menu::{Check, ContextMenu, DropdownMenu, MenuEntry, MenuItem};
 pub use popover::Popover;
+pub use toast::{
+    TOAST_DEFAULT, TOAST_ERROR, TOAST_VISIBLE, TOAST_WITH_ACTION, Toast, ToastId, ToastTone,
+    Toasts, duration_for,
+};
 pub(crate) use tooltip::attach as tooltip_attach;
 pub use tooltip::{TOOLTIP_DELAY, TOOLTIP_SKIP, Tip, Tips, Tooltipped};
+pub use transition::{ARRIVAL, AccountTransition, Transition, TransitionKind, announce_arrival};
 
 actions!(
     thelemail_overlay,
@@ -56,4 +63,5 @@ pub fn init(cx: &mut App) {
         KeyBinding::new("menu", OpenContextMenu, Some(CONTEXT_TARGET)),
     ]);
     tooltip::register(cx);
+    toast::register(cx);
 }
