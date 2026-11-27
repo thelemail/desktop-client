@@ -5,6 +5,9 @@ mod gallery;
 #[cfg(debug_assertions)]
 mod icon_gallery;
 mod instance;
+mod language;
+#[cfg(debug_assertions)]
+mod language_gallery;
 mod logging;
 mod menus;
 #[cfg(debug_assertions)]

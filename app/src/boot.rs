@@ -1,7 +1,7 @@
 use gpui_kit::{App, QuitMode, application};
 use thelemail_api::ApiConfig;
 use thelemail_core::notify::{self, NotificationTarget};
-use thelemail_core::{Core, CoreEvent, locale};
+use thelemail_core::{Core, CoreEvent};
 
 use crate::bridge::{self, HubEvent};
 use crate::instance::{self, Claim};
@@ -9,7 +9,7 @@ use crate::nav::{self, navigator};
 use crate::router::{AuthPage, Route};
 use crate::services::{self, Services};
 use crate::window::{self, show_main};
-use crate::{appearance, logging, menus, tray};
+use crate::{appearance, language, logging, menus, tray};
 
 pub fn run() {
     let log = logging::init();
@@ -55,9 +55,6 @@ pub fn run() {
         core.start();
         core
     };
-    if let Some(system) = locale::system_locales().first() {
-        core.locale().set(system);
-    }
 
     let (show_tx, show_rx) = async_channel::unbounded::<()>();
     if let Some(listener) = listener {
@@ -75,6 +72,7 @@ pub fn run() {
         let handle = runtime.handle().clone();
         cx.set_global(Services::new(core.clone(), runtime, log));
         appearance::init(cx);
+        language::init(cx);
         cx.on_app_quit(|cx| {
             Services::shutdown(cx);
             async {}

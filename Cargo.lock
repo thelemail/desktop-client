@@ -7322,8 +7322,10 @@ dependencies = [
  "png 0.18.1",
  "serde",
  "serde_json",
+ "sys-locale",
  "thelemail-api",
  "thelemail-core",
+ "thelemail-i18n",
  "thelemail-keystore",
  "thelemail-ui",
  "tokio",
@@ -7376,10 +7378,10 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2 0.10.9",
- "sys-locale",
  "tar",
  "tempfile",
  "thelemail-api",
+ "thelemail-i18n",
  "thelemail-keystore",
  "thelemail-mime",
  "thelemail-store",
@@ -7469,6 +7471,7 @@ name = "thelemail-ui"
 version = "0.24.0"
 dependencies = [
  "gpui-kit",
+ "thelemail-i18n",
  "tracing",
 ]
 
