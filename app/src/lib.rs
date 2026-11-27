@@ -26,4 +26,6 @@ mod boot;
 #[cfg(debug_assertions)]
 mod button_gallery;
 #[cfg(debug_assertions)]
+mod choice_gallery;
+#[cfg(debug_assertions)]
 mod field_gallery;

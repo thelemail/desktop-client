@@ -233,6 +233,7 @@ impl MotionGallery {
             .gap(px(12.0))
             .child(div().text_token(&T_SMALL, theme).child("Reduced motion"))
             .child(segmented(
+                ElementId::Name(format!("{:?}-reduce-motion", theme.appearance).into()),
                 choices.into_iter().map(move |(choice, label)| {
                     let this = this.clone();
                     (label, reduce == choice, move |cx: &mut App| {

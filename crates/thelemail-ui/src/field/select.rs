@@ -177,6 +177,7 @@ impl Render for Select {
             invalid: self.invalid,
             disabled: self.disabled,
             read_only: false,
+            search: false,
         });
         let current = self.selected.and_then(|ix| self.options.get(ix));
         let shown = current

@@ -414,7 +414,9 @@ impl RenderOnce for Button {
             .items_center()
             .justify_center()
             .gap(px(metrics.gap))
-            .child(Spinner::new(self.child_id("spin"), metrics.font, fg))
+            .when(swap > 0.0, |row| {
+                row.child(Spinner::new(self.child_id("spin"), metrics.font, fg))
+            })
             .when_some(self.busy_label.clone(), |row, label| {
                 row.child(div().whitespace_nowrap().child(label))
             });
