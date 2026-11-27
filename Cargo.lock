@@ -1372,8 +1372,10 @@ dependencies = [
  "thelemail-api",
  "thelemail-keystore",
  "thelemail-store",
+ "thelemail-trust",
  "tokio",
  "url",
+ "uuid",
  "windows-sys 0.61.2",
  "zeroize",
 ]

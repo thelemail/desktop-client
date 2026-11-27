@@ -4,6 +4,7 @@ pub mod keystore;
 pub mod locale;
 pub mod net;
 pub mod paths;
+pub mod productkeys;
 pub mod session;
 
 use std::sync::Arc;
