@@ -21,8 +21,10 @@ interprocess = { version = "2.4.10", features = ["tokio"] }
 png = "0.18.1"
 serde.workspace = true
 serde_json.workspace = true
+sys-locale = "0.3.2"
 thelemail-api = { path = "../crates/thelemail-api" }
 thelemail-core = { path = "../crates/thelemail-core" }
+thelemail-i18n = { path = "../crates/thelemail-i18n" }
 thelemail-keystore = { path = "../crates/thelemail-keystore" }
 thelemail-ui = { path = "../crates/thelemail-ui" }
 tokio = { workspace = true, features = ["io-util", "net"] }

@@ -9,6 +9,7 @@ use thelemail_ui::theme::{ActiveTokens, Theme};
 use thelemail_ui::tokens::{ColorToken, RADIUS_SM, T_SMALL};
 
 use crate::gallery::{caption, frame, section};
+use crate::language::Language;
 use crate::motion_gallery::FrameMeter;
 use crate::router::GalleryTab;
 
@@ -115,7 +116,8 @@ impl Render for IconGallery {
         self.meter.tick(cx.background_executor().now());
         let current = *cx.tokens();
         let this = cx.entity().downgrade();
-        frame(GalleryTab::Icons, &current, |theme| {
+        let language = *cx.global::<Language>();
+        frame(GalleryTab::Icons, &current, language, |theme| {
             self.column(theme, &this, cx)
         })
     }

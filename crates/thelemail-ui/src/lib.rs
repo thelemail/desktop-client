@@ -1,6 +1,7 @@
 pub mod fonts;
 pub mod icons;
 pub mod motion;
+pub mod rich;
 pub mod state;
 pub mod text;
 pub mod theme;

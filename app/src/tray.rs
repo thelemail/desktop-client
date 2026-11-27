@@ -2,12 +2,11 @@ use std::io::Cursor;
 use std::sync::Arc;
 
 use gpui_kit::{App, Global};
-use thelemail_core::locale::{self, Text};
+use thelemail_i18n::m;
 
 use tray_icon::menu::{Menu, MenuEvent, MenuId, MenuItem, PredefinedMenuItem};
 use tray_icon::{Icon, MouseButton, MouseButtonState, TrayIcon, TrayIconBuilder, TrayIconEvent};
 
-use crate::services::Services;
 use crate::window::show_main;
 
 #[cfg(target_os = "macos")]
@@ -20,6 +19,8 @@ const QUIT: &str = "quit";
 
 struct Tray {
     _icon: TrayIcon,
+    show: MenuItem,
+    quit: MenuItem,
 }
 
 impl Global for Tray {}
@@ -31,9 +32,8 @@ enum Request {
 
 pub fn init(cx: &mut App) {
     let (tx, rx) = async_channel::unbounded::<Request>();
-    let lang = cx.global::<Services>().core().locale().current();
-    match build(lang, tx) {
-        Ok(icon) => cx.set_global(Tray { _icon: icon }),
+    match build(tx) {
+        Ok(tray) => cx.set_global(tray),
         Err(err) => {
             tracing::warn!("tray: unavailable: {err}");
             return;
@@ -50,9 +50,16 @@ pub fn init(cx: &mut App) {
     .detach();
 }
 
-fn build(lang: &str, tx: async_channel::Sender<Request>) -> anyhow::Result<TrayIcon> {
-    let show = MenuItem::with_id(SHOW, locale::text(lang, Text::ShowApp), true, None);
-    let quit = MenuItem::with_id(QUIT, locale::text(lang, Text::Quit), true, None);
+pub fn relabel(cx: &mut App) {
+    if let Some(tray) = cx.try_global::<Tray>() {
+        tray.show.set_text(m::desktop_tray_show());
+        tray.quit.set_text(m::desktop_tray_quit());
+    }
+}
+
+fn build(tx: async_channel::Sender<Request>) -> anyhow::Result<Tray> {
+    let show = MenuItem::with_id(SHOW, m::desktop_tray_show(), true, None);
+    let quit = MenuItem::with_id(QUIT, m::desktop_tray_quit(), true, None);
     let menu = Menu::with_items(&[&show, &PredefinedMenuItem::separator(), &quit])?;
 
     let menu_tx = tx.clone();
@@ -88,7 +95,11 @@ fn build(lang: &str, tx: async_channel::Sender<Request>) -> anyhow::Result<TrayI
         .with_menu_on_left_click(true);
     #[cfg(not(target_os = "macos"))]
     let builder = builder.with_icon(icon()?).with_menu_on_left_click(false);
-    Ok(builder.build()?)
+    Ok(Tray {
+        _icon: builder.build()?,
+        show,
+        quit,
+    })
 }
 
 fn icon() -> anyhow::Result<Icon> {

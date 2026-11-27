@@ -3,6 +3,7 @@ use std::sync::Mutex;
 use std::sync::Arc;
 
 use serde::Serialize;
+use thelemail_i18n::m;
 
 use crate::{Core, CoreEvent};
 
@@ -16,17 +17,17 @@ pub struct NewMail {
 }
 
 impl NewMail {
-    fn title(&self, locale: &str) -> String {
+    fn title(&self) -> String {
         if self.sender.is_empty() {
-            crate::locale::text(locale, crate::locale::Text::NewMessage).to_owned()
+            m::desktop_notify_new_message().to_owned()
         } else {
             self.sender.clone()
         }
     }
 
-    fn subtitle(&self, locale: &str) -> String {
+    fn subtitle(&self) -> String {
         if self.subject.is_empty() {
-            crate::locale::text(locale, crate::locale::Text::NoSubject).to_owned()
+            m::mail_compose_no_subject().to_owned()
         } else {
             self.subject.clone()
         }
@@ -333,11 +334,10 @@ mod platform {
     }
 
     fn deliver(core: &Arc<Core>, mail: &NewMail) {
-        let lang = core.locale().current();
         unsafe {
             let content = UNMutableNotificationContent::new();
-            content.setTitle(&NSString::from_str(&mail.title(lang)));
-            content.setSubtitle(&NSString::from_str(&mail.subtitle(lang)));
+            content.setTitle(&NSString::from_str(&mail.title()));
+            content.setSubtitle(&NSString::from_str(&mail.subtitle()));
             if !mail.snippet.is_empty() {
                 content.setBody(&NSString::from_str(&mail.snippet));
             }
@@ -526,11 +526,10 @@ mod platform {
     }
 
     fn deliver(core: &Arc<Core>, mail: &NewMail) -> windows::core::Result<()> {
-        let lang = core.locale().current();
         let xml = XmlDocument::new()?;
         xml.LoadXml(&HSTRING::from(super::toast_xml(
-            &mail.title(lang),
-            &mail.subtitle(lang),
+            &mail.title(),
+            &mail.subtitle(),
             &mail.snippet,
         )))?;
         let toast = ToastNotification::CreateToastNotification(&xml)?;

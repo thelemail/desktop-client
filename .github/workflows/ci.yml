@@ -60,6 +60,8 @@ jobs:
 
       - run: cargo xtask tokens --check
 
+      - run: cargo xtask i18n --check
+
       - run: cargo clippy --workspace --all-targets -- -D warnings
 
       - run: cargo test --workspace

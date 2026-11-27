@@ -1,6 +1,8 @@
 use gpui_kit::base::input::{Copy, Cut, Paste, Redo, SelectAll, Undo};
 use gpui_kit::{App, KeyBinding, Menu, MenuItem, OsAction, SystemMenuType, Window, actions};
 
+use thelemail_i18n::m;
+
 use crate::nav::navigator;
 use crate::router::{AccountPage, SettingsSection};
 #[cfg(debug_assertions)]
@@ -67,6 +69,10 @@ pub fn init(cx: &mut App) {
             nav.push(Route::Debug(DebugPage::Tokens(GalleryTab::Colours)), cx)
         });
     });
+    refresh(cx);
+}
+
+pub fn refresh(cx: &mut App) {
     cx.set_menus(menus());
 }
 
@@ -97,44 +103,45 @@ fn bindings() -> Vec<KeyBinding> {
 fn menus() -> Vec<Menu> {
     vec![
         Menu::new("Thelemail").items([
-            MenuItem::action("About Thelemail", About),
+            MenuItem::action(m::desktop_menu_about(), About),
             MenuItem::separator(),
-            MenuItem::action("Settings…", Settings),
+            MenuItem::action(m::desktop_menu_settings(), Settings),
             MenuItem::separator(),
-            MenuItem::os_submenu("Services", SystemMenuType::Services),
+            MenuItem::os_submenu(m::desktop_menu_services(), SystemMenuType::Services),
             MenuItem::separator(),
-            MenuItem::action("Hide Thelemail", Hide),
-            MenuItem::action("Hide Others", HideOthers),
-            MenuItem::action("Show All", ShowAll),
+            MenuItem::action(m::desktop_menu_hide(), Hide),
+            MenuItem::action(m::desktop_menu_hide_others(), HideOthers),
+            MenuItem::action(m::desktop_menu_show_all(), ShowAll),
             MenuItem::separator(),
-            MenuItem::action("Quit Thelemail", Quit),
+            MenuItem::action(m::desktop_menu_quit(), Quit),
         ]),
-        Menu::new("Edit").items([
-            MenuItem::os_action("Undo", Undo, OsAction::Undo),
-            MenuItem::os_action("Redo", Redo, OsAction::Redo),
+        Menu::new(m::desktop_menu_edit()).items([
+            MenuItem::os_action(m::desktop_menu_undo(), Undo, OsAction::Undo),
+            MenuItem::os_action(m::desktop_menu_redo(), Redo, OsAction::Redo),
             MenuItem::separator(),
-            MenuItem::os_action("Cut", Cut, OsAction::Cut),
-            MenuItem::os_action("Copy", Copy, OsAction::Copy),
-            MenuItem::os_action("Paste", Paste, OsAction::Paste),
-            MenuItem::os_action("Select All", SelectAll, OsAction::SelectAll),
+            MenuItem::os_action(m::desktop_menu_cut(), Cut, OsAction::Cut),
+            MenuItem::os_action(m::desktop_menu_copy(), Copy, OsAction::Copy),
+            MenuItem::os_action(m::desktop_menu_paste(), Paste, OsAction::Paste),
+            MenuItem::os_action(m::desktop_menu_select_all(), SelectAll, OsAction::SelectAll),
         ]),
-        Menu::new("View").items(view_items()),
-        Menu::new("Window").items([
-            MenuItem::action("Minimize", Minimize),
-            MenuItem::action("Zoom", Zoom),
+        Menu::new(m::desktop_menu_view()).items(view_items()),
+        Menu::new(m::desktop_menu_window()).items([
+            MenuItem::action(m::desktop_menu_minimize(), Minimize),
+            MenuItem::action(m::desktop_menu_zoom(), Zoom),
             MenuItem::separator(),
             MenuItem::action("Thelemail", ShowMain),
         ]),
-        Menu::new("Help").items([MenuItem::action("Thelemail Help", Help)]),
+        Menu::new(m::desktop_menu_help())
+            .items([MenuItem::action(m::desktop_menu_help_app(), Help)]),
     ]
 }
 
 fn view_items() -> Vec<MenuItem> {
     let mut items = vec![
-        MenuItem::action("Back", Back),
-        MenuItem::action("Forward", Forward),
+        MenuItem::action(m::desktop_menu_back(), Back),
+        MenuItem::action(m::desktop_menu_forward(), Forward),
         MenuItem::separator(),
-        MenuItem::action("Enter Full Screen", ToggleFullScreen),
+        MenuItem::action(m::desktop_menu_full_screen(), ToggleFullScreen),
     ];
     if cfg!(debug_assertions) {
         items.push(MenuItem::separator());

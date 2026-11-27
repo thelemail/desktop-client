@@ -10,20 +10,23 @@ use thelemail_ui::tokens::{
     TEXT_STYLES, TRACKING, TYPE_SCALE, Z_LAYERS,
 };
 
-use crate::appearance;
+use crate::language::Language;
 use crate::nav::navigator;
 use crate::router::{DebugPage, GalleryTab, Route};
+use crate::{appearance, language_gallery};
 
 const SAMPLE: &str = "Sphinx of black quartz, judge my vow 0123456789";
 
 pub fn render(tab: GalleryTab, cx: &App) -> impl IntoElement {
     let current = *cx.tokens();
-    frame(tab, &current, |theme| tokens(theme, tab))
+    let language = *cx.global::<Language>();
+    frame(tab, &current, language, |theme| tokens(theme, tab))
 }
 
 pub fn frame(
     tab: GalleryTab,
     current: &Theme,
+    language: Language,
     mut content: impl FnMut(&Theme) -> AnyElement,
 ) -> Div {
     div()
@@ -31,7 +34,7 @@ pub fn frame(
         .flex()
         .flex_col()
         .bg(current.color(ColorToken::BgSunken))
-        .child(header(current, tab))
+        .child(header(current, tab, language))
         .child(
             div()
                 .id("token-gallery")
@@ -56,6 +59,7 @@ fn tab_label(tab: GalleryTab) -> &'static str {
         GalleryTab::Type => "Type",
         GalleryTab::Motion => "Motion",
         GalleryTab::Icons => "Icons",
+        GalleryTab::Language => "Language",
     }
 }
 
@@ -66,7 +70,7 @@ fn theme(appearance: Appearance, current: &Theme) -> Theme {
     }
 }
 
-fn header(current: &Theme, tab: GalleryTab) -> impl IntoElement {
+fn header(current: &Theme, tab: GalleryTab, language: Language) -> impl IntoElement {
     let choices = [
         (ThemeChoice::Light, "Light"),
         (ThemeChoice::Dark, "Dark"),
@@ -74,8 +78,10 @@ fn header(current: &Theme, tab: GalleryTab) -> impl IntoElement {
     ];
     div()
         .flex()
+        .flex_wrap()
         .items_center()
         .justify_between()
+        .gap(px(12.0))
         .px(px(24.0))
         .py(px(12.0))
         .border_b_1()
@@ -102,6 +108,16 @@ fn header(current: &Theme, tab: GalleryTab) -> impl IntoElement {
                     appearance::set(choice, cx)
                 })
             }),
+            current,
+        ))
+        .child(segmented(
+            language_gallery::choices()
+                .into_iter()
+                .map(|(choice, label)| {
+                    (label, language.choice == choice, move |cx: &mut App| {
+                        language_gallery::pick(choice, cx)
+                    })
+                }),
             current,
         ))
 }
@@ -177,6 +193,7 @@ fn tokens(theme: &Theme, tab: GalleryTab) -> AnyElement {
             .child(section("Text styles", text_styles(&theme), &theme))
             .child(section("Type scale", type_scale(&theme), &theme))
             .child(section("Weights", weights(&theme), &theme)),
+        GalleryTab::Language => body.child(language_gallery::render(&theme)),
         GalleryTab::Motion | GalleryTab::Icons => body,
     }
     .into_any_element()
