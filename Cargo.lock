@@ -7387,6 +7387,7 @@ dependencies = [
  "thelemail-i18n",
  "thelemail-keystore",
  "thelemail-mime",
+ "thelemail-state",
  "thelemail-store",
  "thelemail-trust",
  "tokio",
@@ -7442,6 +7443,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "thelemail-state"
+version = "0.24.0"
+
+[[package]]
 name = "thelemail-store"
 version = "0.24.0"
 dependencies = [
@@ -7476,6 +7481,7 @@ dependencies = [
  "gpui-kit",
  "serde_json",
  "thelemail-i18n",
+ "thelemail-state",
  "tracing",
 ]
 

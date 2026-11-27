@@ -24,6 +24,7 @@ thelemail-i18n = { path = "../thelemail-i18n" }
 thelemail-mime = { path = "../thelemail-mime" }
 thelemail-keystore = { path = "../thelemail-keystore" }
 thelemail-store = { path = "../thelemail-store" }
+thelemail-state = { path = "../thelemail-state" }
 tokio = { workspace = true }
 tracing.workspace = true
 url.workspace = true

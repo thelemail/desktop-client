@@ -8,6 +8,7 @@ license.workspace = true
 [dependencies]
 gpui-kit.workspace = true
 thelemail-i18n = { path = "../thelemail-i18n" }
+thelemail-state = { path = "../thelemail-state" }
 tracing.workspace = true
 
 [dev-dependencies]
