@@ -7,6 +7,10 @@ use thelemail_ui::theme::{ActiveTokens, Theme};
 use thelemail_ui::tokens::ColorToken;
 
 #[cfg(debug_assertions)]
+use crate::avatar_gallery::AvatarGallery;
+#[cfg(debug_assertions)]
+use crate::brand_gallery::BrandGallery;
+#[cfg(debug_assertions)]
 use crate::button_gallery::ButtonGallery;
 #[cfg(debug_assertions)]
 use crate::choice_gallery::ChoiceGallery;
@@ -22,6 +26,8 @@ use crate::overlay_gallery::OverlayGallery;
 #[cfg(debug_assertions)]
 use crate::router::{DebugPage, GalleryTab, Route};
 use crate::screens;
+#[cfg(debug_assertions)]
+use crate::states_gallery::StatesGallery;
 use crate::window::FrameSaver;
 
 pub struct Shell {
@@ -39,6 +45,12 @@ pub struct Shell {
     choices: Option<Entity<ChoiceGallery>>,
     #[cfg(debug_assertions)]
     overlays: Option<Entity<OverlayGallery>>,
+    #[cfg(debug_assertions)]
+    states: Option<Entity<StatesGallery>>,
+    #[cfg(debug_assertions)]
+    avatars: Option<Entity<AvatarGallery>>,
+    #[cfg(debug_assertions)]
+    brand: Option<Entity<BrandGallery>>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -65,6 +77,12 @@ impl Shell {
             choices: None,
             #[cfg(debug_assertions)]
             overlays: None,
+            #[cfg(debug_assertions)]
+            states: None,
+            #[cfg(debug_assertions)]
+            avatars: None,
+            #[cfg(debug_assertions)]
+            brand: None,
             _subscriptions: subscriptions,
         }
     }
@@ -124,6 +142,30 @@ impl Render for Shell {
                 .get_or_insert_with(|| cx.new(|cx| OverlayGallery::new(window, cx)))
                 .clone();
             return root.child(overlays);
+        }
+        #[cfg(debug_assertions)]
+        if route == Route::Debug(DebugPage::Tokens(GalleryTab::States)) {
+            let states = self
+                .states
+                .get_or_insert_with(|| cx.new(|_| StatesGallery::new()))
+                .clone();
+            return root.child(states);
+        }
+        #[cfg(debug_assertions)]
+        if route == Route::Debug(DebugPage::Tokens(GalleryTab::Avatars)) {
+            let avatars = self
+                .avatars
+                .get_or_insert_with(|| cx.new(|cx| AvatarGallery::new(window, cx)))
+                .clone();
+            return root.child(avatars);
+        }
+        #[cfg(debug_assertions)]
+        if route == Route::Debug(DebugPage::Tokens(GalleryTab::Brand)) {
+            let brand = self
+                .brand
+                .get_or_insert_with(|| cx.new(|cx| BrandGallery::new(window, cx)))
+                .clone();
+            return root.child(brand);
         }
         let _ = window;
         root.child(screens::render(&route, cx))

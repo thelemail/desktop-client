@@ -15,6 +15,7 @@ use super::{Dismiss, MODAL, focus};
 use crate::button::{Button, Size};
 use crate::icons::{IconName, glyph};
 use crate::motion::{DIALOG, Look, Moving as _, OVERLAY, SHEET};
+use crate::scroll_area::ScrollArea;
 use crate::theme::{ActiveTokens, Appearance, Theme};
 use crate::tokens::{ColorToken, FONT_MONO, FONT_SANS, RADIUS_PANEL};
 
@@ -539,17 +540,13 @@ impl RenderOnce for Dialog {
             .children(header)
             .when(!body.is_empty(), |el| {
                 el.child(
-                    div()
-                        .id(self.child_id("body"))
+                    ScrollArea::vertical(self.child_id("body"))
                         .flex_shrink(1.0)
                         .min_h_0()
-                        .overflow_y_scroll()
                         .mx(px(-PAD_X))
                         .my(px(-4.0))
-                        .px(px(PAD_X))
-                        .py(px(4.0))
-                        .flex()
-                        .flex_col()
+                        .content(|c| c.px(px(PAD_X)).py(px(4.0)).flex().flex_col())
+                        .theme(theme)
                         .children(body),
                 )
             })

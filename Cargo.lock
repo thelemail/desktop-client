@@ -7363,6 +7363,8 @@ dependencies = [
  "flate2",
  "futures-util",
  "hex",
+ "icu_normalizer",
+ "image",
  "libc",
  "objc2 0.6.5",
  "objc2-app-kit 0.3.2",
@@ -7372,6 +7374,7 @@ dependencies = [
  "plist",
  "rand 0.8.8",
  "reqwest",
+ "resvg 0.46.0",
  "rusqlite",
  "security-framework",
  "semver",
@@ -7471,6 +7474,7 @@ name = "thelemail-ui"
 version = "0.24.0"
 dependencies = [
  "gpui-kit",
+ "serde_json",
  "thelemail-i18n",
  "tracing",
 ]

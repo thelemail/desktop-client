@@ -1,8 +1,9 @@
 use gpui_kit::{
-    AnyElement, App, Div, ElementId, FontWeight, InteractiveElement, IntoElement, ParentElement,
-    StatefulInteractiveElement, Styled, div, px, relative,
+    AnyElement, App, Div, ElementId, FontWeight, IntoElement, ParentElement, Styled, div, px,
+    relative,
 };
 use thelemail_ui::choice::{SegmentOption, Segmented};
+use thelemail_ui::scroll_area::ScrollArea;
 use thelemail_ui::text::{TextTokens, cased};
 use thelemail_ui::theme::{ActiveTokens, Appearance, Theme, ThemeChoice};
 use thelemail_ui::tokens::{
@@ -53,11 +54,10 @@ pub fn frame_in(
         .bg(current.color(ColorToken::BgSunken))
         .child(header(current, tab, language))
         .child(
-            div()
-                .id("token-gallery")
+            ScrollArea::vertical("token-gallery")
                 .flex_1()
                 .min_h_0()
-                .overflow_y_scroll()
+                .theme(*current)
                 .child(
                     div().flex().w_full().children(
                         columns
@@ -81,6 +81,9 @@ fn tab_label(tab: GalleryTab) -> &'static str {
         GalleryTab::Fields => "Fields",
         GalleryTab::Choices => "Choices",
         GalleryTab::Overlays => "Overlays",
+        GalleryTab::States => "States",
+        GalleryTab::Avatars => "Avatars",
+        GalleryTab::Brand => "Brand",
     }
 }
 
@@ -209,7 +212,10 @@ fn tokens(theme: &Theme, tab: GalleryTab) -> AnyElement {
         | GalleryTab::Buttons
         | GalleryTab::Fields
         | GalleryTab::Choices
-        | GalleryTab::Overlays => body,
+        | GalleryTab::Overlays
+        | GalleryTab::States
+        | GalleryTab::Avatars
+        | GalleryTab::Brand => body,
     }
     .into_any_element()
 }

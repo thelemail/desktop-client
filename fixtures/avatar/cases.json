@@ -1,0 +1,246 @@
+{
+	"initials": [
+		{
+			"name": "Ada Lovelace",
+			"email": "ada@acme.test",
+			"initials": "AL"
+		},
+		{
+			"name": "ada",
+			"email": "ada@acme.test",
+			"initials": "AD"
+		},
+		{
+			"name": "Mary Ann Lee",
+			"email": "mary@acme.test",
+			"initials": "ML"
+		},
+		{
+			"name": "  Élodie   Durand ",
+			"email": "elodie@acme.test",
+			"initials": "ÉD"
+		},
+		{
+			"name": "Ølstad\tKari",
+			"email": "kari@acme.test",
+			"initials": "ØK"
+		},
+		{
+			"name": "李小龙",
+			"email": "li@acme.test",
+			"initials": "李小"
+		},
+		{
+			"name": "o",
+			"email": "o@acme.test",
+			"initials": "O"
+		},
+		{
+			"name": "",
+			"email": "zoe.west@acme.test",
+			"initials": "ZO"
+		},
+		{
+			"name": null,
+			"email": "zoe.west@acme.test",
+			"initials": "ZO"
+		},
+		{
+			"name": "   ",
+			"email": "q@acme.test",
+			"initials": "Q"
+		},
+		{
+			"name": "",
+			"email": "",
+			"initials": "TH"
+		},
+		{
+			"name": null,
+			"email": null,
+			"initials": "TH"
+		},
+		{
+			"name": "",
+			"email": "@acme.test",
+			"initials": "TH"
+		},
+		{
+			"name": "straße",
+			"email": "x@acme.test",
+			"initials": "ST"
+		},
+		{
+			"name": "Jean Paul",
+			"email": "jp@acme.test",
+			"initials": "JP"
+		},
+		{
+			"name": "﻿Bom Name",
+			"email": "b@acme.test",
+			"initials": "BN"
+		},
+		{
+			"name": "Ünal Öz",
+			"email": "unal@acme.test",
+			"initials": "ÜÖ"
+		}
+	],
+	"palette": [
+		{
+			"seed": "",
+			"slot": 0
+		},
+		{
+			"seed": "a",
+			"slot": 2
+		},
+		{
+			"seed": "ada@acme.test",
+			"slot": 1
+		},
+		{
+			"seed": "zoe.west@acme.test",
+			"slot": 1
+		},
+		{
+			"seed": "postmaster@thelemail.com",
+			"slot": 2
+		},
+		{
+			"seed": "élodie@acme.test",
+			"slot": 0
+		},
+		{
+			"seed": "李@acme.test",
+			"slot": 4
+		},
+		{
+			"seed": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx@acme.test",
+			"slot": 4
+		},
+		{
+			"seed": "emoji😀@acme.test",
+			"slot": 3
+		}
+	],
+	"senders": [
+		{
+			"sender": {
+				"display": "Ada Lovelace",
+				"address": "ada@acme.test"
+			},
+			"attested": null,
+			"mismatch": null,
+			"from": "Ada Lovelace",
+			"fromAddr": "ada@acme.test",
+			"init": "AL",
+			"slot": 1,
+			"senderMismatch": false
+		},
+		{
+			"sender": {
+				"display": "Ada Lovelace",
+				"address": "ada@acme.test"
+			},
+			"attested": "",
+			"mismatch": null,
+			"from": "Ada Lovelace",
+			"fromAddr": "ada@acme.test",
+			"init": "AL",
+			"slot": 1,
+			"senderMismatch": false
+		},
+		{
+			"sender": {
+				"display": "Ada Lovelace",
+				"address": "ada@acme.test"
+			},
+			"attested": "ada@acme.test",
+			"mismatch": null,
+			"from": "Ada Lovelace",
+			"fromAddr": "ada@acme.test",
+			"init": "AL",
+			"slot": 1,
+			"senderMismatch": false
+		},
+		{
+			"sender": {
+				"display": "Ada Lovelace",
+				"address": "Ada@Acme.Test "
+			},
+			"attested": " ada@acme.test",
+			"mismatch": null,
+			"from": "Ada Lovelace",
+			"fromAddr": "Ada@Acme.Test ",
+			"init": "AL",
+			"slot": 0,
+			"senderMismatch": false
+		},
+		{
+			"sender": {
+				"display": "Bank Support",
+				"address": "support@bank.test"
+			},
+			"attested": "mallory@thelemail.com",
+			"mismatch": "mallory@thelemail.com",
+			"from": "mallory@thelemail.com",
+			"fromAddr": "mallory@thelemail.com",
+			"init": "MA",
+			"slot": 4,
+			"senderMismatch": true
+		},
+		{
+			"sender": {
+				"display": "",
+				"address": "ops@acme.test"
+			},
+			"attested": null,
+			"mismatch": null,
+			"from": "ops@acme.test",
+			"fromAddr": "ops@acme.test",
+			"init": "OP",
+			"slot": 2,
+			"senderMismatch": false
+		},
+		{
+			"sender": {
+				"display": "",
+				"address": ""
+			},
+			"attested": null,
+			"mismatch": null,
+			"from": "Unknown",
+			"fromAddr": "",
+			"init": "UN",
+			"slot": 0,
+			"senderMismatch": false
+		},
+		{
+			"sender": {
+				"display": "Élodie",
+				"address": "élodie@acme.test"
+			},
+			"attested": "élodie@acme.test",
+			"mismatch": null,
+			"from": "Élodie",
+			"fromAddr": "élodie@acme.test",
+			"init": "ÉL",
+			"slot": 2,
+			"senderMismatch": false
+		},
+		{
+			"sender": {
+				"display": "Zoe",
+				"address": "zoe@acme.test"
+			},
+			"attested": "ZOE@ACME.TEST",
+			"mismatch": null,
+			"from": "Zoe",
+			"fromAddr": "zoe@acme.test",
+			"init": "ZO",
+			"slot": 2,
+			"senderMismatch": false
+		}
+	]
+}

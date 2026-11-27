@@ -32,13 +32,17 @@ pub struct Assets;
 
 impl AssetSource for Assets {
     fn load(&self, path: &str) -> Result<Option<Cow<'static, [u8]>>> {
-        Ok(IconName::from_path(path).map(|icon| Cow::Borrowed(icon.svg())))
+        Ok(IconName::from_path(path)
+            .map(|icon| icon.svg())
+            .or_else(|| crate::brand::asset(path))
+            .map(Cow::Borrowed))
     }
 
     fn list(&self, path: &str) -> Result<Vec<SharedString>> {
         Ok(IconName::ALL
             .iter()
             .map(|icon| icon.path())
+            .chain(crate::brand::paths())
             .filter(|p| p.starts_with(path))
             .map(SharedString::from)
             .collect())

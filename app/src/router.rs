@@ -231,12 +231,15 @@ pub enum GalleryTab {
     Fields,
     Choices,
     Overlays,
+    States,
+    Avatars,
+    Brand,
     Language,
 }
 
 #[cfg(debug_assertions)]
 impl GalleryTab {
-    pub const ALL: [(&'static str, Self); 11] = [
+    pub const ALL: [(&'static str, Self); 14] = [
         ("colours", Self::Colours),
         ("shadows", Self::Shadows),
         ("shapes", Self::Shapes),
@@ -247,6 +250,9 @@ impl GalleryTab {
         ("fields", Self::Fields),
         ("choices", Self::Choices),
         ("overlays", Self::Overlays),
+        ("states", Self::States),
+        ("avatars", Self::Avatars),
+        ("brand", Self::Brand),
         ("language", Self::Language),
     ];
 

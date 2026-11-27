@@ -1,3 +1,4 @@
+pub mod avatars;
 pub mod ids;
 pub mod keychain;
 pub mod keystore;
@@ -7,6 +8,7 @@ pub mod notify;
 pub mod paths;
 pub mod productkeys;
 pub mod realtime;
+pub mod sender;
 pub mod session;
 pub mod settings;
 pub mod shell;
@@ -18,6 +20,7 @@ use thelemail_api::{ApiConfig, Net, TransportError};
 use thelemail_keystore::{Broadcast, Keystore};
 use tokio::sync::broadcast;
 
+use crate::avatars::Avatars;
 use crate::keystore::PersistentHalves;
 use crate::mirror::Mirror;
 use crate::realtime::Realtime;
@@ -42,6 +45,9 @@ pub enum CoreEvent {
     Realtime(realtime::RealtimeFrame),
     NotificationOpened(notify::NotificationTarget),
     NotifyStatus(notify::NotifyStatus),
+    AvatarsChanged {
+        account_id: String,
+    },
 }
 
 pub struct Core {
@@ -51,6 +57,7 @@ pub struct Core {
     mirror: Mirror,
     realtime: Realtime,
     settings: Settings,
+    avatars: Avatars,
     events: broadcast::Sender<CoreEvent>,
 }
 
@@ -68,6 +75,7 @@ impl Core {
             mirror: Mirror::default(),
             realtime: Realtime::default(),
             settings: Settings::load(paths::data_root().join("settings.json")),
+            avatars: Avatars::default(),
             events,
         }
     }
@@ -92,6 +100,10 @@ impl Core {
         &self.settings
     }
 
+    pub fn avatars(&self) -> &Avatars {
+        &self.avatars
+    }
+
     pub fn shutdown(&self) {
         self.realtime.close_all();
         self.mirror.shutdown();
@@ -110,6 +122,7 @@ impl Core {
     }
 
     pub fn start(self: &Arc<Self>) {
+        avatars::start(self);
         let core = self.clone();
         let mut events = core.keystore.subscribe();
         tokio::spawn(async move {
@@ -142,6 +155,10 @@ impl Core {
                     account_id.clone(),
                 ));
             }
+            Broadcast::Locked { account_id, .. } | Broadcast::Cleared { account_id } => {
+                self.avatars.forget(account_id);
+            }
+            Broadcast::ClearedAll => self.avatars.forget_all(),
             Broadcast::VaultChanged { account_id, .. } => {
                 let core = self.clone();
                 let id = account_id.clone();

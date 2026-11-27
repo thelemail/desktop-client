@@ -9,7 +9,7 @@ use gpui_kit::{
     AnyElement, App, ElementId, IntoElement, ParentElement, Pixels, Styled, Window, div, px,
 };
 
-use super::curve::{BASE, CUBIC_OUT, Curve, EASE, EASE_OUT, FAST, LINEAR, SLOW};
+use super::curve::{BASE, Bezier, CUBIC_OUT, Curve, EASE, EASE_OUT, FAST, LINEAR, SLOW};
 use super::driver::Spec;
 use super::live::{MotionHandle, animate_from};
 
@@ -244,6 +244,12 @@ pub const UNFOLD: Spec = Spec::new(Duration::from_millis(260), CUBIC_OUT);
 
 pub const SHIMMER_PERIOD: Duration = Duration::from_millis(1400);
 
+pub const PULSE_PERIOD: Duration = Duration::from_millis(1600);
+
+pub const PULSE_DIM: f32 = 0.55;
+
+const PULSE_CURVE: Curve = Curve::Bezier(Bezier::new(0.25, 0.1, 0.25, 1.0));
+
 pub const NAMED: [(&str, Toggle); 11] = [
     ("card_in", CARD_IN),
     ("dialog", DIALOG),
@@ -304,6 +310,17 @@ pub fn shimmer(id: impl Into<ElementId>, window: &mut Window, cx: &mut App) -> f
     animate_keyframes(id.into(), &keyframes, timing, window, cx).value
 }
 
+pub fn pulse(id: impl Into<ElementId>, window: &mut Window, cx: &mut App) -> f32 {
+    let keyframes = Keyframes::try_new([
+        Keyframe::new(0.0, 1.0_f32).ease(PULSE_CURVE.easing()),
+        Keyframe::new(0.5, PULSE_DIM).ease(PULSE_CURVE.easing()),
+        Keyframe::new(1.0, 1.0),
+    ])
+    .expect("three ordered keyframes");
+    let timing = Timing::new(PULSE_PERIOD).iterations(IterationCount::Infinite);
+    animate_keyframes(id.into(), &keyframes, timing, window, cx).value
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -316,6 +333,7 @@ mod tests {
             }
         }
         assert!(UNFOLD.curve.stays_in_range());
+        assert!(PULSE_CURVE.stays_in_range());
     }
 
     #[test]
@@ -327,6 +345,8 @@ mod tests {
         assert_eq!(MENU.enter.duration, FAST);
         assert_eq!(OVERLAY.enter.duration, BASE);
         assert_eq!(UNFOLD.duration, Duration::from_millis(260));
+        assert_eq!(SHIMMER_PERIOD, Duration::from_millis(1400));
+        assert_eq!(PULSE_PERIOD, Duration::from_millis(1600));
         assert_eq!(ROW_ARRIVE.kept_fade, Some(SLOW));
         assert_eq!(READER_CONTENT_IN.kept_fade, Some(FAST));
         assert!(NAMED.iter().all(|(name, toggle)| toggle.kept_fade.is_none()

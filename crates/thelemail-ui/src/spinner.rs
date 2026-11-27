@@ -8,6 +8,7 @@ use gpui_kit::{
 
 const STROKE: f32 = 2.0;
 const SWEEP: f32 = TAU * 0.75;
+const RING_SWEEP: f32 = TAU * 0.25;
 const REDUCED_SLOWDOWN: u32 = 3;
 
 pub const BUTTON_PERIOD: Duration = Duration::from_millis(800);
@@ -18,6 +19,7 @@ pub struct Spinner {
     id: ElementId,
     size: f32,
     color: Hsla,
+    track: Option<Hsla>,
     period: Duration,
 }
 
@@ -27,8 +29,14 @@ impl Spinner {
             id: id.into(),
             size,
             color,
+            track: None,
             period: BUTTON_PERIOD,
         }
+    }
+
+    pub fn ring(mut self, track: Hsla) -> Self {
+        self.track = Some(track);
+        self
     }
 
     pub fn period(mut self, period: Duration) -> Self {
@@ -57,6 +65,8 @@ impl RenderOnce for Spinner {
         let angle = turn(now.saturating_duration_since(started), period);
         window.request_animation_frame();
         let color = self.color;
+        let track = self.track;
+        let sweep = if track.is_some() { RING_SWEEP } else { SWEEP };
         div().flex_none().size(px(self.size)).child(
             canvas(
                 |_, _, _| (),
@@ -65,14 +75,23 @@ impl RenderOnce for Spinner {
                     let center = bounds.center();
                     let at =
                         |a: f32| point(center.x + radius * a.cos(), center.y + radius * a.sin());
+                    if let Some(track) = track {
+                        let mut ring = PathBuilder::stroke(px(STROKE));
+                        ring.move_to(at(0.0));
+                        ring.arc_to(point(radius, radius), px(0.0), false, true, at(TAU / 2.0));
+                        ring.arc_to(point(radius, radius), px(0.0), false, true, at(0.0));
+                        if let Ok(ring) = ring.build() {
+                            window.paint_path(ring, track);
+                        }
+                    }
                     let mut path = PathBuilder::stroke(px(STROKE));
                     path.move_to(at(angle));
                     path.arc_to(
                         point(radius, radius),
                         px(0.0),
+                        sweep > TAU / 2.0,
                         true,
-                        true,
-                        at(angle + SWEEP),
+                        at(angle + sweep),
                     );
                     if let Ok(path) = path.build() {
                         window.paint_path(path, color);
