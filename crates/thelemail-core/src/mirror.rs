@@ -6,14 +6,14 @@ use std::sync::{Arc, Mutex};
 use futures_util::{StreamExt, stream};
 use rusqlite::{Connection, params};
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, Emitter, Manager};
 use thelemail_api::{ApiRequest, Net};
 use thelemail_keystore::Keystore;
+use thelemail_store::list::{MirrorMessage, MirrorRow, get_message, get_thread, list_mailbox};
 use thelemail_store::search::{SearchHit, search_messages};
 use thelemail_store::{account_db_path, open_account_db};
 use tokio::sync::Notify;
 
-use crate::keychain;
+use crate::{Core, CoreEvent, keychain};
 
 const SCOPES: &[&str] = &["inbox", "archive", "folder", "spam", "trash"];
 const PAGE_LIMIT: u32 = 100;
@@ -171,7 +171,42 @@ impl Default for Mirror {
 
 impl Mirror {
     pub fn root() -> PathBuf {
-        dirs_root().join("com.thelemail.desktop")
+        crate::paths::data_root()
+    }
+
+    pub fn list(
+        &self,
+        account_id: &str,
+        mailbox: &str,
+        direction: Option<&str>,
+        folder_id: Option<&str>,
+        limit: Option<usize>,
+    ) -> Result<Vec<MirrorRow>, String> {
+        crate::ids::account_id(account_id)?;
+        self.with_conn(account_id, |conn| {
+            list_mailbox(conn, mailbox, direction, folder_id, limit.unwrap_or(200))
+                .map_err(|e| e.to_string())
+        })
+    }
+
+    pub fn message(
+        &self,
+        account_id: &str,
+        message_id: &str,
+    ) -> Result<Option<MirrorMessage>, String> {
+        crate::ids::account_id(account_id)?;
+        let now = now_iso();
+        self.with_conn(account_id, |conn| {
+            get_message(conn, message_id, &now).map_err(|e| e.to_string())
+        })
+    }
+
+    pub fn thread(&self, account_id: &str, message_id: &str) -> Result<Vec<MirrorMessage>, String> {
+        crate::ids::account_id(account_id)?;
+        let now = now_iso();
+        self.with_conn(account_id, |conn| {
+            get_thread(conn, message_id, &now).map_err(|e| e.to_string())
+        })
     }
 
     pub fn open(&self, account_id: &str) -> Result<(), String> {
@@ -453,22 +488,6 @@ impl Mirror {
     }
 }
 
-#[cfg(windows)]
-fn dirs_root() -> PathBuf {
-    std::env::var_os("LOCALAPPDATA")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("."))
-}
-
-#[cfg(not(windows))]
-fn dirs_root() -> PathBuf {
-    std::env::var_os("HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join("Library")
-        .join("Application Support")
-}
-
 fn upsert_message(
     conn: &Connection,
     item: &MessageListItem,
@@ -647,19 +666,19 @@ fn undecryptable_messages(conn: &Connection) -> Result<Vec<String>, String> {
         .map_err(|e| e.to_string())
 }
 
-pub async fn retry_undecryptable(app: AppHandle, account_id: String) {
-    let mirror = app.state::<Mirror>();
+pub async fn retry_undecryptable(core: Arc<Core>, account_id: String) {
+    let mirror = core.mirror();
     mirror.want_retry(&account_id);
     if !mirror.claim(&account_id) {
         return;
     }
     while mirror.take_retry(&account_id) {
-        if retry_pass(&app, &account_id).await == RetryPass::Deferred {
+        if retry_pass(&core, &account_id).await == RetryPass::Deferred {
             mirror.defer_retry(&account_id);
             return;
         }
     }
-    release_and_hand_off(&app, &account_id);
+    release_and_hand_off(&core, &account_id);
 }
 
 #[derive(PartialEq, Eq)]
@@ -668,10 +687,10 @@ enum RetryPass {
     Deferred,
 }
 
-async fn retry_pass(app: &AppHandle, account_id: &str) -> RetryPass {
-    let net = app.state::<Net>();
-    let ks = app.state::<Keystore>();
-    let mirror = app.state::<Mirror>();
+async fn retry_pass(core: &Arc<Core>, account_id: &str) -> RetryPass {
+    let net = core.net();
+    let ks = core.keystore();
+    let mirror = core.mirror();
     let Some(token) = mirror.token(account_id) else {
         return RetryPass::Deferred;
     };
@@ -687,7 +706,7 @@ async fn retry_pass(app: &AppHandle, account_id: &str) -> RetryPass {
         let pending: Vec<_> = chunk
             .iter()
             .map(|id| async {
-                let detail = get_detail(&net, account_id, &token, id).await;
+                let detail = get_detail(net, account_id, &token, id).await;
                 (id.clone(), detail)
             })
             .collect();
@@ -708,7 +727,7 @@ async fn retry_pass(app: &AppHandle, account_id: &str) -> RetryPass {
             let Some(encrypted) = encrypted else {
                 continue;
             };
-            let (preview, decrypted) = decrypt_preview(&ks, account_id, &encrypted);
+            let (preview, decrypted) = decrypt_preview(ks, account_id, &encrypted);
             if !decrypted {
                 continue;
             }
@@ -732,14 +751,50 @@ async fn retry_pass(app: &AppHandle, account_id: &str) -> RetryPass {
         return RetryPass::Done;
     }
     eprintln!("mirror: recovered {recovered} preview(s) for {account_id} after a key change");
-    let _ = app.emit(
-        "mirror://changed",
-        serde_json::json!({ "accountId": account_id, "arrived": 0 }),
-    );
-    if let Err(err) = prefetch_bodies(&net, &ks, &mirror, account_id, &token, |_, _| {}).await {
+    core.emit(CoreEvent::MirrorChanged {
+        account_id: account_id.to_string(),
+        arrived: 0,
+    });
+    if let Err(err) = prefetch_bodies(net, ks, mirror, account_id, &token, |_, _| {}).await {
         eprintln!("mirror: fetching recovered bodies for {account_id} failed: {err}");
     }
     RetryPass::Done
+}
+
+pub fn start_sync(core: &Arc<Core>, account_id: &str, access_token: &str) -> Result<(), String> {
+    crate::ids::account_id(account_id)?;
+    core.mirror().set_token(account_id, access_token);
+    let core = core.clone();
+    let account_id = account_id.to_owned();
+    let access_token = access_token.to_owned();
+    tokio::spawn(async move {
+        if !crate::productkeys::verify_or_clear(&core, &account_id, &access_token).await {
+            return;
+        }
+        tokio::spawn(backfill(core.clone(), account_id.clone(), access_token));
+        tokio::spawn(watch_inbox(core, account_id));
+    });
+    Ok(())
+}
+
+impl crate::keystore::AttachmentCache for Mirror {
+    fn get(&self, account_id: &str, attachment_id: &str) -> Option<Vec<u8>> {
+        let now = now_iso();
+        self.with_conn(account_id, |conn| {
+            thelemail_store::list::cached_attachment(conn, attachment_id, &now)
+                .map_err(|e| e.to_string())
+        })
+        .ok()
+        .flatten()
+    }
+
+    fn put(&self, account_id: &str, attachment_id: &str, plain: &[u8]) {
+        let now = now_iso();
+        let _ = self.with_conn(account_id, |conn| {
+            thelemail_store::list::store_attachment(conn, attachment_id, plain, &now)
+                .map_err(|e| e.to_string())
+        });
+    }
 }
 
 pub fn now_iso() -> String {
@@ -749,108 +804,93 @@ pub fn now_iso() -> String {
         .unwrap_or_default()
 }
 
-pub async fn backfill(app: AppHandle, account_id: String, access_token: String) {
-    let mirror = app.state::<Mirror>();
+pub async fn backfill(core: Arc<Core>, account_id: String, access_token: String) {
+    let mirror = core.mirror();
     if !mirror.claim(&account_id) {
         return;
     }
-    if has_delta_token(&mirror, &account_id) {
+    if has_delta_token(mirror, &account_id) {
         mirror.arm_notifications(&account_id);
     }
 
     for scope in SCOPES {
-        let net = app.state::<Net>();
-        let ks = app.state::<Keystore>();
-        let mirror = app.state::<Mirror>();
-        let result = sync_scope(
-            &net,
-            &ks,
-            &mirror,
-            &account_id,
-            scope,
-            &access_token,
-            |done| {
-                let _ = app.emit(
-                    "mirror://progress",
-                    SyncProgress {
-                        account_id: account_id.clone(),
-                        scope: scope.to_string(),
-                        phase: "previews".to_owned(),
-                        previews_done: done,
-                        bodies_done: 0,
-                        bodies_total: 0,
-                        complete: false,
-                    },
-                );
-            },
-        )
+        let net = core.net();
+        let ks = core.keystore();
+        let mirror = core.mirror();
+        let result = sync_scope(net, ks, mirror, &account_id, scope, &access_token, |done| {
+            core.emit(CoreEvent::MirrorProgress(SyncProgress {
+                account_id: account_id.clone(),
+                scope: scope.to_string(),
+                phase: "previews".to_owned(),
+                previews_done: done,
+                bodies_done: 0,
+                bodies_total: 0,
+                complete: false,
+            }));
+        })
         .await;
         match result {
-            Ok((_, fresh)) => announce(&app, &account_id, &fresh),
+            Ok((_, fresh)) => announce(&core, &account_id, &fresh),
             Err(err) => {
-                let _ = app.emit(
-                    "mirror://error",
-                    serde_json::json!({ "accountId": account_id, "scope": scope, "error": err }),
-                );
+                core.emit(CoreEvent::MirrorError {
+                    account_id: account_id.to_string(),
+                    scope: Some(scope.to_string()),
+                    error: err.to_string(),
+                });
             }
         }
     }
 
-    app.state::<Mirror>().arm_notifications(&account_id);
+    core.mirror().arm_notifications(&account_id);
 
     {
-        let net = app.state::<Net>();
-        let ks = app.state::<Keystore>();
-        let mirror = app.state::<Mirror>();
+        let net = core.net();
+        let ks = core.keystore();
+        let mirror = core.mirror();
         let result = prefetch_bodies(
-            &net,
-            &ks,
-            &mirror,
+            net,
+            ks,
+            mirror,
             &account_id,
             &access_token,
             |done, total| {
-                let _ = app.emit(
-                    "mirror://progress",
-                    SyncProgress {
-                        account_id: account_id.clone(),
-                        scope: "all".to_owned(),
-                        phase: "bodies".to_owned(),
-                        previews_done: 0,
-                        bodies_done: done,
-                        bodies_total: total,
-                        complete: false,
-                    },
-                );
+                core.emit(CoreEvent::MirrorProgress(SyncProgress {
+                    account_id: account_id.clone(),
+                    scope: "all".to_owned(),
+                    phase: "bodies".to_owned(),
+                    previews_done: 0,
+                    bodies_done: done,
+                    bodies_total: total,
+                    complete: false,
+                }));
             },
         )
         .await;
         if let Err(err) = result {
-            let _ = app.emit(
-                "mirror://error",
-                serde_json::json!({ "accountId": account_id, "error": err }),
-            );
+            core.emit(CoreEvent::MirrorError {
+                account_id: account_id.to_string(),
+                scope: None,
+                error: err.to_string(),
+            });
         }
     }
 
-    let _ = app.emit(
-        "mirror://progress",
-        SyncProgress {
-            account_id: account_id.clone(),
-            scope: "all".to_owned(),
-            phase: "idle".to_owned(),
-            previews_done: 0,
-            bodies_done: 0,
-            bodies_total: 0,
-            complete: true,
-        },
-    );
-    release_and_hand_off(&app, &account_id);
+    core.emit(CoreEvent::MirrorProgress(SyncProgress {
+        account_id: account_id.clone(),
+        scope: "all".to_owned(),
+        phase: "idle".to_owned(),
+        previews_done: 0,
+        bodies_done: 0,
+        bodies_total: 0,
+        complete: true,
+    }));
+    release_and_hand_off(&core, &account_id);
 }
 
-fn release_and_hand_off(app: &AppHandle, account_id: &str) {
-    let mirror = app.state::<Mirror>();
+fn release_and_hand_off(core: &Arc<Core>, account_id: &str) {
+    let mirror = core.mirror();
     if mirror.release_wanting_retry(account_id) {
-        tauri::async_runtime::spawn(retry_undecryptable(app.clone(), account_id.to_owned()));
+        tokio::spawn(retry_undecryptable(core.clone(), account_id.to_owned()));
     }
 }
 
@@ -954,24 +994,24 @@ fn has_delta_token(mirror: &Mirror, account_id: &str) -> bool {
         .is_some()
 }
 
-fn announce(app: &AppHandle, account_id: &str, fresh: &[crate::notify::NewMail]) {
+fn announce(core: &Arc<Core>, account_id: &str, fresh: &[crate::notify::NewMail]) {
     if fresh.is_empty() {
         return;
     }
-    let armed = app.state::<Mirror>().notifications_armed(account_id);
+    let armed = core.mirror().notifications_armed(account_id);
     eprintln!(
         "mirror: {} fresh arrival(s) for {account_id}, notifications armed={armed}",
         fresh.len()
     );
     if armed {
         for mail in fresh {
-            crate::notify::new_mail(app, mail);
+            crate::notify::new_mail(core, mail);
         }
     }
-    let _ = app.emit(
-        "mirror://changed",
-        serde_json::json!({ "accountId": account_id, "arrived": fresh.len() }),
-    );
+    core.emit(CoreEvent::MirrorChanged {
+        account_id: account_id.to_string(),
+        arrived: fresh.len(),
+    });
 }
 
 pub async fn sync_scope(
@@ -1084,16 +1124,16 @@ fn urlencode(value: &str) -> String {
 const SESSION_EXPIRED: &str = "session expired";
 const HINT_LAG: std::time::Duration = std::time::Duration::from_secs(6);
 
-pub fn poke(app: &AppHandle, account_id: &str) {
-    let mirror = app.state::<Mirror>();
+pub fn poke(core: &Arc<Core>, account_id: &str) {
+    let mirror = core.mirror();
     if !mirror.is_watching(account_id) || !mirror.begin_poke(account_id) {
         return;
     }
-    let app = app.clone();
+    let core = core.clone();
     let account_id = account_id.to_owned();
-    tauri::async_runtime::spawn(async move {
+    tokio::spawn(async move {
         tokio::time::sleep(HINT_LAG).await;
-        app.state::<Mirror>().finish_poke(&account_id);
+        core.mirror().finish_poke(&account_id);
     });
 }
 const POLL_INTERVAL: std::time::Duration = std::time::Duration::from_secs(30);
@@ -1119,47 +1159,47 @@ fn jitter(base: std::time::Duration) -> std::time::Duration {
     base + std::time::Duration::from_millis(offset)
 }
 
-pub async fn watch_inbox(app: AppHandle, account_id: String) {
-    if !app.state::<Mirror>().claim_watch(&account_id) {
+pub async fn watch_inbox(core: Arc<Core>, account_id: String) {
+    if !core.mirror().claim_watch(&account_id) {
         return;
     }
 
     let mut failures: u32 = 0;
 
     loop {
-        if !app.state::<Mirror>().is_watching(&account_id) {
+        if !core.mirror().is_watching(&account_id) {
             break;
         }
 
-        let token = app.state::<Mirror>().token(&account_id);
+        let token = core.mirror().token(&account_id);
         if let Some(token) = token {
-            match poll_changes(&app, &account_id, &token).await {
+            match poll_changes(&core, &account_id, &token).await {
                 Ok(arrivals) => {
                     failures = 0;
                     eprintln!(
                         "mirror: poll for {account_id} saw {} arrival(s)",
                         arrivals.len()
                     );
-                    announce(&app, &account_id, &arrivals);
+                    announce(&core, &account_id, &arrivals);
                 }
                 Err(err) => {
                     failures = failures.saturating_add(1);
                     eprintln!("mirror: poll for {account_id} failed ({failures}): {err}");
                     if err == SESSION_EXPIRED {
-                        let _ = app.emit(
-                            "mirror://token-expired",
-                            serde_json::json!({ "accountId": account_id }),
-                        );
+                        core.emit(CoreEvent::TokenExpired {
+                            account_id: account_id.to_string(),
+                        });
                     }
-                    let _ = app.emit(
-                        "mirror://error",
-                        serde_json::json!({ "accountId": account_id, "error": err }),
-                    );
+                    core.emit(CoreEvent::MirrorError {
+                        account_id: account_id.to_string(),
+                        scope: None,
+                        error: err.to_string(),
+                    });
                 }
             }
         }
 
-        let waker = app.state::<Mirror>().token_waker(&account_id);
+        let waker = core.mirror().token_waker(&account_id);
         if tokio::time::timeout(next_delay(failures), waker.notified())
             .await
             .is_ok()
@@ -2168,13 +2208,13 @@ pub fn apply_changes(
 }
 
 async fn poll_changes(
-    app: &AppHandle,
+    core: &Arc<Core>,
     account_id: &str,
     access_token: &str,
 ) -> Result<Vec<crate::notify::NewMail>, String> {
-    let net = app.state::<Net>();
-    let ks = app.state::<Keystore>();
-    let mirror = app.state::<Mirror>();
+    let net = core.net();
+    let ks = core.keystore();
+    let mirror = core.mirror();
 
     let mut arrivals = Vec::new();
     loop {
@@ -2226,8 +2266,8 @@ async fn poll_changes(
             eprintln!(
                 "mirror: {account_id} is past the change horizon, rebuilding from the watermark"
             );
-            tauri::async_runtime::spawn(backfill(
-                app.clone(),
+            tokio::spawn(backfill(
+                core.clone(),
                 account_id.to_owned(),
                 access_token.to_owned(),
             ));
@@ -2238,7 +2278,7 @@ async fn poll_changes(
         let arrived = mirror.with_conn(account_id, |conn| {
             apply_changes(
                 conn,
-                &ks,
+                ks,
                 account_id,
                 &page.changes,
                 &page.next_cursor,

@@ -2,11 +2,13 @@ pub mod ids;
 pub mod keychain;
 pub mod keystore;
 pub mod locale;
+pub mod mirror;
 pub mod net;
 pub mod notify;
 pub mod paths;
 pub mod productkeys;
 pub mod session;
+pub mod shell;
 pub mod updates;
 
 use std::sync::Arc;
@@ -17,11 +19,24 @@ use tokio::sync::broadcast;
 
 use crate::keystore::PersistentHalves;
 use crate::locale::UiLocale;
+use crate::mirror::Mirror;
 
 #[derive(Debug, Clone)]
 pub enum CoreEvent {
     Keystore(Broadcast),
-    AccountKeysChanged { account_id: String },
+    MirrorChanged {
+        account_id: String,
+        arrived: usize,
+    },
+    MirrorProgress(mirror::SyncProgress),
+    MirrorError {
+        account_id: String,
+        scope: Option<String>,
+        error: String,
+    },
+    TokenExpired {
+        account_id: String,
+    },
     NotificationOpened(notify::NotificationTarget),
     NotifyStatus(notify::NotifyStatus),
 }
@@ -31,6 +46,7 @@ pub struct Core {
     keystore: Keystore,
     halves: PersistentHalves,
     locale: UiLocale,
+    mirror: Mirror,
     events: broadcast::Sender<CoreEvent>,
 }
 
@@ -46,6 +62,7 @@ impl Core {
             keystore: Keystore::new(),
             halves: PersistentHalves::default(),
             locale: UiLocale::default(),
+            mirror: Mirror::default(),
             events,
         }
     }
@@ -60,6 +77,14 @@ impl Core {
 
     pub fn locale(&self) -> &UiLocale {
         &self.locale
+    }
+
+    pub fn mirror(&self) -> &Mirror {
+        &self.mirror
+    }
+
+    pub fn shutdown(&self) {
+        self.mirror.shutdown();
     }
 
     pub(crate) fn halves(&self) -> &PersistentHalves {
@@ -102,9 +127,10 @@ impl Core {
                     keystore::save_key_history(&core, &id);
                     keystore::rewrap_persisted(&core, &id);
                 });
-                let _ = self.events.send(CoreEvent::AccountKeysChanged {
-                    account_id: account_id.clone(),
-                });
+                tokio::spawn(mirror::retry_undecryptable(
+                    self.clone(),
+                    account_id.clone(),
+                ));
             }
             Broadcast::VaultChanged { account_id, .. } => {
                 let core = self.clone();
