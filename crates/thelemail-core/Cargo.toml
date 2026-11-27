@@ -8,6 +8,7 @@ license.workspace = true
 [dependencies]
 base64.workspace = true
 hex.workspace = true
+semver = "1"
 serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
@@ -17,19 +18,27 @@ thelemail-keystore = { path = "../thelemail-keystore" }
 thelemail-store = { path = "../thelemail-store" }
 tokio = { workspace = true }
 url.workspace = true
+uuid = { workspace = true, features = ["v4"] }
 zeroize.workspace = true
 
 [target."cfg(target_os = \"macos\")".dependencies]
+flate2 = "1.1"
+libc = "0.2"
+plist = "1.10"
 security-framework.workspace = true
+tar = "0.4.46"
 
 [target."cfg(windows)".dependencies]
+dataview = "1.1"
+pelite = "0.10.0"
 windows-sys = { version = "0.61", features = [
     "Win32_Foundation",
     "Win32_Security_Credentials",
 ] }
 
 [dev-dependencies]
+dataview = "1.1"
+pelite = "0.10.0"
 tempfile = "3"
 thelemail-trust = { path = "../thelemail-trust", features = ["testkit"] }
-uuid = { workspace = true, features = ["v4"] }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time"] }

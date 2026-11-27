@@ -1,15 +1,12 @@
 use std::path::{Path, PathBuf};
 
-use tauri::{AppHandle, Manager};
-use tauri_plugin_updater::Update;
-
-use super::{UpdateError, Updates, check_version};
+use super::{UpdateError, check_version};
 
 const PRODUCT_NAME: &str = "Thelemail";
 const UNINSTALLER: &str = "uninstall.exe";
 
 pub struct Staged {
-    installer: Vec<u8>,
+    pub installer: Vec<u8>,
 }
 
 pub fn installed() -> Option<PathBuf> {
@@ -36,15 +33,6 @@ pub fn stage(
     Ok(Staged {
         installer: installer.to_vec(),
     })
-}
-
-pub fn finish(app: &AppHandle, update: Update, staged: Staged, _installed: &Path, version: &str) {
-    app.cleanup_before_exit();
-    if let Err(err) = update.install(&staged.installer) {
-        eprintln!("updates: launching the {version} installer failed: {err}");
-        app.state::<Updates>()
-            .change(|p| p.last_failure = Some("install".to_owned()));
-    }
 }
 
 fn aligned(bytes: &[u8]) -> Vec<u64> {
@@ -117,8 +105,8 @@ fn is_leftover(name: &str) -> bool {
 mod tests {
     use super::*;
 
-    const OURS: &[u8] = include_bytes!("../../../fixtures/installer/thelemail-0.13.0.exe");
-    const OTHER: &[u8] = include_bytes!("../../../fixtures/installer/other-0.13.0.exe");
+    const OURS: &[u8] = include_bytes!("../../../../fixtures/installer/thelemail-0.13.0.exe");
+    const OTHER: &[u8] = include_bytes!("../../../../fixtures/installer/other-0.13.0.exe");
 
     #[test]
     fn the_installer_version_strings_are_read() {

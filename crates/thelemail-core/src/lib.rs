@@ -6,6 +6,7 @@ pub mod net;
 pub mod paths;
 pub mod productkeys;
 pub mod session;
+pub mod updates;
 
 use std::sync::Arc;
 
