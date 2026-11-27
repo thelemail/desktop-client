@@ -1,0 +1,35 @@
+[package]
+name = "thelemail-core"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+base64.workspace = true
+hex.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+sys-locale = "0.3.2"
+thelemail-api = { path = "../thelemail-api" }
+thelemail-keystore = { path = "../thelemail-keystore" }
+thelemail-store = { path = "../thelemail-store" }
+tokio = { workspace = true }
+url.workspace = true
+zeroize.workspace = true
+
+[target."cfg(target_os = \"macos\")".dependencies]
+security-framework.workspace = true
+
+[target."cfg(windows)".dependencies]
+windows-sys = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_Security_Credentials",
+] }
+
+[dev-dependencies]
+tempfile = "3"
+thelemail-trust = { path = "../thelemail-trust", features = ["testkit"] }
+uuid = { workspace = true, features = ["v4"] }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time"] }

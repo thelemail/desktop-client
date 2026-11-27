@@ -3,11 +3,11 @@ use std::collections::HashMap;
 use base64::Engine as _;
 use serde::Deserialize;
 use serde_json::Value;
-use tauri::{AppHandle, Manager};
 use thelemail_api::{ApiRequest, Net};
 use thelemail_keystore::{AccountKeyList, Keystore, LoadAccountKeysArgs};
 
-use crate::keystore::{PersistentHalves, clear_account};
+use crate::Core;
+use crate::keystore::clear_account;
 
 const PRODUCT: &str = "app";
 
@@ -166,10 +166,8 @@ pub async fn verify(
     }
 }
 
-pub async fn verify_or_clear(app: &AppHandle, account_id: &str, token: &str) -> bool {
-    let net = app.state::<Net>();
-    let ks = app.state::<Keystore>();
-    match verify(&net, &ks, account_id, token).await {
+pub async fn verify_or_clear(core: &Core, account_id: &str, token: &str) -> bool {
+    match verify(core.net(), core.keystore(), account_id, token).await {
         Ok(Outcome::Unreachable(err)) => {
             eprintln!("productkeys: could not check {account_id}: {err}");
             true
@@ -187,7 +185,7 @@ pub async fn verify_or_clear(app: &AppHandle, account_id: &str, token: &str) -> 
             enforce: true,
         }) => {
             eprintln!("productkeys: {account_id} refused: {reason}");
-            clear_account(&ks, &app.state::<PersistentHalves>(), account_id);
+            clear_account(core, account_id);
             false
         }
     }
