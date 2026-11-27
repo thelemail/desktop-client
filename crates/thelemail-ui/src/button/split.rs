@@ -1,8 +1,12 @@
 use gpui_kit::{
-    App, Corners, ElementId, IntoElement, ParentElement, RenderOnce, Styled, Window, div, px,
+    App, Corners, ElementId, InteractiveElement, IntoElement, ParentElement, RenderOnce, Styled,
+    Window, div, px,
 };
 
-use super::{Button, look::{Flags, Phase, look}};
+use super::{
+    Button,
+    look::{Flags, Phase, look},
+};
 use crate::theme::{ActiveTokens, Theme};
 
 const DIVIDER: f32 = 0.22;

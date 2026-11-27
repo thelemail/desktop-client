@@ -1,6 +1,6 @@
 use gpui_kit::{
     A11ySubtreeBuilder, App, Bounds, Element, ElementId, GlobalElementId, InspectorElementId,
-    InteractiveElement, Interactivity, IntoElement, LayoutId, Pixels, Role, Window, accesskit,
+    InteractiveElement, Interactivity, LayoutId, Pixels, Role, Window, accesskit,
 };
 
 pub struct A11yState<E> {
@@ -24,14 +24,6 @@ impl<E: Element> A11yStateExt for E {}
 impl<E: InteractiveElement> InteractiveElement for A11yState<E> {
     fn interactivity(&mut self) -> &mut Interactivity {
         self.inner.interactivity()
-    }
-}
-
-impl<E: Element> IntoElement for A11yState<E> {
-    type Element = Self;
-
-    fn into_element(self) -> Self::Element {
-        self
     }
 }
 

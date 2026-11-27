@@ -131,7 +131,9 @@ pub fn look(variant: Variant, flags: Flags, phase: Phase) -> Look {
         return look;
     }
     match phase {
-        Phase::Active if variant == Variant::Primary => paint(Token(T::PrimaryPress), rest(variant).fg),
+        Phase::Active if variant == Variant::Primary => {
+            paint(Token(T::PrimaryPress), rest(variant).fg)
+        }
         Phase::Hover | Phase::Active => hover(variant),
         Phase::Rest => rest(variant),
     }
@@ -160,43 +162,72 @@ mod tests {
                 Phase::Hover,
             );
             assert_eq!(look.fg, Token(T::FgFaint), "{variant:?}");
-            let want = if variant.is_ghost() { Clear } else { Token(T::DisabledFill) };
+            let want = if variant.is_ghost() {
+                Clear
+            } else {
+                Token(T::DisabledFill)
+            };
             assert_eq!(look.bg, want, "{variant:?}");
         }
     }
 
     #[test]
     fn busy_keeps_the_filled_roles_and_dims_the_rest() {
-        let busy = Flags { busy: true, ..flags() };
+        let busy = Flags {
+            busy: true,
+            ..flags()
+        };
         assert_eq!(
             look(Variant::Primary, busy, Phase::Hover).bg,
             Alpha(T::Primary, BUSY_FILL)
         );
-        assert_eq!(look(Variant::Tonal, busy, Phase::Rest), rest(Variant::Tonal));
-        assert_eq!(look(Variant::Neutral, busy, Phase::Rest), rest(Variant::Neutral));
+        assert_eq!(
+            look(Variant::Tonal, busy, Phase::Rest),
+            rest(Variant::Tonal)
+        );
+        assert_eq!(
+            look(Variant::Neutral, busy, Phase::Rest),
+            rest(Variant::Neutral)
+        );
         assert_eq!(
             look(Variant::DangerSolid, busy, Phase::Rest).bg,
             Alpha(T::Danger500, BUSY_FILL)
         );
-        assert_eq!(look(Variant::Ghost, busy, Phase::Rest), disabled(Variant::Ghost));
-        assert_eq!(look(Variant::Caution, busy, Phase::Rest), disabled(Variant::Caution));
+        assert_eq!(
+            look(Variant::Ghost, busy, Phase::Rest),
+            disabled(Variant::Ghost)
+        );
+        assert_eq!(
+            look(Variant::Caution, busy, Phase::Rest),
+            disabled(Variant::Caution)
+        );
     }
 
     #[test]
     fn pressed_ghosts_turn_pine_and_beat_hover() {
-        let on = Flags { on: true, ..flags() };
+        let on = Flags {
+            on: true,
+            ..flags()
+        };
         for variant in [Variant::Ghost, Variant::GhostDanger] {
             assert_eq!(
                 look(variant, on, Phase::Hover),
                 paint(Token(T::Pine100), Token(T::Pine700))
             );
         }
-        assert_eq!(look(Variant::Neutral, on, Phase::Rest), rest(Variant::Neutral));
+        assert_eq!(
+            look(Variant::Neutral, on, Phase::Rest),
+            rest(Variant::Neutral)
+        );
     }
 
     #[test]
     fn a_pressed_star_is_brass() {
-        let star = Flags { on: true, star: true, ..flags() };
+        let star = Flags {
+            on: true,
+            star: true,
+            ..flags()
+        };
         assert_eq!(
             look(Variant::Ghost, star, Phase::Hover),
             paint(Token(T::Brass100), Token(T::Brass700))
@@ -205,15 +236,33 @@ mod tests {
 
     #[test]
     fn only_primary_has_a_press_colour() {
-        assert_eq!(look(Variant::Primary, flags(), Phase::Active).bg, Token(T::PrimaryPress));
-        assert_eq!(look(Variant::Tonal, flags(), Phase::Active), hover(Variant::Tonal));
+        assert_eq!(
+            look(Variant::Primary, flags(), Phase::Active).bg,
+            Token(T::PrimaryPress)
+        );
+        assert_eq!(
+            look(Variant::Tonal, flags(), Phase::Active),
+            hover(Variant::Tonal)
+        );
     }
 
     #[test]
     fn inverse_covers_primary_neutral_and_ghost_only() {
-        let inv = Flags { inverse: true, ..flags() };
-        assert_eq!(look(Variant::Primary, inv, Phase::Rest).bg, Token(T::FgOnPine));
-        assert_eq!(look(Variant::Ghost, inv, Phase::Hover).bg, Alpha(T::FgOnPine, 0.18));
-        assert_eq!(look(Variant::Danger, inv, Phase::Rest), rest(Variant::Danger));
+        let inv = Flags {
+            inverse: true,
+            ..flags()
+        };
+        assert_eq!(
+            look(Variant::Primary, inv, Phase::Rest).bg,
+            Token(T::FgOnPine)
+        );
+        assert_eq!(
+            look(Variant::Ghost, inv, Phase::Hover).bg,
+            Alpha(T::FgOnPine, 0.18)
+        );
+        assert_eq!(
+            look(Variant::Danger, inv, Phase::Rest),
+            rest(Variant::Danger)
+        );
     }
 }

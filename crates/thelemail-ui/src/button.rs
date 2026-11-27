@@ -7,13 +7,14 @@ use std::rc::Rc;
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
     AnyElement, App, ClickEvent, Corners, ElementId, FocusHandle, FontWeight, Hsla,
-    InteractiveElement, IntoElement, MouseButton, ParentElement, Pixels, RenderOnce, Role,
-    SharedString, StatefulInteractiveElement, Styled, Toggled, Window, div, px, relative,
+    InteractiveElement, IntoElement, MouseButton, ParentElement, RenderOnce, Role, SharedString,
+    StatefulInteractiveElement, Styled, Toggled, Window, div, px, relative,
 };
 
 use crate::a11y::A11yStateExt as _;
 use crate::icons::{IconName, glyph};
 use crate::motion::{BASE, EASE, FAST, Spec, animate, ease_color};
+use crate::shape::{self, CornerRadii as _};
 use crate::spinner::Spinner;
 use crate::theme::{ActiveTokens, Theme};
 use crate::tokens::{
@@ -102,7 +103,10 @@ impl Size {
             Self::Md | Self::Icon => (CONTROL_MD, 14.5, 16.0, 8.0, 17.0),
             Self::Lg | Self::IconLg => (CONTROL_LG, 15.5, 16.0, 8.0, 18.0),
         };
-        let square = matches!(self, Self::IconXs | Self::IconSm | Self::Icon | Self::IconLg);
+        let square = matches!(
+            self,
+            Self::IconXs | Self::IconSm | Self::Icon | Self::IconLg
+        );
         Metrics {
             control,
             font,
@@ -170,7 +174,7 @@ impl Button {
             star: false,
             inverse: false,
             disabled: false,
-            corners: Corners::all(true),
+            corners: shape::ALL,
             focus: None,
             tab_index: 0,
             theme: None,
@@ -295,23 +299,16 @@ impl Button {
         self
     }
 
-    pub fn on_click(mut self, handler: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static) -> Self {
+    pub fn on_click(
+        mut self,
+        handler: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    ) -> Self {
         self.on_click = Some(Rc::new(handler));
         self
     }
 
     fn child_id(&self, name: &'static str) -> ElementId {
         ElementId::NamedChild(self.id.clone().into(), name.into())
-    }
-}
-
-fn rounded(radius: Pixels, corners: Corners<bool>) -> Corners<Pixels> {
-    let pick = |on: bool| if on { radius } else { px(0.0) };
-    Corners {
-        top_left: pick(corners.top_left),
-        top_right: pick(corners.top_right),
-        bottom_right: pick(corners.bottom_right),
-        bottom_left: pick(corners.bottom_left),
     }
 }
 
@@ -344,7 +341,8 @@ impl RenderOnce for Button {
         let radius = px(metrics.control.radius);
         let interactive = !self.disabled && !self.busy;
 
-        let pointer = window.use_keyed_state(self.child_id("pointer"), cx, |_, _| Pointer::default());
+        let pointer =
+            window.use_keyed_state(self.child_id("pointer"), cx, |_, _| Pointer::default());
         let Pointer { hovered, down } = *pointer.read(cx);
         let phase = match (interactive, down && hovered, hovered) {
             (false, _, _) => Phase::Rest,
@@ -360,8 +358,20 @@ impl RenderOnce for Button {
             inverse: self.inverse,
         };
         let target = look(self.variant, flags, phase);
-        let bg = ease_color(self.child_id("bg"), target.bg.resolve(&theme), COLOR, window, cx);
-        let fg = ease_color(self.child_id("fg"), target.fg.resolve(&theme), COLOR, window, cx);
+        let bg = ease_color(
+            self.child_id("bg"),
+            target.bg.resolve(&theme),
+            COLOR,
+            window,
+            cx,
+        );
+        let fg = ease_color(
+            self.child_id("fg"),
+            target.fg.resolve(&theme),
+            COLOR,
+            window,
+            cx,
+        );
 
         let nudge_to = if phase == Phase::Active && !cx.reduce_motion() {
             NUDGE
@@ -395,10 +405,10 @@ impl RenderOnce for Button {
             .or_else(|| self.label.clone())
             .or_else(|| self.tooltip.clone());
 
-        let idle = self.content.take().map_or_else(
-            || self.row(fg, metrics).into_any_element(),
-            |content| content,
-        );
+        let idle = self
+            .content
+            .take()
+            .unwrap_or_else(|| self.row(fg, metrics).into_any_element());
         let busy_row = div()
             .flex()
             .items_center()
@@ -427,25 +437,22 @@ impl RenderOnce for Button {
                     .child(idle),
             )
             .child(
-                    div()
-                        .col_start(1)
-                        .row_start(1)
-                        .flex()
-                        .items_center()
-                        .justify_center()
-                        .relative()
-                        .top(px(rise * (1.0 - swap)))
-                        .opacity(swap)
-                        .child(busy_row),
+                div()
+                    .col_start(1)
+                    .row_start(1)
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .relative()
+                    .top(px(rise * (1.0 - swap)))
+                    .opacity(swap)
+                    .child(busy_row),
             );
 
-        let corners = rounded(radius, self.corners);
-        let ring_corners = rounded(radius + px(RING_OFFSET + RING_WIDTH), self.corners);
+        let corners = shape::pick(radius, self.corners);
+        let ring_corners = shape::pick(radius + px(RING_OFFSET + RING_WIDTH), self.corners);
         let ring_color = theme.color(ColorToken::FocusRing);
-        let tooltip = self
-            .tooltip
-            .clone()
-            .filter(|_| self.expanded != Some(true));
+        let tooltip = self.tooltip.clone().filter(|_| self.expanded != Some(true));
         let shortcut = self.shortcut.clone();
         let on_click = self.on_click.clone().filter(|_| interactive);
         let pointer_hover = pointer.clone();
@@ -466,7 +473,7 @@ impl RenderOnce for Button {
             .when(metrics.square, |el| el.w(height))
             .when(self.block, |el| el.w_full())
             .px(px(metrics.pad_x))
-            .corner_radii(corners)
+            .corners(corners)
             .border_1()
             .border_color(gpui_kit::transparent_black())
             .bg(bg)
@@ -475,13 +482,16 @@ impl RenderOnce for Button {
             .text_size(px(metrics.font * FONT_SANS.size_adjust))
             .font_weight(FontWeight::SEMIBOLD)
             .line_height(relative(1.0))
-            .when(self.busy, |el| el.cursor_progress())
             .when(self.disabled, |el| el.cursor_not_allowed())
             .when(interactive, |el| el.cursor_pointer())
             .role(Role::Button)
             .when_some(label_for_a11y, |el, label| el.aria_label(label))
             .when_some(self.pressed, |el, pressed| {
-                el.aria_toggled(if pressed { Toggled::True } else { Toggled::False })
+                el.aria_toggled(if pressed {
+                    Toggled::True
+                } else {
+                    Toggled::False
+                })
             })
             .when_some(self.expanded, |el, expanded| el.aria_expanded(expanded))
             .when(!disabled || focused, |el| {
@@ -531,7 +541,7 @@ impl RenderOnce for Button {
                         .left(px(-(RING_OFFSET + RING_WIDTH + 1.0)))
                         .right(px(-(RING_OFFSET + RING_WIDTH + 1.0)))
                         .bottom(px(-(RING_OFFSET + RING_WIDTH + 1.0)))
-                        .corner_radii(ring_corners)
+                        .corners(ring_corners)
                         .border(px(RING_WIDTH))
                         .border_color(ring_color),
                 )
