@@ -5,6 +5,8 @@ mod gallery;
 mod instance;
 mod logging;
 mod menus;
+#[cfg(debug_assertions)]
+mod motion_gallery;
 pub mod nav;
 pub mod router;
 mod screens;

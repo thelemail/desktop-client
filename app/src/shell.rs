@@ -1,17 +1,24 @@
 use gpui_kit::{
-    Context, Entity, IntoElement, ParentElement, Render, Styled, Subscription, Window, div,
+    AppContext, Context, Entity, IntoElement, ParentElement, Render, Styled, Subscription, Window,
+    div,
 };
 
 use thelemail_ui::theme::{ActiveTokens, Theme};
 use thelemail_ui::tokens::ColorToken;
 
+#[cfg(debug_assertions)]
+use crate::motion_gallery::MotionGallery;
 use crate::nav::{Navigator, navigator};
+#[cfg(debug_assertions)]
+use crate::router::{DebugPage, GalleryTab, Route};
 use crate::screens;
 use crate::window::FrameSaver;
 
 pub struct Shell {
     nav: Entity<Navigator>,
     frame: FrameSaver,
+    #[cfg(debug_assertions)]
+    motion: Option<Entity<crate::motion_gallery::MotionGallery>>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -26,18 +33,29 @@ impl Shell {
         Self {
             nav,
             frame: FrameSaver::default(),
+            #[cfg(debug_assertions)]
+            motion: None,
             _subscriptions: subscriptions,
         }
     }
 }
 
 impl Render for Shell {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let route = self.nav.read(cx).current().clone();
-        div()
+        let root = div()
             .size_full()
             .bg(cx.tokens().color(ColorToken::Bg))
-            .text_color(cx.tokens().color(ColorToken::FgMuted))
-            .child(screens::render(&route, cx))
+            .text_color(cx.tokens().color(ColorToken::FgMuted));
+        #[cfg(debug_assertions)]
+        if route == Route::Debug(DebugPage::Tokens(GalleryTab::Motion)) {
+            let motion = self
+                .motion
+                .get_or_insert_with(|| cx.new(|cx| MotionGallery::new(window, cx)))
+                .clone();
+            return root.child(motion);
+        }
+        let _ = window;
+        root.child(screens::render(&route, cx))
     }
 }
