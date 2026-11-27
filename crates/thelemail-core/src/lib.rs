@@ -1,7 +1,6 @@
 pub mod ids;
 pub mod keychain;
 pub mod keystore;
-pub mod locale;
 pub mod mirror;
 pub mod net;
 pub mod notify;
@@ -20,7 +19,6 @@ use thelemail_keystore::{Broadcast, Keystore};
 use tokio::sync::broadcast;
 
 use crate::keystore::PersistentHalves;
-use crate::locale::UiLocale;
 use crate::mirror::Mirror;
 use crate::realtime::Realtime;
 use crate::settings::Settings;
@@ -50,7 +48,6 @@ pub struct Core {
     net: Net,
     keystore: Keystore,
     halves: PersistentHalves,
-    locale: UiLocale,
     mirror: Mirror,
     realtime: Realtime,
     settings: Settings,
@@ -68,7 +65,6 @@ impl Core {
             net,
             keystore: Keystore::new(),
             halves: PersistentHalves::default(),
-            locale: UiLocale::default(),
             mirror: Mirror::default(),
             realtime: Realtime::default(),
             settings: Settings::load(paths::data_root().join("settings.json")),
@@ -82,10 +78,6 @@ impl Core {
 
     pub fn keystore(&self) -> &Keystore {
         &self.keystore
-    }
-
-    pub fn locale(&self) -> &UiLocale {
-        &self.locale
     }
 
     pub fn mirror(&self) -> &Mirror {

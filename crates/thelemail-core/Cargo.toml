@@ -16,8 +16,8 @@ semver = "1"
 serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
-sys-locale = "0.3.2"
 thelemail-api = { path = "../thelemail-api" }
+thelemail-i18n = { path = "../thelemail-i18n" }
 thelemail-mime = { path = "../thelemail-mime" }
 thelemail-keystore = { path = "../thelemail-keystore" }
 thelemail-store = { path = "../thelemail-store" }

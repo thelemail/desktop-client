@@ -2,6 +2,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 use serde::{Deserialize, Serialize};
+use thelemail_i18n::Locale;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -16,6 +17,8 @@ pub enum Theme {
 pub struct AppSettings {
     #[serde(default)]
     pub theme: Theme,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub locale: Option<String>,
 }
 
 pub struct Settings {
@@ -46,6 +49,18 @@ impl Settings {
         let mut current = self.current.lock().unwrap();
         let changed = current.theme != theme;
         current.theme = theme;
+        changed
+    }
+
+    pub fn locale(&self) -> Option<Locale> {
+        Locale::parse(self.current.lock().unwrap().locale.as_deref()?)
+    }
+
+    pub fn set_locale(&self, locale: Option<Locale>) -> bool {
+        let mut current = self.current.lock().unwrap();
+        let next = locale.map(|l| l.code().to_string());
+        let changed = current.locale != next;
+        current.locale = next;
         changed
     }
 
@@ -115,5 +130,34 @@ mod tests {
         assert_eq!(Settings::load(path.clone()).theme(), Theme::System);
         std::fs::write(&path, br#"{"later":true}"#).unwrap();
         assert_eq!(Settings::load(path).theme(), Theme::System);
+    }
+
+    #[test]
+    fn saved_locale_survives_a_reload_and_automatic_is_not_written() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        let settings = Settings::load(path.clone());
+        assert_eq!(settings.locale(), None);
+        assert!(settings.set_locale(Some(Locale::De)));
+        assert!(!settings.set_locale(Some(Locale::De)));
+        settings.save().unwrap();
+        let reloaded = Settings::load(path.clone());
+        assert_eq!(reloaded.locale(), Some(Locale::De));
+        assert!(reloaded.set_locale(None));
+        reloaded.save().unwrap();
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            "{\n  \"theme\": \"system\"\n}"
+        );
+    }
+
+    #[test]
+    fn unknown_locales_fall_back_to_automatic_and_keep_the_theme() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        std::fs::write(&path, br#"{"theme":"dark","locale":"pt-BR"}"#).unwrap();
+        let settings = Settings::load(path);
+        assert_eq!(settings.locale(), None);
+        assert_eq!(settings.theme(), Theme::Dark);
     }
 }
