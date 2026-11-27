@@ -7394,6 +7394,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "thelemail-i18n"
+version = "0.24.0"
+dependencies = [
+ "serde_json",
+]
+
+[[package]]
 name = "thelemail-keystore"
 version = "0.24.0"
 dependencies = [
@@ -9414,6 +9421,9 @@ checksum = "ec7a2a501ed189703dba8b08142f057e887dfc4b2cc4db2d343ac6376ba3e0b9"
 [[package]]
 name = "xtask"
 version = "0.24.0"
+dependencies = [
+ "serde_json",
+]
 
 [[package]]
 name = "y4m"
