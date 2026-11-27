@@ -22,7 +22,13 @@ pub mod window;
 
 pub use boot::run;
 
+#[cfg(debug_assertions)]
+mod avatar_gallery;
+#[cfg(debug_assertions)]
+mod avatars;
 mod boot;
+#[cfg(debug_assertions)]
+mod brand_gallery;
 #[cfg(debug_assertions)]
 mod button_gallery;
 #[cfg(debug_assertions)]
@@ -31,3 +37,5 @@ mod choice_gallery;
 mod field_gallery;
 #[cfg(debug_assertions)]
 mod overlay_gallery;
+#[cfg(debug_assertions)]
+mod states_gallery;

@@ -81,6 +81,9 @@ fn tab_label(tab: GalleryTab) -> &'static str {
         GalleryTab::Fields => "Fields",
         GalleryTab::Choices => "Choices",
         GalleryTab::Overlays => "Overlays",
+        GalleryTab::States => "States",
+        GalleryTab::Avatars => "Avatars",
+        GalleryTab::Brand => "Brand",
     }
 }
 
@@ -209,7 +212,10 @@ fn tokens(theme: &Theme, tab: GalleryTab) -> AnyElement {
         | GalleryTab::Buttons
         | GalleryTab::Fields
         | GalleryTab::Choices
-        | GalleryTab::Overlays => body,
+        | GalleryTab::Overlays
+        | GalleryTab::States
+        | GalleryTab::Avatars
+        | GalleryTab::Brand => body,
     }
     .into_any_element()
 }
