@@ -1,0 +1,346 @@
+{
+	"plans": [
+		{
+			"code": null,
+			"isFreePlan": false,
+			"isFreeFamily": false,
+			"allowsCustomDomains": false,
+			"allowsSharedAddresses": false,
+			"allowsSharedDomainAlias": false,
+			"allowsMembers": false
+		},
+		{
+			"code": "free",
+			"isFreePlan": true,
+			"isFreeFamily": false,
+			"allowsCustomDomains": false,
+			"allowsSharedAddresses": false,
+			"allowsSharedDomainAlias": false,
+			"allowsMembers": false
+		},
+		{
+			"code": "free_family",
+			"isFreePlan": true,
+			"isFreeFamily": true,
+			"allowsCustomDomains": false,
+			"allowsSharedAddresses": true,
+			"allowsSharedDomainAlias": true,
+			"allowsMembers": true
+		},
+		{
+			"code": "personal",
+			"isFreePlan": false,
+			"isFreeFamily": false,
+			"allowsCustomDomains": true,
+			"allowsSharedAddresses": true,
+			"allowsSharedDomainAlias": false,
+			"allowsMembers": true
+		},
+		{
+			"code": "personal_plus",
+			"isFreePlan": false,
+			"isFreeFamily": false,
+			"allowsCustomDomains": true,
+			"allowsSharedAddresses": true,
+			"allowsSharedDomainAlias": false,
+			"allowsMembers": true
+		},
+		{
+			"code": "family",
+			"isFreePlan": false,
+			"isFreeFamily": false,
+			"allowsCustomDomains": true,
+			"allowsSharedAddresses": true,
+			"allowsSharedDomainAlias": true,
+			"allowsMembers": true
+		},
+		{
+			"code": "family_plus",
+			"isFreePlan": false,
+			"isFreeFamily": false,
+			"allowsCustomDomains": true,
+			"allowsSharedAddresses": true,
+			"allowsSharedDomainAlias": true,
+			"allowsMembers": true
+		},
+		{
+			"code": "team",
+			"isFreePlan": false,
+			"isFreeFamily": false,
+			"allowsCustomDomains": true,
+			"allowsSharedAddresses": true,
+			"allowsSharedDomainAlias": true,
+			"allowsMembers": true
+		},
+		{
+			"code": "business",
+			"isFreePlan": false,
+			"isFreeFamily": false,
+			"allowsCustomDomains": true,
+			"allowsSharedAddresses": true,
+			"allowsSharedDomainAlias": true,
+			"allowsMembers": true
+		},
+		{
+			"code": "unknown_plan",
+			"isFreePlan": false,
+			"isFreeFamily": false,
+			"allowsCustomDomains": true,
+			"allowsSharedAddresses": true,
+			"allowsSharedDomainAlias": true,
+			"allowsMembers": true
+		}
+	],
+	"invites": [
+		{
+			"type": null,
+			"code": null,
+			"mode": "none"
+		},
+		{
+			"type": null,
+			"code": "free",
+			"mode": "none"
+		},
+		{
+			"type": null,
+			"code": "free_family",
+			"mode": "none"
+		},
+		{
+			"type": null,
+			"code": "personal",
+			"mode": "none"
+		},
+		{
+			"type": null,
+			"code": "personal_plus",
+			"mode": "none"
+		},
+		{
+			"type": null,
+			"code": "family",
+			"mode": "none"
+		},
+		{
+			"type": null,
+			"code": "family_plus",
+			"mode": "none"
+		},
+		{
+			"type": null,
+			"code": "team",
+			"mode": "none"
+		},
+		{
+			"type": null,
+			"code": "business",
+			"mode": "none"
+		},
+		{
+			"type": null,
+			"code": "unknown_plan",
+			"mode": "none"
+		},
+		{
+			"type": "personal",
+			"code": null,
+			"mode": "none"
+		},
+		{
+			"type": "personal",
+			"code": "free",
+			"mode": "none"
+		},
+		{
+			"type": "personal",
+			"code": "free_family",
+			"mode": "none"
+		},
+		{
+			"type": "personal",
+			"code": "personal",
+			"mode": "none"
+		},
+		{
+			"type": "personal",
+			"code": "personal_plus",
+			"mode": "none"
+		},
+		{
+			"type": "personal",
+			"code": "family",
+			"mode": "none"
+		},
+		{
+			"type": "personal",
+			"code": "family_plus",
+			"mode": "none"
+		},
+		{
+			"type": "personal",
+			"code": "team",
+			"mode": "none"
+		},
+		{
+			"type": "personal",
+			"code": "business",
+			"mode": "none"
+		},
+		{
+			"type": "personal",
+			"code": "unknown_plan",
+			"mode": "none"
+		},
+		{
+			"type": "family",
+			"code": null,
+			"mode": "none"
+		},
+		{
+			"type": "family",
+			"code": "free",
+			"mode": "none"
+		},
+		{
+			"type": "family",
+			"code": "free_family",
+			"mode": "existing-account"
+		},
+		{
+			"type": "family",
+			"code": "personal",
+			"mode": "domain"
+		},
+		{
+			"type": "family",
+			"code": "personal_plus",
+			"mode": "domain"
+		},
+		{
+			"type": "family",
+			"code": "family",
+			"mode": "domain"
+		},
+		{
+			"type": "family",
+			"code": "family_plus",
+			"mode": "domain"
+		},
+		{
+			"type": "family",
+			"code": "team",
+			"mode": "domain"
+		},
+		{
+			"type": "family",
+			"code": "business",
+			"mode": "domain"
+		},
+		{
+			"type": "family",
+			"code": "unknown_plan",
+			"mode": "domain"
+		},
+		{
+			"type": "business",
+			"code": null,
+			"mode": "none"
+		},
+		{
+			"type": "business",
+			"code": "free",
+			"mode": "none"
+		},
+		{
+			"type": "business",
+			"code": "free_family",
+			"mode": "existing-account"
+		},
+		{
+			"type": "business",
+			"code": "personal",
+			"mode": "domain"
+		},
+		{
+			"type": "business",
+			"code": "personal_plus",
+			"mode": "domain"
+		},
+		{
+			"type": "business",
+			"code": "family",
+			"mode": "domain"
+		},
+		{
+			"type": "business",
+			"code": "family_plus",
+			"mode": "domain"
+		},
+		{
+			"type": "business",
+			"code": "team",
+			"mode": "domain"
+		},
+		{
+			"type": "business",
+			"code": "business",
+			"mode": "domain"
+		},
+		{
+			"type": "business",
+			"code": "unknown_plan",
+			"mode": "domain"
+		},
+		{
+			"type": "unknown_type",
+			"code": null,
+			"mode": "none"
+		},
+		{
+			"type": "unknown_type",
+			"code": "free",
+			"mode": "none"
+		},
+		{
+			"type": "unknown_type",
+			"code": "free_family",
+			"mode": "none"
+		},
+		{
+			"type": "unknown_type",
+			"code": "personal",
+			"mode": "none"
+		},
+		{
+			"type": "unknown_type",
+			"code": "personal_plus",
+			"mode": "none"
+		},
+		{
+			"type": "unknown_type",
+			"code": "family",
+			"mode": "none"
+		},
+		{
+			"type": "unknown_type",
+			"code": "family_plus",
+			"mode": "none"
+		},
+		{
+			"type": "unknown_type",
+			"code": "team",
+			"mode": "none"
+		},
+		{
+			"type": "unknown_type",
+			"code": "business",
+			"mode": "none"
+		},
+		{
+			"type": "unknown_type",
+			"code": "unknown_plan",
+			"mode": "none"
+		}
+	]
+}

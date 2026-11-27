@@ -90,6 +90,7 @@ pub fn forget(
     crate::ids::account_id(account_id)?;
     let _guard = saved_session_lock();
     core.auth().forget(account_id);
+    core.account().forget(account_id);
     core.net().forget_cookie(&refresh_cookie_name(account_id));
     core.net()
         .forget_cookie(&legacy_refresh_cookie_name(account_id));
