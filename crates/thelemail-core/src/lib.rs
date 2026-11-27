@@ -9,6 +9,7 @@ pub mod paths;
 pub mod productkeys;
 pub mod realtime;
 pub mod session;
+pub mod settings;
 pub mod shell;
 pub mod updates;
 
@@ -22,6 +23,7 @@ use crate::keystore::PersistentHalves;
 use crate::locale::UiLocale;
 use crate::mirror::Mirror;
 use crate::realtime::Realtime;
+use crate::settings::Settings;
 
 #[derive(Debug, Clone)]
 pub enum CoreEvent {
@@ -51,6 +53,7 @@ pub struct Core {
     locale: UiLocale,
     mirror: Mirror,
     realtime: Realtime,
+    settings: Settings,
     events: broadcast::Sender<CoreEvent>,
 }
 
@@ -68,6 +71,7 @@ impl Core {
             locale: UiLocale::default(),
             mirror: Mirror::default(),
             realtime: Realtime::default(),
+            settings: Settings::load(paths::data_root().join("settings.json")),
             events,
         }
     }
@@ -90,6 +94,10 @@ impl Core {
 
     pub fn realtime(&self) -> &Realtime {
         &self.realtime
+    }
+
+    pub fn settings(&self) -> &Settings {
+        &self.settings
     }
 
     pub fn shutdown(&self) {
