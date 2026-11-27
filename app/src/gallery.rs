@@ -27,6 +27,22 @@ pub fn frame(
     tab: GalleryTab,
     current: &Theme,
     language: Language,
+    content: impl FnMut(&Theme) -> AnyElement,
+) -> Div {
+    frame_in(
+        tab,
+        current,
+        language,
+        &[Appearance::Light, Appearance::Dark],
+        content,
+    )
+}
+
+pub fn frame_in(
+    tab: GalleryTab,
+    current: &Theme,
+    language: Language,
+    columns: &[Appearance],
     mut content: impl FnMut(&Theme) -> AnyElement,
 ) -> Div {
     div()
@@ -42,11 +58,11 @@ pub fn frame(
                 .min_h_0()
                 .overflow_y_scroll()
                 .child(
-                    div()
-                        .flex()
-                        .w_full()
-                        .child(column(theme(Appearance::Light, current), &mut content))
-                        .child(column(theme(Appearance::Dark, current), &mut content)),
+                    div().flex().w_full().children(
+                        columns
+                            .iter()
+                            .map(|appearance| column(theme(*appearance, current), &mut content)),
+                    ),
                 ),
         )
 }
@@ -60,6 +76,8 @@ fn tab_label(tab: GalleryTab) -> &'static str {
         GalleryTab::Motion => "Motion",
         GalleryTab::Icons => "Icons",
         GalleryTab::Language => "Language",
+        GalleryTab::Buttons => "Buttons",
+        GalleryTab::Fields => "Fields",
     }
 }
 
@@ -194,7 +212,7 @@ fn tokens(theme: &Theme, tab: GalleryTab) -> AnyElement {
             .child(section("Type scale", type_scale(&theme), &theme))
             .child(section("Weights", weights(&theme), &theme)),
         GalleryTab::Language => body.child(language_gallery::render(&theme)),
-        GalleryTab::Motion | GalleryTab::Icons => body,
+        GalleryTab::Motion | GalleryTab::Icons | GalleryTab::Buttons | GalleryTab::Fields => body,
     }
     .into_any_element()
 }

@@ -23,3 +23,7 @@ pub mod window;
 pub use boot::run;
 
 mod boot;
+#[cfg(debug_assertions)]
+mod button_gallery;
+#[cfg(debug_assertions)]
+mod field_gallery;

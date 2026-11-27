@@ -7,6 +7,10 @@ use thelemail_ui::theme::{ActiveTokens, Theme};
 use thelemail_ui::tokens::ColorToken;
 
 #[cfg(debug_assertions)]
+use crate::button_gallery::ButtonGallery;
+#[cfg(debug_assertions)]
+use crate::field_gallery::FieldGallery;
+#[cfg(debug_assertions)]
 use crate::icon_gallery::IconGallery;
 #[cfg(debug_assertions)]
 use crate::motion_gallery::MotionGallery;
@@ -23,6 +27,10 @@ pub struct Shell {
     motion: Option<Entity<MotionGallery>>,
     #[cfg(debug_assertions)]
     icons: Option<Entity<IconGallery>>,
+    #[cfg(debug_assertions)]
+    buttons: Option<Entity<ButtonGallery>>,
+    #[cfg(debug_assertions)]
+    fields: Option<Entity<FieldGallery>>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -41,6 +49,10 @@ impl Shell {
             motion: None,
             #[cfg(debug_assertions)]
             icons: None,
+            #[cfg(debug_assertions)]
+            buttons: None,
+            #[cfg(debug_assertions)]
+            fields: None,
             _subscriptions: subscriptions,
         }
     }
@@ -68,6 +80,22 @@ impl Render for Shell {
                 .get_or_insert_with(|| cx.new(|_| IconGallery::new()))
                 .clone();
             return root.child(icons);
+        }
+        #[cfg(debug_assertions)]
+        if route == Route::Debug(DebugPage::Tokens(GalleryTab::Buttons)) {
+            let buttons = self
+                .buttons
+                .get_or_insert_with(|| cx.new(|_| ButtonGallery::new()))
+                .clone();
+            return root.child(buttons);
+        }
+        #[cfg(debug_assertions)]
+        if route == Route::Debug(DebugPage::Tokens(GalleryTab::Fields)) {
+            let fields = self
+                .fields
+                .get_or_insert_with(|| cx.new(|cx| FieldGallery::new(window, cx)))
+                .clone();
+            return root.child(fields);
         }
         let _ = window;
         root.child(screens::render(&route, cx))

@@ -1,8 +1,10 @@
+mod color;
 mod curve;
 mod driver;
 mod live;
 mod named;
 
+pub use color::{ease_color, mix};
 pub use curve::{BASE, Bezier, CUBIC_OUT, Curve, EASE, EASE_OUT, FAST, LINEAR, SLOW};
 pub use driver::{Motion, Reduced, Sample, Spec};
 pub use live::{MotionHandle, animate, animate_from};
