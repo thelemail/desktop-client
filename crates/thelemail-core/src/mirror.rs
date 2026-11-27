@@ -303,7 +303,7 @@ impl Mirror {
             .collect();
         for (account_id, conn) in drained {
             if let Err((_, err)) = conn.close() {
-                eprintln!("mirror: closing {account_id} on shutdown failed: {err}");
+                tracing::warn!("mirror: closing {account_id} on shutdown failed: {err}");
             }
         }
     }
@@ -737,7 +737,9 @@ async fn retry_pass(core: &Arc<Core>, account_id: &str) -> RetryPass {
                 Ok(true) => recovered += 1,
                 Ok(false) => {}
                 Err(err) => {
-                    eprintln!("mirror: storing a recovered preview for {account_id} failed: {err}");
+                    tracing::warn!(
+                        "mirror: storing a recovered preview for {account_id} failed: {err}"
+                    );
                     return RetryPass::Done;
                 }
             }
@@ -750,13 +752,13 @@ async fn retry_pass(core: &Arc<Core>, account_id: &str) -> RetryPass {
     if recovered == 0 {
         return RetryPass::Done;
     }
-    eprintln!("mirror: recovered {recovered} preview(s) for {account_id} after a key change");
+    tracing::info!("mirror: recovered {recovered} preview(s) for {account_id} after a key change");
     core.emit(CoreEvent::MirrorChanged {
         account_id: account_id.to_string(),
         arrived: 0,
     });
     if let Err(err) = prefetch_bodies(net, ks, mirror, account_id, &token, |_, _| {}).await {
-        eprintln!("mirror: fetching recovered bodies for {account_id} failed: {err}");
+        tracing::warn!("mirror: fetching recovered bodies for {account_id} failed: {err}");
     }
     RetryPass::Done
 }
@@ -999,7 +1001,7 @@ fn announce(core: &Arc<Core>, account_id: &str, fresh: &[crate::notify::NewMail]
         return;
     }
     let armed = core.mirror().notifications_armed(account_id);
-    eprintln!(
+    tracing::info!(
         "mirror: {} fresh arrival(s) for {account_id}, notifications armed={armed}",
         fresh.len()
     );
@@ -1176,7 +1178,7 @@ pub async fn watch_inbox(core: Arc<Core>, account_id: String) {
             match poll_changes(&core, &account_id, &token).await {
                 Ok(arrivals) => {
                     failures = 0;
-                    eprintln!(
+                    tracing::info!(
                         "mirror: poll for {account_id} saw {} arrival(s)",
                         arrivals.len()
                     );
@@ -1184,7 +1186,7 @@ pub async fn watch_inbox(core: Arc<Core>, account_id: String) {
                 }
                 Err(err) => {
                     failures = failures.saturating_add(1);
-                    eprintln!("mirror: poll for {account_id} failed ({failures}): {err}");
+                    tracing::warn!("mirror: poll for {account_id} failed ({failures}): {err}");
                     if err == SESSION_EXPIRED {
                         core.emit(CoreEvent::TokenExpired {
                             account_id: account_id.to_string(),
@@ -2263,7 +2265,7 @@ async fn poll_changes(
 
         if page.resync_required {
             mirror.with_conn(account_id, |conn| reset_for_resync(conn, &page.next_cursor))?;
-            eprintln!(
+            tracing::info!(
                 "mirror: {account_id} is past the change horizon, rebuilding from the watermark"
             );
             tokio::spawn(backfill(

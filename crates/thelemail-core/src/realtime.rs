@@ -238,7 +238,7 @@ async fn read(
                     }
                 }
                 if buffer.len() > MAX_FRAME_BYTES {
-                    eprintln!("realtime: a frame for {account_id} passed {MAX_FRAME_BYTES} bytes, reconnecting");
+                    tracing::warn!("realtime: a frame for {account_id} passed {MAX_FRAME_BYTES} bytes, reconnecting");
                     return Ended::Dropped;
                 }
             }

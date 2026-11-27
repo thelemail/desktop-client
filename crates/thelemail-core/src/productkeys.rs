@@ -169,7 +169,7 @@ pub async fn verify(
 pub async fn verify_or_clear(core: &Core, account_id: &str, token: &str) -> bool {
     match verify(core.net(), core.keystore(), account_id, token).await {
         Ok(Outcome::Unreachable(err)) => {
-            eprintln!("productkeys: could not check {account_id}: {err}");
+            tracing::warn!("productkeys: could not check {account_id}: {err}");
             true
         }
         Ok(_) => true,
@@ -177,14 +177,14 @@ pub async fn verify_or_clear(core: &Core, account_id: &str, token: &str) -> bool
             reason,
             enforce: false,
         }) => {
-            eprintln!("productkeys: {account_id} refused, not enforced: {reason}");
+            tracing::warn!("productkeys: {account_id} refused, not enforced: {reason}");
             true
         }
         Err(Refused {
             reason,
             enforce: true,
         }) => {
-            eprintln!("productkeys: {account_id} refused: {reason}");
+            tracing::warn!("productkeys: {account_id} refused: {reason}");
             clear_account(core, account_id);
             false
         }

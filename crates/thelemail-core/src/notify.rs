@@ -259,7 +259,7 @@ mod platform {
     }
 
     fn publish(core: &Arc<Core>, status: NotifyStatus) {
-        eprintln!(
+        tracing::info!(
             "notifications: authorization={} alerts={} sound={} translocated={} error={}",
             status.authorization,
             status.alerts,
@@ -317,7 +317,7 @@ mod platform {
             block2::RcBlock::new(move |granted: objc2::runtime::Bool, err: *mut NSError| {
                 let error = describe_error(err);
                 if !granted.as_bool() {
-                    eprintln!(
+                    tracing::warn!(
                         "notifications: authorization was not granted: {}",
                         error.as_deref().unwrap_or("declined by the user")
                     );
@@ -367,10 +367,10 @@ mod platform {
             let handler =
                 block2::RcBlock::new(move |err: *mut NSError| match describe_error(err) {
                     Some(error) => {
-                        eprintln!("notifications: the request was rejected: {error}");
+                        tracing::warn!("notifications: the request was rejected: {error}");
                         refresh_status(&core, Some(error));
                     }
-                    None => eprintln!("notifications: posted {message_id}"),
+                    None => tracing::info!("notifications: posted {message_id}"),
                 });
             center().addNotificationRequest_withCompletionHandler(&request, Some(&handler));
         }
@@ -379,7 +379,7 @@ mod platform {
     pub fn post(core: &Arc<Core>, mail: &NewMail) {
         if !bundled() {
             if !WARNED_UNBUNDLED.swap(true, Ordering::SeqCst) {
-                eprintln!(
+                tracing::info!(
                     "notifications: not running from an app bundle, notifications are disabled"
                 );
             }
@@ -389,7 +389,7 @@ mod platform {
         let mail = mail.clone();
         with_settings(move |settings| {
             let status = settings.authorizationStatus();
-            eprintln!(
+            tracing::info!(
                 "notifications: posting {} with authorization={}",
                 mail.message_id,
                 authorization_name(status)
@@ -504,7 +504,7 @@ mod platform {
     }
 
     fn publish(core: &Arc<Core>, status: NotifyStatus) {
-        eprintln!(
+        tracing::info!(
             "notifications: authorization={} alerts={} error={}",
             status.authorization,
             status.alerts,
@@ -565,16 +565,16 @@ mod platform {
     pub fn post(core: &Arc<Core>, mail: &NewMail) {
         if installed().is_none() {
             if !WARNED_UNBUNDLED.swap(true, Ordering::SeqCst) {
-                eprintln!(
+                tracing::info!(
                     "notifications: not running from an installed copy, notifications are disabled"
                 );
             }
             return;
         }
         match deliver(core, mail) {
-            Ok(()) => eprintln!("notifications: posted {}", mail.message_id),
+            Ok(()) => tracing::info!("notifications: posted {}", mail.message_id),
             Err(err) => {
-                eprintln!("notifications: the toast was rejected: {}", err.message());
+                tracing::warn!("notifications: the toast was rejected: {}", err.message());
                 publish(core, snapshot(Some(err.message())));
             }
         }

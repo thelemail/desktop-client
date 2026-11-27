@@ -141,7 +141,7 @@ impl Updates {
         let mut persisted = self.persisted.lock().expect("updates state");
         f(&mut persisted);
         if let Err(err) = save(&self.path, &persisted) {
-            eprintln!("updates: saving state failed: {err}");
+            tracing::warn!("updates: saving state failed: {err}");
         }
     }
 

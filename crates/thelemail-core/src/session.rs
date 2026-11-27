@@ -66,7 +66,7 @@ pub fn sync_persisted(net: &Net, account_id: &str) {
         return;
     };
     if let Err(err) = keychain::put_refresh_cookie(account_id, value) {
-        eprintln!("session: could not update the saved sign-in: {err}");
+        tracing::warn!("session: could not update the saved sign-in: {err}");
     }
 }
 
