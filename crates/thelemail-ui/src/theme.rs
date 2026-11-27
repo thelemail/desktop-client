@@ -121,6 +121,10 @@ impl Theme {
             colors.border = self.color(ColorToken::BorderSoft);
             colors.input = self.color(ColorToken::BorderControl);
             colors.ring = self.color(ColorToken::FocusRing);
+            colors.scrollbar = Hsla::transparent_black();
+            colors.scrollbar_thumb = self.color(ColorToken::BorderStrong);
+            colors.scrollbar_thumb_hover = self.color(ColorToken::BorderControl);
+            kit.scrollbar_mode = crate::scroll_area::mode();
         });
     }
 

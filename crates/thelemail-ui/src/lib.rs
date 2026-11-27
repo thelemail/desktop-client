@@ -11,6 +11,7 @@ pub mod load_state;
 pub mod motion;
 pub mod overlay;
 pub mod rich;
+pub mod scroll_area;
 pub mod separator;
 pub mod shape;
 pub mod skeleton;
