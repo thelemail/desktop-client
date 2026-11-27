@@ -1,13 +1,12 @@
 use std::time::Duration;
 
-use gpui_kit::base::{Keyframe, Keyframes, Timing, animate_keyframes};
 use gpui_kit::{
     App, ElementId, InteractiveElement, IntoElement, ParentElement, RenderOnce, Role,
     StatefulInteractiveElement, Styled, Window, div, px, relative,
 };
 use thelemail_i18n::m;
 
-use crate::motion::{EASE_OUT, Spec, animate};
+use crate::motion::{EASE_OUT, Spec, animate, once};
 use crate::theme::{ActiveTokens, Theme};
 use crate::tokens::ColorToken;
 
@@ -69,18 +68,6 @@ impl StepPills {
     }
 }
 
-fn arrival(id: ElementId, window: &mut Window, cx: &mut App) -> f32 {
-    let total = ARRIVE_DELAY + ARRIVE;
-    let hold = ARRIVE_DELAY.as_secs_f32() / total.as_secs_f32();
-    let keyframes = Keyframes::try_new([
-        Keyframe::new(0.0, 0.0_f32),
-        Keyframe::new(hold, 0.0).ease(EASE_OUT.easing()),
-        Keyframe::new(1.0, 1.0),
-    ])
-    .expect("ordered keyframes");
-    animate_keyframes(id, &keyframes, Timing::new(total), window, cx).value
-}
-
 impl RenderOnce for StepPills {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
         let theme = self.theme.unwrap_or(*cx.tokens());
@@ -100,7 +87,7 @@ impl RenderOnce for StepPills {
                 .clamp(0.0, 1.0);
                 let shown = if i == self.current {
                     let id = self.child_id(format!("arrive-{}", self.current));
-                    eased * arrival(id, window, cx)
+                    eased * once(id, ARRIVE_DELAY, ARRIVE, EASE_OUT, window, cx)
                 } else {
                     eased
                 };

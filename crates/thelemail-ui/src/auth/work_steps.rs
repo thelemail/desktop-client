@@ -1,6 +1,5 @@
 use std::time::Duration;
 
-use gpui_kit::base::{Keyframe, Keyframes, Timing, animate_keyframes};
 use gpui_kit::{
     App, ElementId, InteractiveElement, IntoElement, ParentElement, RenderOnce, Role, SharedString,
     StatefulInteractiveElement, Styled, Transformation, Window, accesskit, div, px, relative, size,
@@ -8,7 +7,7 @@ use gpui_kit::{
 
 use crate::a11y::A11yStateExt as _;
 use crate::icons::{IconName, glyph};
-use crate::motion::{BASE, EASE_OUT, Spec, animate, ease_color};
+use crate::motion::{BASE, EASE_OUT, Spec, animate, ease_color, once};
 use crate::spinner::{STATUS_PERIOD, Spinner};
 use crate::theme::{ActiveTokens, Theme};
 use crate::tokens::{ColorToken, FONT_SANS, RADIUS_PILL};
@@ -87,15 +86,6 @@ impl WorkSteps {
     }
 }
 
-fn pop(id: ElementId, window: &mut Window, cx: &mut App) -> f32 {
-    let keyframes = Keyframes::try_new([
-        Keyframe::new(0.0, 0.0_f32).ease(EASE_OUT.easing()),
-        Keyframe::new(1.0, 1.0),
-    ])
-    .expect("two endpoint keyframes");
-    animate_keyframes(id, &keyframes, Timing::new(TICK_POP), window, cx).value
-}
-
 impl RenderOnce for WorkSteps {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
         let theme = self.theme.unwrap_or(*cx.tokens());
@@ -149,7 +139,14 @@ impl RenderOnce for WorkSteps {
                         .period(STATUS_PERIOD),
                     ),
                     Row::Done => {
-                        let shown = pop(self.child_id(format!("tick-{i}")), window, cx);
+                        let shown = once(
+                            self.child_id(format!("tick-{i}")),
+                            Duration::ZERO,
+                            TICK_POP,
+                            EASE_OUT,
+                            window,
+                            cx,
+                        );
                         let scale = TICK_FROM + (1.0 - TICK_FROM) * shown;
                         slot.bg(theme.color(ColorToken::Success100)).child(
                             div().opacity(shown).child(

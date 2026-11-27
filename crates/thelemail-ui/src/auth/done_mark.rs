@@ -1,6 +1,5 @@
 use std::time::Duration;
 
-use gpui_kit::base::{Keyframe, Keyframes, Timing, animate_keyframes};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
     App, ElementId, InteractiveElement, IntoElement, LineCap, LineJoin, ParentElement, PathBuilder,
@@ -8,7 +7,7 @@ use gpui_kit::{
     Window, canvas, div, point, px,
 };
 
-use crate::motion::EASE_OUT;
+use crate::motion::{EASE_OUT, once};
 use crate::theme::{ActiveTokens, Theme};
 use crate::tokens::{ColorToken, RADIUS_PILL};
 
@@ -85,23 +84,25 @@ impl DoneMark {
     }
 }
 
-fn play(id: ElementId, delay: Duration, run: Duration, window: &mut Window, cx: &mut App) -> f32 {
-    let total = delay + run;
-    let hold = delay.as_secs_f32() / total.as_secs_f32();
-    let keyframes = Keyframes::try_new([
-        Keyframe::new(0.0, 0.0_f32),
-        Keyframe::new(hold, 0.0).ease(EASE_OUT.easing()),
-        Keyframe::new(1.0, 1.0),
-    ])
-    .expect("ordered keyframes");
-    animate_keyframes(id, &keyframes, Timing::new(total), window, cx).value
-}
-
 impl RenderOnce for DoneMark {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
         let theme = self.theme.unwrap_or(*cx.tokens());
-        let pop = play(self.child_id("pop"), Duration::ZERO, POP, window, cx);
-        let draw = play(self.child_id("draw"), DRAW_DELAY, DRAW, window, cx);
+        let pop = once(
+            self.child_id("pop"),
+            Duration::ZERO,
+            POP,
+            EASE_OUT,
+            window,
+            cx,
+        );
+        let draw = once(
+            self.child_id("draw"),
+            DRAW_DELAY,
+            DRAW,
+            EASE_OUT,
+            window,
+            cx,
+        );
         let disc = DISC * (POP_FROM + (1.0 - POP_FROM) * pop);
         let ink = theme.color(ColorToken::Primary);
         let line = drawn(&CHECK_POINTS, draw);

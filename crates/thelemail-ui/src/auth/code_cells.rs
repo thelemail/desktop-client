@@ -196,9 +196,7 @@ impl RenderOnce for CodeCells {
             .disabled(self.disabled)
             .aria_label(self.label.clone())
             .content_type(InputContentType::OneTimeCode)
-            .absolute()
-            .inset_0()
-            .opacity(0.0)
+            .size_full()
             .text_size(px(INPUT_FONT));
         let focus = self.state.clone();
         div()
@@ -214,7 +212,7 @@ impl RenderOnce for CodeCells {
                 })
             })
             .children(cells)
-            .child(field)
+            .child(div().absolute().inset_0().opacity(0.0).child(field))
     }
 }
 
