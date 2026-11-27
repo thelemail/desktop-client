@@ -32,3 +32,4 @@ windows-sys = { version = "0.61", features = [
 tempfile = "3"
 thelemail-trust = { path = "../thelemail-trust", features = ["testkit"] }
 uuid = { workspace = true, features = ["v4"] }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time"] }

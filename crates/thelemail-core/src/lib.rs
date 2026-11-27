@@ -108,3 +108,36 @@ impl Core {
         let _ = self.events.send(CoreEvent::Keystore(event));
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const ACCOUNT: &str = "0c0c0c0c-0c0c-4c0c-8c0c-0c0c0c0c0c0c";
+
+    fn core() -> Arc<Core> {
+        Core::new(ApiConfig {
+            api_base: "https://api.thelemail.test/".parse().unwrap(),
+            submission_base: "https://submit.thelemail.test/".parse().unwrap(),
+            web_origin: "https://app.thelemail.test".to_owned(),
+        })
+        .unwrap()
+    }
+
+    #[tokio::test]
+    async fn keystore_events_reach_core_subscribers() {
+        let core = core();
+        let mut events = core.subscribe();
+        core.start();
+        tokio::task::yield_now().await;
+        core.keystore().clear(ACCOUNT);
+        let event = tokio::time::timeout(std::time::Duration::from_secs(2), events.recv())
+            .await
+            .expect("an event within two seconds")
+            .expect("an open channel");
+        assert!(matches!(
+            event,
+            CoreEvent::Keystore(Broadcast::Cleared { ref account_id }) if account_id == ACCOUNT
+        ));
+    }
+}
