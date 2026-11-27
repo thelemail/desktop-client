@@ -1,5 +1,6 @@
 pub mod a11y;
 pub mod badge;
+pub mod brand;
 pub mod button;
 pub mod choice;
 pub mod empty_state;
