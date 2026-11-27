@@ -16,6 +16,7 @@ use thelemail_ui::theme::{ActiveTokens, Theme};
 use thelemail_ui::tokens::{ColorToken, RADIUS_MD, RADIUS_SM, ShadowToken, T_LABEL, T_SMALL};
 
 use crate::gallery::{caption, frame, section, segmented};
+use crate::language::Language;
 use crate::router::GalleryTab;
 
 const MISSED: Duration = Duration::from_micros(12_500);
@@ -172,7 +173,8 @@ impl Render for MotionGallery {
         self.meter.tick(cx.background_executor().now());
         let current = *cx.tokens();
         let this = cx.entity().downgrade();
-        frame(GalleryTab::Motion, &current, |theme| {
+        let language = *cx.global::<Language>();
+        frame(GalleryTab::Motion, &current, language, |theme| {
             self.column(theme, &this, window, cx)
         })
     }
