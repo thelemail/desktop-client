@@ -326,6 +326,23 @@ mod tests {
         assert_eq!(Updates::new(dir.path()).persisted(), Persisted::default());
     }
 
+    #[test]
+    fn a_state_file_written_by_the_tauri_app_reads_back_unchanged() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let written = r#"{"snoozedVersion":"0.24.1","snoozedUntil":1795000000,"lastCheck":1794990000,"lastFailure":"download"}"#;
+        std::fs::write(dir.path().join(STATE_FILE), written).expect("write");
+        let persisted = Updates::new(dir.path()).persisted();
+        assert_eq!(persisted.snoozed_version.as_deref(), Some("0.24.1"));
+        assert_eq!(persisted.snoozed_until, Some(1_795_000_000));
+        assert_eq!(persisted.last_check, Some(1_794_990_000));
+        assert_eq!(persisted.last_failure.as_deref(), Some("download"));
+        assert_eq!(
+            serde_json::to_string(&persisted).expect("encode"),
+            written,
+            "the file must round-trip in the 0.24.x layout"
+        );
+    }
+
     fn offer(version: &str) -> Available {
         Available {
             version: version.to_owned(),

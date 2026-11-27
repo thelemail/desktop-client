@@ -65,6 +65,7 @@ windows-sys = { version = "0.61", features = [
 ] }
 
 [dev-dependencies]
+reqwest = { workspace = true, features = ["blocking", "json"] }
 dataview = "1.1"
 pelite = "0.10.0"
 tempfile = "3"
