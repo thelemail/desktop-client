@@ -1,5 +1,6 @@
 pub mod a11y;
 pub mod button;
+pub mod choice;
 pub mod feedback;
 pub mod field;
 pub mod fonts;
