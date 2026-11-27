@@ -7390,6 +7390,7 @@ dependencies = [
  "thelemail-state",
  "thelemail-store",
  "thelemail-trust",
+ "thiserror 2.0.20",
  "tokio",
  "tracing",
  "url",

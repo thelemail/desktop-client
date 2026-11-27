@@ -1,3 +1,4 @@
+pub mod api;
 pub mod avatars;
 pub mod ids;
 pub mod keychain;
@@ -12,6 +13,8 @@ pub mod sender;
 pub mod session;
 pub mod settings;
 pub mod shell;
+#[cfg(test)]
+pub(crate) mod stub;
 pub mod updates;
 
 use std::sync::Arc;
@@ -20,6 +23,7 @@ use thelemail_api::{ApiConfig, Net, TransportError};
 use thelemail_keystore::{Broadcast, Keystore};
 use tokio::sync::broadcast;
 
+use crate::api::{Api, Auth};
 use crate::avatars::Avatars;
 use crate::keystore::PersistentHalves;
 use crate::mirror::Mirror;
@@ -42,6 +46,9 @@ pub enum CoreEvent {
     TokenExpired {
         account_id: String,
     },
+    SessionLost {
+        account_id: String,
+    },
     Realtime(realtime::RealtimeFrame),
     NotificationOpened(notify::NotificationTarget),
     NotifyStatus(notify::NotifyStatus),
@@ -52,6 +59,7 @@ pub enum CoreEvent {
 
 pub struct Core {
     net: Net,
+    auth: Auth,
     keystore: Keystore,
     halves: PersistentHalves,
     mirror: Mirror,
@@ -70,6 +78,7 @@ impl Core {
         let (events, _) = broadcast::channel(256);
         Self {
             net,
+            auth: Auth::new(events.clone()),
             keystore: Keystore::new(),
             halves: PersistentHalves::default(),
             mirror: Mirror::default(),
@@ -82,6 +91,14 @@ impl Core {
 
     pub fn net(&self) -> &Net {
         &self.net
+    }
+
+    pub fn auth(&self) -> &Auth {
+        &self.auth
+    }
+
+    pub fn api(&self) -> Api<'_> {
+        Api::new(&self.net, &self.auth)
     }
 
     pub fn keystore(&self) -> &Keystore {
