@@ -1,10 +1,9 @@
 use std::sync::{Mutex, MutexGuard};
 
 use sha2::{Digest, Sha256};
-use tauri::State;
 use thelemail_api::{ApiRequest, Net};
 
-use crate::keychain;
+use crate::{Core, keychain};
 
 static SAVED_SESSION: Mutex<()> = Mutex::new(());
 
@@ -71,29 +70,22 @@ pub fn sync_persisted(net: &Net, account_id: &str) {
     }
 }
 
-#[derive(Debug, serde::Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct SessionArgs {
-    pub account_id: String,
-}
-
-#[tauri::command]
-pub fn session_persist(net: State<'_, Net>, args: SessionArgs) -> Result<bool, String> {
-    crate::ids::account_id(&args.account_id)?;
+pub fn persist(core: &Core, account_id: &str) -> Result<bool, String> {
+    crate::ids::account_id(account_id)?;
     let _guard = saved_session_lock();
-    let Some(value) = find_refresh_cookie(&net.export_cookies(), &args.account_id) else {
+    let Some(value) = find_refresh_cookie(&core.net().export_cookies(), account_id) else {
         return Ok(false);
     };
-    keychain::put_refresh_cookie(&args.account_id, &value)?;
+    keychain::put_refresh_cookie(account_id, &value)?;
     Ok(true)
 }
 
-#[tauri::command]
-pub fn session_restore(net: State<'_, Net>, args: SessionArgs) -> Result<bool, String> {
-    crate::ids::account_id(&args.account_id)?;
-    match keychain::refresh_cookie(&args.account_id) {
+pub fn restore(core: &Core, account_id: &str) -> Result<bool, String> {
+    crate::ids::account_id(account_id)?;
+    match keychain::refresh_cookie(account_id) {
         keychain::Read::Found(value) => {
-            net.import_cookie(&refresh_cookie_name(&args.account_id), &value)
+            core.net()
+                .import_cookie(&refresh_cookie_name(account_id), &value)
                 .map_err(|e| e.to_string())?;
             Ok(true)
         }
@@ -102,21 +94,20 @@ pub fn session_restore(net: State<'_, Net>, args: SessionArgs) -> Result<bool, S
     }
 }
 
-#[tauri::command]
-pub fn session_forget(
-    net: State<'_, Net>,
-    mirror: State<'_, crate::mirror::Mirror>,
-    halves: State<'_, crate::keystore::PersistentHalves>,
-    args: SessionArgs,
+pub fn forget(
+    core: &Core,
+    account_id: &str,
+    purge: impl FnOnce(&str) -> Result<(), String>,
 ) -> Result<(), String> {
-    crate::ids::account_id(&args.account_id)?;
+    crate::ids::account_id(account_id)?;
     let _guard = saved_session_lock();
-    net.forget_cookie(&refresh_cookie_name(&args.account_id));
-    net.forget_cookie(&legacy_refresh_cookie_name(&args.account_id));
-    crate::keystore::forget_persisted(&halves, &args.account_id);
-    let purged = mirror.purge(&args.account_id);
-    let cookie = keychain::forget_refresh_cookie(&args.account_id);
-    let db_key = keychain::forget_db_key(&args.account_id);
+    core.net().forget_cookie(&refresh_cookie_name(account_id));
+    core.net()
+        .forget_cookie(&legacy_refresh_cookie_name(account_id));
+    crate::keystore::forget_persisted(core, account_id);
+    let purged = purge(account_id);
+    let cookie = keychain::forget_refresh_cookie(account_id);
+    let db_key = keychain::forget_db_key(account_id);
     purged.and(cookie).and(db_key)
 }
 

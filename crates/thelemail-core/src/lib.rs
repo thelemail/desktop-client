@@ -2,7 +2,9 @@ pub mod ids;
 pub mod keychain;
 pub mod keystore;
 pub mod locale;
+pub mod net;
 pub mod paths;
+pub mod session;
 
 use std::sync::Arc;
 
