@@ -2,7 +2,7 @@ use crate::plural::{Category, cardinal, ordinal};
 use crate::rich::{Rich, fill};
 use crate::{Locale, locale};
 pub const SOURCE_TAG: &str = "v0.52.0";
-pub const KEY_COUNT: usize = 3864;
+pub const KEY_COUNT: usize = 3890;
 pub fn account_key_unchecked() -> &'static str {
     match locale() {
         Locale::En => {
@@ -10856,6 +10856,214 @@ pub fn common_something_went_wrong() -> &'static str {
         Locale::De => "Etwas ist schiefgelaufen. Versuchen Sie es erneut.",
         Locale::Fr => "Une erreur s’est produite. Réessayez.",
         Locale::Pt => "Ocorreu um erro. Tente novamente.",
+    }
+}
+pub fn desktop_menu_about() -> &'static str {
+    match locale() {
+        Locale::En => "About Thelemail",
+        Locale::De => "Über Thelemail",
+        Locale::Fr => "À propos de Thelemail",
+        Locale::Pt => "Acerca do Thelemail",
+    }
+}
+pub fn desktop_menu_back() -> &'static str {
+    match locale() {
+        Locale::En => "Back",
+        Locale::De => "Zurück",
+        Locale::Fr => "Précédent",
+        Locale::Pt => "Retroceder",
+    }
+}
+pub fn desktop_menu_copy() -> &'static str {
+    match locale() {
+        Locale::En => "Copy",
+        Locale::De => "Kopieren",
+        Locale::Fr => "Copier",
+        Locale::Pt => "Copiar",
+    }
+}
+pub fn desktop_menu_cut() -> &'static str {
+    match locale() {
+        Locale::En => "Cut",
+        Locale::De => "Ausschneiden",
+        Locale::Fr => "Couper",
+        Locale::Pt => "Cortar",
+    }
+}
+pub fn desktop_menu_edit() -> &'static str {
+    match locale() {
+        Locale::En => "Edit",
+        Locale::De => "Bearbeiten",
+        Locale::Fr => "Édition",
+        Locale::Pt => "Edição",
+    }
+}
+pub fn desktop_menu_forward() -> &'static str {
+    match locale() {
+        Locale::En => "Forward",
+        Locale::De => "Vorwärts",
+        Locale::Fr => "Suivant",
+        Locale::Pt => "Avançar",
+    }
+}
+pub fn desktop_menu_full_screen() -> &'static str {
+    match locale() {
+        Locale::En => "Enter Full Screen",
+        Locale::De => "Vollbildmodus aktivieren",
+        Locale::Fr => "Passer en mode plein écran",
+        Locale::Pt => "Entrar em ecrã completo",
+    }
+}
+pub fn desktop_menu_help() -> &'static str {
+    match locale() {
+        Locale::En => "Help",
+        Locale::De => "Hilfe",
+        Locale::Fr => "Aide",
+        Locale::Pt => "Ajuda",
+    }
+}
+pub fn desktop_menu_help_app() -> &'static str {
+    match locale() {
+        Locale::En => "Thelemail Help",
+        Locale::De => "Thelemail-Hilfe",
+        Locale::Fr => "Aide Thelemail",
+        Locale::Pt => "Ajuda do Thelemail",
+    }
+}
+pub fn desktop_menu_hide() -> &'static str {
+    match locale() {
+        Locale::En => "Hide Thelemail",
+        Locale::De => "Thelemail ausblenden",
+        Locale::Fr => "Masquer Thelemail",
+        Locale::Pt => "Ocultar o Thelemail",
+    }
+}
+pub fn desktop_menu_hide_others() -> &'static str {
+    match locale() {
+        Locale::En => "Hide Others",
+        Locale::De => "Andere ausblenden",
+        Locale::Fr => "Masquer les autres",
+        Locale::Pt => "Ocultar outros",
+    }
+}
+pub fn desktop_menu_minimize() -> &'static str {
+    match locale() {
+        Locale::En => "Minimize",
+        Locale::De => "Im Dock ablegen",
+        Locale::Fr => "Placer dans le Dock",
+        Locale::Pt => "Minimizar",
+    }
+}
+pub fn desktop_menu_paste() -> &'static str {
+    match locale() {
+        Locale::En => "Paste",
+        Locale::De => "Einsetzen",
+        Locale::Fr => "Coller",
+        Locale::Pt => "Colar",
+    }
+}
+pub fn desktop_menu_quit() -> &'static str {
+    match locale() {
+        Locale::En => "Quit Thelemail",
+        Locale::De => "Thelemail beenden",
+        Locale::Fr => "Quitter Thelemail",
+        Locale::Pt => "Sair do Thelemail",
+    }
+}
+pub fn desktop_menu_redo() -> &'static str {
+    match locale() {
+        Locale::En => "Redo",
+        Locale::De => "Wiederholen",
+        Locale::Fr => "Rétablir",
+        Locale::Pt => "Refazer",
+    }
+}
+pub fn desktop_menu_select_all() -> &'static str {
+    match locale() {
+        Locale::En => "Select All",
+        Locale::De => "Alles auswählen",
+        Locale::Fr => "Tout sélectionner",
+        Locale::Pt => "Selecionar tudo",
+    }
+}
+pub fn desktop_menu_services() -> &'static str {
+    match locale() {
+        Locale::En => "Services",
+        Locale::De => "Dienste",
+        Locale::Fr => "Services",
+        Locale::Pt => "Serviços",
+    }
+}
+pub fn desktop_menu_settings() -> &'static str {
+    match locale() {
+        Locale::En => "Settings…",
+        Locale::De => "Einstellungen …",
+        Locale::Fr => "Réglages…",
+        Locale::Pt => "Definições…",
+    }
+}
+pub fn desktop_menu_show_all() -> &'static str {
+    match locale() {
+        Locale::En => "Show All",
+        Locale::De => "Alle einblenden",
+        Locale::Fr => "Tout afficher",
+        Locale::Pt => "Mostrar tudo",
+    }
+}
+pub fn desktop_menu_undo() -> &'static str {
+    match locale() {
+        Locale::En => "Undo",
+        Locale::De => "Widerrufen",
+        Locale::Fr => "Annuler",
+        Locale::Pt => "Anular",
+    }
+}
+pub fn desktop_menu_view() -> &'static str {
+    match locale() {
+        Locale::En => "View",
+        Locale::De => "Darstellung",
+        Locale::Fr => "Présentation",
+        Locale::Pt => "Visualização",
+    }
+}
+pub fn desktop_menu_window() -> &'static str {
+    match locale() {
+        Locale::En => "Window",
+        Locale::De => "Fenster",
+        Locale::Fr => "Fenêtre",
+        Locale::Pt => "Janela",
+    }
+}
+pub fn desktop_menu_zoom() -> &'static str {
+    match locale() {
+        Locale::En => "Zoom",
+        Locale::De => "Zoomen",
+        Locale::Fr => "Réduire/agrandir",
+        Locale::Pt => "Zoom",
+    }
+}
+pub fn desktop_notify_new_message() -> &'static str {
+    match locale() {
+        Locale::En => "New message",
+        Locale::De => "Neue Nachricht",
+        Locale::Fr => "Nouveau message",
+        Locale::Pt => "Nova mensagem",
+    }
+}
+pub fn desktop_tray_quit() -> &'static str {
+    match locale() {
+        Locale::En => "Quit",
+        Locale::De => "Beenden",
+        Locale::Fr => "Quitter",
+        Locale::Pt => "Sair",
+    }
+}
+pub fn desktop_tray_show() -> &'static str {
+    match locale() {
+        Locale::En => "Show Thelemail",
+        Locale::De => "Thelemail anzeigen",
+        Locale::Fr => "Afficher Thelemail",
+        Locale::Pt => "Mostrar o Thelemail",
     }
 }
 pub fn handoff_auth_invalid() -> &'static str {
