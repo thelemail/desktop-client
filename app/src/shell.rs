@@ -38,6 +38,6 @@ impl Render for Shell {
             .size_full()
             .bg(cx.tokens().color(ColorToken::Bg))
             .text_color(cx.tokens().color(ColorToken::FgMuted))
-            .child(screens::placeholder(&route))
+            .child(screens::render(&route, cx))
     }
 }
