@@ -1,13 +1,14 @@
 use std::collections::VecDeque;
 use std::time::{Duration, Instant};
 
-use gpui_kit::base::input::{Input, InputEvent, InputState};
+use gpui_kit::base::input::{InputEvent, InputState};
 use gpui_kit::base::{ReduceMotionPreference, set_reduce_motion_preference};
 use gpui_kit::{
     AnyElement, App, AppContext, Context, Div, ElementId, Entity, Hsla, InteractiveElement,
     IntoElement, ParentElement, Render, Rgba, SharedString, StatefulInteractiveElement, Styled,
     Subscription, WeakEntity, Window, div, linear_color_stop, linear_gradient, px, relative,
 };
+use thelemail_ui::field::TextField;
 use thelemail_ui::motion::{
     Look, Moving, NAMED, ROW_ARRIVE, SHIMMER_PERIOD, height_auto, shimmer, unfold,
 };
@@ -520,17 +521,11 @@ impl MotionGallery {
             .flex_col()
             .gap(px(6.0))
             .child(
-                div()
-                    .h(px(36.0))
-                    .px(px(10.0))
-                    .flex()
-                    .items_center()
-                    .rounded(px(RADIUS_SM))
-                    .border_1()
-                    .border_color(theme.color(ColorToken::BorderControl))
-                    .bg(theme.color(ColorToken::Surface))
-                    .text_color(theme.color(ColorToken::Fg))
-                    .child(Input::new(&self.input)),
+                TextField::new(
+                    SharedString::from(format!("typing-{:?}", theme.appearance)),
+                    &self.input,
+                )
+                .theme(*theme),
             )
             .child(div().h(px(36.0)).text_token(&T_SMALL, theme).child(status))
             .child(
