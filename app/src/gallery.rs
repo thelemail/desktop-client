@@ -18,12 +18,20 @@ const SAMPLE: &str = "Sphinx of black quartz, judge my vow 0123456789";
 
 pub fn render(tab: GalleryTab, cx: &App) -> impl IntoElement {
     let current = *cx.tokens();
+    frame(tab, &current, |theme| tokens(theme, tab))
+}
+
+pub fn frame(
+    tab: GalleryTab,
+    current: &Theme,
+    mut content: impl FnMut(&Theme) -> AnyElement,
+) -> Div {
     div()
         .size_full()
         .flex()
         .flex_col()
         .bg(current.color(ColorToken::BgSunken))
-        .child(header(&current, tab))
+        .child(header(current, tab))
         .child(
             div()
                 .id("token-gallery")
@@ -34,8 +42,8 @@ pub fn render(tab: GalleryTab, cx: &App) -> impl IntoElement {
                     div()
                         .flex()
                         .w_full()
-                        .child(column(theme(Appearance::Light, &current), tab))
-                        .child(column(theme(Appearance::Dark, &current), tab)),
+                        .child(column(theme(Appearance::Light, current), &mut content))
+                        .child(column(theme(Appearance::Dark, current), &mut content)),
                 ),
         )
 }
@@ -46,6 +54,7 @@ fn tab_label(tab: GalleryTab) -> &'static str {
         GalleryTab::Shadows => "Shadows",
         GalleryTab::Shapes => "Shapes",
         GalleryTab::Type => "Type",
+        GalleryTab::Motion => "Motion",
     }
 }
 
@@ -96,7 +105,7 @@ fn header(current: &Theme, tab: GalleryTab) -> impl IntoElement {
         ))
 }
 
-fn segmented<F: Fn(&mut App) + 'static>(
+pub fn segmented<F: Fn(&mut App) + 'static>(
     items: impl Iterator<Item = (&'static str, bool, F)>,
     current: &Theme,
 ) -> impl IntoElement {
@@ -135,12 +144,12 @@ impl<E: Styled> Segment for E {
     }
 }
 
-fn column(theme: Theme, tab: GalleryTab) -> impl IntoElement {
+fn column(theme: Theme, content: &mut impl FnMut(&Theme) -> AnyElement) -> Div {
     let title = match theme.appearance {
         Appearance::Light => "Light",
         Appearance::Dark => "Dark",
     };
-    let body = div()
+    div()
         .flex_1()
         .min_w_0()
         .flex()
@@ -148,7 +157,13 @@ fn column(theme: Theme, tab: GalleryTab) -> impl IntoElement {
         .gap(px(28.0))
         .p(px(24.0))
         .bg(theme.color(ColorToken::Bg))
-        .child(div().text_token(&T_H2, &theme).child(title));
+        .child(div().text_token(&T_H2, &theme).child(title))
+        .child(content(&theme))
+}
+
+fn tokens(theme: &Theme, tab: GalleryTab) -> AnyElement {
+    let theme = *theme;
+    let body = div().flex().flex_col().gap(px(28.0));
     match tab {
         GalleryTab::Colours => body.child(colours(&theme)),
         GalleryTab::Shadows => body.child(shadows(&theme)),
@@ -161,10 +176,12 @@ fn column(theme: Theme, tab: GalleryTab) -> impl IntoElement {
             .child(section("Text styles", text_styles(&theme), &theme))
             .child(section("Type scale", type_scale(&theme), &theme))
             .child(section("Weights", weights(&theme), &theme)),
+        GalleryTab::Motion => body,
     }
+    .into_any_element()
 }
 
-fn section(title: &str, body: AnyElement, theme: &Theme) -> impl IntoElement {
+pub fn section(title: &str, body: AnyElement, theme: &Theme) -> impl IntoElement {
     div()
         .flex()
         .flex_col()
@@ -178,7 +195,7 @@ fn section(title: &str, body: AnyElement, theme: &Theme) -> impl IntoElement {
         .child(body)
 }
 
-fn caption(text: String, theme: &Theme) -> Div {
+pub fn caption(text: String, theme: &Theme) -> Div {
     div().text_token(&T_MONO_XS, theme).child(text)
 }
 
