@@ -6,6 +6,7 @@ use gpui_kit::{
 use thelemail_i18n::m;
 
 use super::confirm::ConfirmDialog;
+use super::dialog::DialogField;
 use crate::field::TextField;
 use crate::icons::IconName;
 
@@ -133,11 +134,12 @@ impl Render for LinkDialog {
             .on_close(move |_, cx| {
                 let _ = close.update(cx, |this, cx| this.close(cx));
             })
-            .child(
+            .child(DialogField::new(
+                m::mail_link_address(),
                 TextField::new(field_id, &self.input)
                     .label(m::mail_link_address())
                     .content_type(InputContentType::Url),
-            )
+            ))
     }
 }
 

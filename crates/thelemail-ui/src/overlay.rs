@@ -13,7 +13,7 @@ mod transition;
 use gpui_kit::{App, KeyBinding, actions};
 
 pub use confirm::{ConfirmDialog, ConfirmTone};
-pub use dialog::{Dialog, DialogSize, NARROW, Presentation, Sheet, Tone};
+pub use dialog::{Dialog, DialogField, DialogSize, NARROW, Presentation, Sheet, Tone};
 pub use layer::{Layer, Z_TRANSITION, covered, native_surface};
 pub use link::{LinkDialog, LinkDialogEvent};
 pub use menu::{Check, ContextMenu, DropdownMenu, MenuEntry, MenuItem};
