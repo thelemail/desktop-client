@@ -44,6 +44,11 @@ pub static MIGRATIONS: &[Migration] = &[
         name: "reply_to",
         up: m0007_reply_to,
     },
+    Migration {
+        version: 8,
+        name: "avatars",
+        up: m0008_avatars,
+    },
 ];
 
 pub fn migrate(conn: &Connection) -> Result<(), StoreError> {
@@ -95,6 +100,23 @@ fn m0007_reply_to(tx: &Transaction) -> rusqlite::Result<()> {
     tx.execute_batch(
         "ALTER TABLE messages ADD COLUMN reply_to_json TEXT NOT NULL DEFAULT '[]';
          UPDATE sync_state SET cursor = NULL;",
+    )
+}
+
+fn m0008_avatars(tx: &Transaction) -> rusqlite::Result<()> {
+    tx.execute_batch(
+        "ALTER TABLE messages ADD COLUMN bimi_domain TEXT NOT NULL DEFAULT '';
+         CREATE TABLE avatar_cache (
+           kind        TEXT NOT NULL,
+           key         TEXT NOT NULL,
+           source      TEXT NOT NULL DEFAULT '',
+           format      TEXT NOT NULL DEFAULT '',
+           bytes       BLOB,
+           checked_at  INTEGER NOT NULL,
+           last_access INTEGER NOT NULL,
+           PRIMARY KEY (kind, key)
+         );
+         CREATE INDEX ix_avatar_cache_lru ON avatar_cache(last_access);",
     )
 }
 
