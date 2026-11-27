@@ -1,13 +1,14 @@
 use std::collections::HashMap;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use base64::Engine as _;
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, Manager, State};
-use thelemail_api::{ApiRequest, Net};
+use thelemail_api::ApiRequest;
 use thelemail_keystore::attframe::{self, DecryptedAttachmentHeader};
 use thelemail_keystore::*;
 use zeroize::Zeroizing;
+
+use crate::Core;
 
 fn b64() -> base64::engine::GeneralPurpose {
     base64::engine::general_purpose::STANDARD
@@ -53,12 +54,14 @@ pub enum AttachmentBytesResponse {
     },
 }
 
-async fn fetch_and_decrypt(
-    net: &Net,
-    ks: &Keystore,
-    args: &AttachmentArgs,
-) -> Result<Vec<u8>, &'static str> {
-    let resp = net
+pub trait AttachmentCache {
+    fn get(&self, account_id: &str, attachment_id: &str) -> Option<Vec<u8>>;
+    fn put(&self, account_id: &str, attachment_id: &str, plain: &[u8]);
+}
+
+async fn fetch_and_decrypt(core: &Core, args: &AttachmentArgs) -> Result<Vec<u8>, &'static str> {
+    let resp = core
+        .net()
         .fetch_blob(ApiRequest {
             url: args.url.clone(),
             method: "GET".to_owned(),
@@ -70,88 +73,68 @@ async fn fetch_and_decrypt(
     if !(200..300).contains(&resp.status) {
         return Err("network");
     }
-    ks.decrypt_bytes(
+    core.keystore().decrypt_bytes(
         &args.account_id,
         &resp.body.unwrap_or_default(),
         args.key_fingerprint_hex.as_deref(),
     )
 }
 
-#[tauri::command]
-pub async fn keystore_attachment_header(
-    net: State<'_, Net>,
-    ks: State<'_, Keystore>,
-    args: AttachmentArgs,
-) -> Result<AttachmentHeaderResponse, KeystoreError> {
-    let plain = match fetch_and_decrypt(&net, &ks, &args).await {
+pub async fn attachment_header(core: &Core, args: AttachmentArgs) -> AttachmentHeaderResponse {
+    let plain = match fetch_and_decrypt(core, &args).await {
         Ok(p) => p,
-        Err(code) => return Ok(AttachmentHeaderResponse::Err { ok: false, code }),
+        Err(code) => return AttachmentHeaderResponse::Err { ok: false, code },
     };
     match attframe::parse_header(&plain) {
-        Ok((header, _)) => Ok(AttachmentHeaderResponse::Ok { ok: true, header }),
-        Err(_) => Ok(AttachmentHeaderResponse::Err {
+        Ok((header, _)) => AttachmentHeaderResponse::Ok { ok: true, header },
+        Err(_) => AttachmentHeaderResponse::Err {
             ok: false,
             code: "invalid_ciphertext",
-        }),
+        },
     }
 }
 
-#[tauri::command]
-pub async fn keystore_attachment_bytes(
-    net: State<'_, Net>,
-    ks: State<'_, Keystore>,
-    mirror: State<'_, crate::mirror::Mirror>,
+pub async fn attachment_bytes(
+    core: &Core,
     args: AttachmentArgs,
-) -> Result<AttachmentBytesResponse, KeystoreError> {
-    let now = crate::mirror::now_iso();
-
-    if let Some(id) = &args.attachment_id {
-        let cached = mirror
-            .with_conn(&args.account_id, |conn| {
-                thelemail_store::list::cached_attachment(conn, id, &now).map_err(|e| e.to_string())
-            })
-            .ok()
-            .flatten();
-        if let Some(bytes) = cached
-            && let Ok((header, payload)) = attframe::parse(&bytes)
-        {
-            return Ok(AttachmentBytesResponse::Ok {
-                ok: true,
-                header,
-                payload,
-            });
-        }
+    cache: Option<&dyn AttachmentCache>,
+) -> AttachmentBytesResponse {
+    if let (Some(cache), Some(id)) = (cache, &args.attachment_id)
+        && let Some(bytes) = cache.get(&args.account_id, id)
+        && let Ok((header, payload)) = attframe::parse(&bytes)
+    {
+        return AttachmentBytesResponse::Ok {
+            ok: true,
+            header,
+            payload,
+        };
     }
 
-    let plain = match fetch_and_decrypt(&net, &ks, &args).await {
+    let plain = match fetch_and_decrypt(core, &args).await {
         Ok(p) => p,
-        Err(code) => return Ok(AttachmentBytesResponse::Err { ok: false, code }),
+        Err(code) => return AttachmentBytesResponse::Err { ok: false, code },
     };
 
     match attframe::parse(&plain) {
         Ok((header, payload)) => {
-            if let Some(id) = &args.attachment_id {
-                let _ = mirror.with_conn(&args.account_id, |conn| {
-                    thelemail_store::list::store_attachment(conn, id, &plain, &now)
-                        .map_err(|e| e.to_string())
-                });
+            if let (Some(cache), Some(id)) = (cache, &args.attachment_id) {
+                cache.put(&args.account_id, id, &plain);
             }
-            Ok(AttachmentBytesResponse::Ok {
+            AttachmentBytesResponse::Ok {
                 ok: true,
                 header,
                 payload,
-            })
+            }
         }
-        Err(_) => Ok(AttachmentBytesResponse::Err {
+        Err(_) => AttachmentBytesResponse::Err {
             ok: false,
             code: "invalid_ciphertext",
-        }),
+        },
     }
 }
 
-#[tauri::command]
-pub fn keystore_status(ks: State<'_, Keystore>) -> StatusResponse {
-    let mut status = ks.status();
+pub fn status(core: &Core) -> StatusResponse {
+    let mut status = core.keystore().status();
     for (account_id, email) in persisted_accounts() {
         match status
             .accounts
@@ -171,80 +154,66 @@ pub fn keystore_status(ks: State<'_, Keystore>) -> StatusResponse {
     status
 }
 
-#[tauri::command]
-pub async fn keystore_opaque_start_auth(
-    ks: State<'_, Keystore>,
-    args: OpaqueStartAuthArgs,
-) -> Result<OpaqueStartAuthResponse, KeystoreError> {
-    ks.opaque_start_auth(args).await
-}
-
-#[tauri::command]
-pub async fn keystore_opaque_finish_auth(
-    ks: State<'_, Keystore>,
-    args: OpaqueFinishAuthArgs,
-) -> Result<OpaqueFinishAuthResponse, KeystoreError> {
-    Ok(ks.opaque_finish_auth(args).await)
-}
-
-#[tauri::command]
-pub async fn keystore_opaque_complete_login_unlock(
-    app: AppHandle,
+pub async fn opaque_complete_login_unlock(
+    core: &Arc<Core>,
     args: OpaqueCompleteLoginUnlockArgs,
 ) -> Result<OpaqueCompleteLoginUnlockResponse, KeystoreError> {
-    tauri::async_runtime::spawn_blocking(move || {
+    let core = core.clone();
+    tokio::task::spawn_blocking(move || {
         let stored = read_key_history(&args.account_id);
-        app.state::<Keystore>()
-            .opaque_complete_login_unlock(args, stored)
+        core.keystore().opaque_complete_login_unlock(args, stored)
     })
     .await
     .map_err(|_| KeystoreError::Protocol)
 }
 
-#[tauri::command]
-pub async fn keystore_migration_finalized(
-    app: AppHandle,
+pub async fn migration_finalized(
+    core: &Arc<Core>,
     args: AccountScopedArgs,
 ) -> Result<PlainOkResponse, KeystoreError> {
-    tauri::async_runtime::spawn_blocking(move || {
+    let core = core.clone();
+    tokio::task::spawn_blocking(move || {
         let stored = read_key_history(&args.account_id);
-        app.state::<Keystore>()
+        core.keystore()
             .migration_finalized(&args.account_id, stored)
     })
     .await
     .map_err(|_| KeystoreError::Protocol)
 }
 
-#[tauri::command]
-pub fn keystore_opaque_abandon_operation(ks: State<'_, Keystore>, args: AbandonArgs) {
-    ks.abandon(&args.operation_id);
-}
-
-#[tauri::command]
-pub async fn keystore_opaque_start_registration(
-    ks: State<'_, Keystore>,
-    args: OpaqueStartRegistrationArgs,
-) -> Result<OpaqueStartRegistrationResponse, KeystoreError> {
-    ks.opaque_start_registration(args).await
-}
-
-#[tauri::command]
-pub async fn keystore_opaque_finish_registration(
-    ks: State<'_, Keystore>,
-    net: State<'_, Net>,
+pub async fn opaque_finish_registration(
+    core: &Core,
     args: OpaqueFinishRegistrationArgs,
-) -> Result<OpaqueFinishRegistrationResponse, KeystoreError> {
-    Ok(ks
-        .opaque_finish_registration(args, net.clock_offset_ms())
-        .await)
+) -> OpaqueFinishRegistrationResponse {
+    core.keystore()
+        .opaque_finish_registration(args, core.net().clock_offset_ms())
+        .await
 }
 
-#[tauri::command]
-pub fn keystore_opaque_finalize_register(
-    ks: State<'_, Keystore>,
-    args: OpaqueFinalizeRegisterArgs,
-) -> OpaqueFinalizeRegisterResponse {
-    ks.opaque_finalize_register(args)
+pub fn create_alias_key(core: &Core, args: CreateAliasKeyArgs) -> CreateAliasKeyResponse {
+    core.keystore()
+        .create_alias_key(args, core.net().clock_offset_ms())
+}
+
+pub async fn load_account_keys(
+    core: &Arc<Core>,
+    args: LoadAccountKeysArgs,
+) -> Result<LoadAccountKeysResponse, KeystoreError> {
+    let core = core.clone();
+    tokio::task::spawn_blocking(move || core.keystore().load_account_keys(args))
+        .await
+        .map_err(|_| KeystoreError::Protocol)
+}
+
+pub async fn prepare_key_rotation(
+    core: &Arc<Core>,
+    args: PrepareKeyRotationArgs,
+) -> Result<PrepareKeyRotationResponse, KeystoreError> {
+    let clock_offset_ms = core.net().clock_offset_ms();
+    let core = core.clone();
+    tokio::task::spawn_blocking(move || core.keystore().prepare_key_rotation(args, clock_offset_ms))
+        .await
+        .map_err(|_| KeystoreError::Protocol)
 }
 
 #[derive(Serialize, Deserialize)]
@@ -268,7 +237,7 @@ struct SessionFile {
 }
 
 fn accounts_root() -> std::path::PathBuf {
-    crate::mirror::Mirror::root().join("accounts")
+    crate::paths::accounts_root()
 }
 
 fn persisted_accounts() -> Vec<(String, String)> {
@@ -295,10 +264,8 @@ fn persisted_accounts() -> Vec<(String, String)> {
 
 fn vault_path(account_id: &str) -> Result<std::path::PathBuf, String> {
     crate::ids::account_id(account_id)?;
-    let dir = crate::mirror::Mirror::root()
-        .join("accounts")
-        .join(account_id);
-    if !dir.starts_with(crate::mirror::Mirror::root().join("accounts")) {
+    let dir = crate::paths::accounts_root().join(account_id);
+    if !dir.starts_with(crate::paths::accounts_root()) {
         return Err("invalid account".to_owned());
     }
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
@@ -364,8 +331,8 @@ fn write_key_history_at(path: &std::path::Path, keys: Vec<StoredAccountKey>) -> 
     })
 }
 
-pub(crate) fn save_key_history(ks: &Keystore, account_id: &str) {
-    let Some(keys) = ks.stored_account_keys(account_id) else {
+pub(crate) fn save_key_history(core: &Core, account_id: &str) {
+    let Some(keys) = core.keystore().stored_account_keys(account_id) else {
         return;
     };
     let Ok(path) = key_history_path(account_id) else {
@@ -376,8 +343,8 @@ pub(crate) fn save_key_history(ks: &Keystore, account_id: &str) {
     }
 }
 
-pub(crate) fn forget_persisted(halves: &PersistentHalves, account_id: &str) {
-    halves.discard(
+pub fn forget_persisted(core: &Core, account_id: &str) {
+    core.halves().discard(
         &Keychain,
         vault_path(account_id).ok().as_deref(),
         account_id,
@@ -626,21 +593,20 @@ fn read_vault_file(path: &std::path::Path) -> Result<VaultFile, ()> {
     serde_json::from_slice::<VaultFile>(&raw).map_err(|_| ())
 }
 
-pub(crate) fn rewrap_persisted(ks: &Keystore, halves: &PersistentHalves, account_id: &str) {
+pub(crate) fn rewrap_persisted(core: &Core, account_id: &str) {
     let Ok(path) = vault_path(account_id) else {
         return;
     };
-    if path.exists() && !halves.rewrap(&path, account_id, || ks.saved_keys(account_id)) {
+    if path.exists()
+        && !core
+            .halves()
+            .rewrap(&path, account_id, || core.keystore().saved_keys(account_id))
+    {
         eprintln!("keystore: rewriting the saved vault for {account_id} failed");
     }
 }
 
-#[tauri::command]
-pub fn keystore_enroll_persistent(
-    ks: State<'_, Keystore>,
-    halves: State<'_, PersistentHalves>,
-    args: EnrollPersistentArgs,
-) {
+pub fn enroll_persistent(core: &Core, args: EnrollPersistentArgs) {
     let Some(server_half) = args.server_half else {
         return;
     };
@@ -651,30 +617,19 @@ pub fn keystore_enroll_persistent(
     let Ok(path) = vault_path(&args.account_id) else {
         return;
     };
-    halves.enroll(
+    core.halves().enroll(
         &Keychain,
         &path,
         &args.account_id,
-        || ks.persist(&args.account_id, &server_half),
+        || core.keystore().persist(&args.account_id, &server_half),
         &server_half,
     );
 }
 
-#[tauri::command]
-pub fn keystore_invalidate_persisted_vault(
-    halves: State<'_, PersistentHalves>,
-    args: AccountScopedArgs,
-) {
-    forget_persisted(&halves, &args.account_id);
-}
-
-#[tauri::command]
-pub fn keystore_try_restore_from_persistent(
-    ks: State<'_, Keystore>,
-    halves: State<'_, PersistentHalves>,
-    args: TryRestoreArgs,
-) -> RestoreResponse {
-    let restored = ks.try_restore_from_persistent(&args.account_id);
+pub fn try_restore_from_persistent(core: &Core, args: TryRestoreArgs) -> RestoreResponse {
+    let restored = core
+        .keystore()
+        .try_restore_from_persistent(&args.account_id);
     if restored.ok {
         return restored;
     }
@@ -689,7 +644,13 @@ pub fn keystore_try_restore_from_persistent(
     let Ok(path) = vault_path(&args.account_id) else {
         return RestoreResponse::failed("no_persistent");
     };
-    match halves.restore(&ks, &Keychain, &path, &args.account_id, &server_half) {
+    match core.halves().restore(
+        core.keystore(),
+        &Keychain,
+        &path,
+        &args.account_id,
+        &server_half,
+    ) {
         Ok(email) => RestoreResponse {
             ok: true,
             account_id: Some(args.account_id),
@@ -700,230 +661,19 @@ pub fn keystore_try_restore_from_persistent(
     }
 }
 
-#[tauri::command]
-pub fn keystore_disable_persistent(halves: State<'_, PersistentHalves>, args: AccountScopedArgs) {
-    forget_persisted(&halves, &args.account_id);
+pub fn clear_account(core: &Core, account_id: &str) {
+    core.halves().forget(account_id);
+    core.keystore().clear(account_id);
 }
 
-#[tauri::command]
-pub fn keystore_clear(
-    ks: State<'_, Keystore>,
-    halves: State<'_, PersistentHalves>,
-    args: AccountScopedArgs,
-) {
-    clear_account(&ks, &halves, &args.account_id);
+pub fn lock(core: &Core, account_id: &str) {
+    core.halves().forget(account_id);
+    core.keystore().lock(account_id);
 }
 
-pub fn clear_account(ks: &Keystore, halves: &PersistentHalves, account_id: &str) {
-    halves.forget(account_id);
-    ks.clear(account_id);
-}
-
-#[tauri::command]
-pub fn keystore_lock(
-    ks: State<'_, Keystore>,
-    halves: State<'_, PersistentHalves>,
-    args: AccountScopedArgs,
-) {
-    halves.forget(&args.account_id);
-    ks.lock(&args.account_id);
-}
-
-#[tauri::command]
-pub fn keystore_clear_all(ks: State<'_, Keystore>, halves: State<'_, PersistentHalves>) {
-    halves.forget_all();
-    ks.clear_all();
-}
-
-#[tauri::command]
-pub fn keystore_decrypt(ks: State<'_, Keystore>, args: DecryptArgs) -> DecryptResponse {
-    ks.decrypt(args)
-}
-
-#[tauri::command]
-pub fn keystore_load_alias_keys(
-    ks: State<'_, Keystore>,
-    args: LoadAliasKeysArgs,
-) -> LoadAliasKeysResponse {
-    ks.load_alias_keys(args)
-}
-
-#[tauri::command]
-pub fn keystore_unload_alias_keys(ks: State<'_, Keystore>, args: AccountScopedArgs) {
-    ks.unload_alias_keys(&args.account_id);
-}
-
-#[tauri::command]
-pub fn keystore_reformat_key_with_uids(
-    _ks: State<'_, Keystore>,
-    _args: AccountScopedArgs,
-) -> serde_json::Value {
-    serde_json::json!({ "ok": false, "code": "unknown" })
-}
-
-#[tauri::command]
-pub async fn keystore_opaque_recovery_setup_start(
-    ks: State<'_, Keystore>,
-    args: OpaqueRecoverySetupStartArgs,
-) -> Result<OpaqueRecoverySetupStartResponse, KeystoreError> {
-    Ok(ks.opaque_recovery_setup_start(args).await)
-}
-
-#[tauri::command]
-pub async fn keystore_opaque_recovery_setup_finish(
-    ks: State<'_, Keystore>,
-    args: OpaqueRecoverySetupFinishArgs,
-) -> Result<RewrapResponse, KeystoreError> {
-    Ok(ks.opaque_recovery_setup_finish(args).await)
-}
-
-#[tauri::command]
-pub fn keystore_opaque_complete_recovery_unlock(
-    ks: State<'_, Keystore>,
-    args: OpaqueCompleteRecoveryUnlockArgs,
-) -> PlainOkResponse {
-    ks.opaque_complete_recovery_unlock(args)
-}
-
-#[tauri::command]
-pub async fn keystore_opaque_prepare_credential_reset(
-    ks: State<'_, Keystore>,
-    args: OpaquePrepareCredentialResetArgs,
-) -> Result<RegistrationRequestResponse, KeystoreError> {
-    Ok(ks.opaque_prepare_credential_reset(args).await)
-}
-
-#[tauri::command]
-pub async fn keystore_opaque_finish_credential_reset(
-    ks: State<'_, Keystore>,
-    args: OpaqueFinishCredentialResetArgs,
-) -> Result<RewrapResponse, KeystoreError> {
-    Ok(ks.opaque_finish_credential_reset(args).await)
-}
-
-#[tauri::command]
-pub async fn keystore_opaque_password_change_start(
-    ks: State<'_, Keystore>,
-    args: OpaquePasswordChangeStartArgs,
-) -> Result<OperationStartResponse, KeystoreError> {
-    Ok(ks.opaque_password_change_start(args).await)
-}
-
-#[tauri::command]
-pub async fn keystore_opaque_password_change_finish(
-    ks: State<'_, Keystore>,
-    args: OpaquePasswordChangeFinishArgs,
-) -> Result<RewrapResponse, KeystoreError> {
-    Ok(ks.opaque_password_change_finish(args).await)
-}
-
-#[tauri::command]
-pub fn keystore_opaque_password_change_commit(
-    ks: State<'_, Keystore>,
-    args: OpaquePasswordChangeCommitArgs,
-) -> OpaquePasswordChangeCommitResponse {
-    ks.opaque_password_change_commit(args)
-}
-
-#[tauri::command]
-pub fn keystore_discard_recovery(ks: State<'_, Keystore>) {
-    ks.discard_recovery();
-}
-
-#[tauri::command]
-pub fn keystore_abandon_password_change(ks: State<'_, Keystore>) {
-    ks.abandon_password_change();
-}
-
-#[tauri::command]
-pub fn keystore_create_alias_key(
-    ks: State<'_, Keystore>,
-    net: State<'_, Net>,
-    args: CreateAliasKeyArgs,
-) -> CreateAliasKeyResponse {
-    ks.create_alias_key(args, net.clock_offset_ms())
-}
-
-#[tauri::command]
-pub fn keystore_commit_reformatted_key(
-    ks: State<'_, Keystore>,
-    args: CommitReformattedKeyArgs,
-) -> PlainOkResponse {
-    ks.commit_reformatted_key(args)
-}
-
-#[tauri::command]
-pub fn keystore_encrypt(ks: State<'_, Keystore>, args: EncryptArgs) -> EncryptResponse {
-    ks.encrypt(args)
-}
-
-#[tauri::command]
-pub fn keystore_encrypt_to_keys(
-    ks: State<'_, Keystore>,
-    args: EncryptToKeysArgs,
-) -> EncryptToKeysResponse {
-    ks.encrypt_to_keys(args)
-}
-
-#[tauri::command]
-pub fn keystore_sign_detached(
-    ks: State<'_, Keystore>,
-    args: SignDetachedArgs,
-) -> SignDetachedResponse {
-    ks.sign_detached(args)
-}
-
-#[tauri::command]
-pub async fn keystore_load_account_keys(
-    app: AppHandle,
-    args: LoadAccountKeysArgs,
-) -> Result<LoadAccountKeysResponse, KeystoreError> {
-    tauri::async_runtime::spawn_blocking(move || app.state::<Keystore>().load_account_keys(args))
-        .await
-        .map_err(|_| KeystoreError::Protocol)
-}
-
-#[tauri::command]
-pub async fn keystore_prepare_key_rotation(
-    app: AppHandle,
-    args: PrepareKeyRotationArgs,
-) -> Result<PrepareKeyRotationResponse, KeystoreError> {
-    let clock_offset_ms = app.state::<Net>().clock_offset_ms();
-    tauri::async_runtime::spawn_blocking(move || {
-        app.state::<Keystore>()
-            .prepare_key_rotation(args, clock_offset_ms)
-    })
-    .await
-    .map_err(|_| KeystoreError::Protocol)
-}
-
-#[tauri::command]
-pub fn keystore_commit_key_rotation(
-    ks: State<'_, Keystore>,
-    args: CommitKeyRotationArgs,
-) -> CommitKeyRotationResponse {
-    ks.commit_key_rotation(args)
-}
-
-#[tauri::command]
-pub fn keystore_list_account_keys(
-    ks: State<'_, Keystore>,
-    args: AccountScopedArgs,
-) -> ListAccountKeysResponse {
-    ks.list_account_keys(&args.account_id)
-}
-
-#[tauri::command]
-pub fn keystore_abandon_key_rotation(ks: State<'_, Keystore>, args: AccountScopedArgs) {
-    ks.abandon_key_rotation(&args.account_id);
-}
-
-#[tauri::command]
-pub fn keystore_get_public_key(
-    ks: State<'_, Keystore>,
-    args: AccountScopedArgs,
-) -> GetPublicKeyResponse {
-    ks.get_public_key(&args.account_id)
+pub fn clear_all(core: &Core) {
+    core.halves().forget_all();
+    core.keystore().clear_all();
 }
 
 #[cfg(test)]
@@ -1165,7 +915,7 @@ mod tests {
     fn a_vault_saved_by_an_earlier_build_unlocks_and_moves_to_the_new_format() {
         let raw = std::fs::read(concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/../fixtures/vault/legacy-vault-files.json"
+            "/../../fixtures/vault/legacy-vault-files.json"
         ))
         .unwrap();
         let fixture: LegacyFixture = serde_json::from_slice(&raw).unwrap();

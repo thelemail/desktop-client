@@ -1361,10 +1361,18 @@ dependencies = [
 name = "thelemail-core"
 version = "0.24.0"
 dependencies = [
+ "base64",
  "security-framework",
+ "serde",
+ "serde_json",
  "sys-locale",
+ "tempfile",
+ "thelemail-api",
+ "thelemail-keystore",
  "thelemail-store",
+ "tokio",
  "windows-sys 0.61.2",
+ "zeroize",
 ]
 
 [[package]]
