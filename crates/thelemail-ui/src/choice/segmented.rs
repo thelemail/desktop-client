@@ -11,9 +11,10 @@ use super::look::{self, DISABLED_OPACITY};
 use super::roving::{self, Pick};
 use super::{Handler, child, hovered, is_enter, ring, set_hover};
 use crate::a11y::A11yStateExt as _;
-use crate::button::{Phase, TOOLTIP_DELAY, Tooltip};
+use crate::button::Phase;
 use crate::icons::{IconName, glyph};
 use crate::motion::{BASE, EASE, EASE_OUT, SLOW, Spec, ease_color};
+use crate::overlay::{Tip, tooltip_attach};
 use crate::theme::{ActiveTokens, Theme};
 use crate::tokens::{CONTROL_MD, CONTROL_SM, ColorToken, FONT_SANS, ShadowToken};
 
@@ -232,61 +233,64 @@ impl RenderOnce for Segmented {
                 cx,
             );
             let handle = handles[ix].clone();
+            let tip_focus = handle.clone();
             let focused = handle.is_focused(window);
             let keyboard = focused && window.last_input_was_keyboard();
             let pick = pick.clone();
             let focus_on_click = handle.clone();
             let hidden = option.hide_label;
             let label = option.label.clone();
+            let tip =
+                hidden.then(|| Tip::new(child(&item_id, "tip"), option.label.clone()).theme(theme));
+            let row = div()
+                .id(item_id)
+                .relative()
+                .flex()
+                .items_center()
+                .justify_center()
+                .gap(px(GAP))
+                .min_w_0()
+                .h_full()
+                .px(px(ITEM_PAD))
+                .rounded(px(item_radius))
+                .text_color(fg)
+                .font_family(FONT_SANS.name)
+                .text_size(px(self.size.font() * FONT_SANS.size_adjust))
+                .font_weight(if checked {
+                    FontWeight::SEMIBOLD
+                } else {
+                    FontWeight::MEDIUM
+                })
+                .line_height(relative(1.0))
+                .whitespace_nowrap()
+                .when(interactive, |el| el.cursor_pointer())
+                .when(!interactive, |el| {
+                    el.cursor_not_allowed().opacity(DISABLED_OPACITY)
+                })
+                .role(Role::RadioButton)
+                .aria_label(option.label.clone())
+                .aria_toggled(if checked {
+                    Toggled::True
+                } else {
+                    Toggled::False
+                })
+                .aria_selected(checked)
+                .aria_position_in_set(ix + 1)
+                .aria_size_of_set(count)
+                .when(interactive || focused, |el| {
+                    el.track_focus(&handle.tab_index(0).tab_stop(stop == Some(ix)))
+                })
+                .on_click(move |event, window, cx| {
+                    if !interactive || is_enter(event) {
+                        return;
+                    }
+                    window.focus(&focus_on_click, cx);
+                    if !checked {
+                        pick(ix, window, cx);
+                    }
+                });
             items.push(
-                div()
-                    .id(item_id)
-                    .relative()
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .gap(px(GAP))
-                    .min_w_0()
-                    .h_full()
-                    .px(px(ITEM_PAD))
-                    .rounded(px(item_radius))
-                    .text_color(fg)
-                    .font_family(FONT_SANS.name)
-                    .text_size(px(self.size.font() * FONT_SANS.size_adjust))
-                    .font_weight(if checked {
-                        FontWeight::SEMIBOLD
-                    } else {
-                        FontWeight::MEDIUM
-                    })
-                    .line_height(relative(1.0))
-                    .whitespace_nowrap()
-                    .when(interactive, |el| el.cursor_pointer())
-                    .when(!interactive, |el| {
-                        el.cursor_not_allowed().opacity(DISABLED_OPACITY)
-                    })
-                    .role(Role::RadioButton)
-                    .aria_label(option.label.clone())
-                    .aria_toggled(if checked {
-                        Toggled::True
-                    } else {
-                        Toggled::False
-                    })
-                    .aria_selected(checked)
-                    .aria_position_in_set(ix + 1)
-                    .aria_size_of_set(count)
-                    .when(interactive || focused, |el| {
-                        el.track_focus(&handle.tab_index(0).tab_stop(stop == Some(ix)))
-                    })
-                    .on_hover(set_hover(hover))
-                    .on_click(move |event, window, cx| {
-                        if !interactive || is_enter(event) {
-                            return;
-                        }
-                        window.focus(&focus_on_click, cx);
-                        if !checked {
-                            pick(ix, window, cx);
-                        }
-                    })
+                tooltip_attach(row, tip, Some(&tip_focus), set_hover(hover), window, cx)
                     .when_some(option.icon, |el, icon| el.child(glyph(icon, px(ICON), fg)))
                     .when(!hidden, |el| {
                         el.child(
@@ -296,13 +300,6 @@ impl RenderOnce for Segmented {
                                 .text_ellipsis()
                                 .child(label),
                         )
-                    })
-                    .when(hidden, |el| {
-                        let text = option.label.clone();
-                        el.tooltip(move |window, cx| {
-                            Tooltip::build(text.clone(), None, Some(theme), window, cx)
-                        })
-                        .tooltip_show_delay(TOOLTIP_DELAY)
                     })
                     .when(keyboard, |el| el.child(ring(0.0, item_radius, ring_color)))
                     .a11y_state(false, !interactive),

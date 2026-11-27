@@ -1,6 +1,5 @@
 mod look;
 mod split;
-mod tooltip;
 
 use std::rc::Rc;
 
@@ -14,6 +13,8 @@ use gpui_kit::{
 use crate::a11y::A11yStateExt as _;
 use crate::icons::{IconName, glyph};
 use crate::motion::{BASE, EASE, FAST, Spec, animate, ease_color};
+use crate::overlay::Tip;
+use crate::overlay::tooltip_attach;
 use crate::shape::{self, CornerRadii as _};
 use crate::spinner::Spinner;
 use crate::theme::{ActiveTokens, Theme};
@@ -23,7 +24,6 @@ use crate::tokens::{
 
 pub use look::{Fill, Flags, Look, Phase, look};
 pub use split::SplitButton;
-pub use tooltip::{TOOLTIP_DELAY, Tooltip};
 
 const NUDGE: f32 = 1.0;
 const BUSY_RISE: f32 = 4.0;
@@ -463,7 +463,22 @@ impl RenderOnce for Button {
         let pointer_out = pointer;
         let disabled = self.disabled;
 
-        div()
+        let tip_focus = focus.clone();
+        let tip = tooltip.map(|text| {
+            Tip::new(self.child_id("tip"), text)
+                .shortcut_opt(shortcut)
+                .theme(theme)
+        });
+        let hover = move |hovered: &bool, window: &mut Window, cx: &mut App| {
+            pointer_hover.update(cx, |p, _| {
+                p.hovered = *hovered;
+                if !*hovered {
+                    p.down = false;
+                }
+            });
+            window.refresh();
+        };
+        let root = div()
             .id(self.id.clone())
             .relative()
             .flex()
@@ -499,15 +514,6 @@ impl RenderOnce for Button {
             .when(!disabled || focused, |el| {
                 el.track_focus(&focus.tab_index(self.tab_index).tab_stop(!disabled))
             })
-            .on_hover(move |hovered, window, cx| {
-                pointer_hover.update(cx, |p, _| {
-                    p.hovered = *hovered;
-                    if !*hovered {
-                        p.down = false;
-                    }
-                });
-                window.refresh();
-            })
             .on_mouse_down(MouseButton::Left, move |_, window, cx| {
                 window.prevent_default();
                 if disabled {
@@ -528,12 +534,6 @@ impl RenderOnce for Button {
             .when_some(on_click, |el, on_click| {
                 el.on_click(move |event, window, cx| on_click(event, window, cx))
             })
-            .when_some(tooltip, |el, text| {
-                el.tooltip(move |window, cx| {
-                    Tooltip::build(text.clone(), shortcut.clone(), Some(theme), window, cx)
-                })
-                .tooltip_show_delay(TOOLTIP_DELAY)
-            })
             .child(cell)
             .when(ring, |el| {
                 el.child(
@@ -547,7 +547,8 @@ impl RenderOnce for Button {
                         .border(px(RING_WIDTH))
                         .border_color(ring_color),
                 )
-            })
+            });
+        tooltip_attach(root, tip, Some(&tip_focus), hover, window, cx)
             .a11y_state(self.busy, self.disabled)
     }
 }

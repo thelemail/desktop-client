@@ -4,6 +4,7 @@ mod focus;
 pub mod layer;
 mod menu;
 mod popover;
+mod tooltip;
 
 use gpui_kit::{App, KeyBinding, actions};
 
@@ -11,6 +12,8 @@ pub use dialog::{Dialog, DialogSize, NARROW, Presentation, Sheet, Tone};
 pub use layer::{Layer, Z_TRANSITION, covered, native_surface};
 pub use menu::{Check, ContextMenu, DropdownMenu, MenuEntry, MenuItem};
 pub use popover::Popover;
+pub(crate) use tooltip::attach as tooltip_attach;
+pub use tooltip::{TOOLTIP_DELAY, TOOLTIP_SKIP, Tip, Tips, Tooltipped};
 
 actions!(
     thelemail_overlay,
@@ -52,4 +55,5 @@ pub fn init(cx: &mut App) {
         KeyBinding::new("shift-f10", OpenContextMenu, Some(CONTEXT_TARGET)),
         KeyBinding::new("menu", OpenContextMenu, Some(CONTEXT_TARGET)),
     ]);
+    tooltip::register(cx);
 }
