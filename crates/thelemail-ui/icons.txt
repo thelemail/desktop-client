@@ -42,6 +42,7 @@ regular circle-check
 regular circle-dashed
 regular circle-exclamation
 regular circle-info
+regular circle-minus
 regular circle-question
 regular circle-xmark
 regular clock

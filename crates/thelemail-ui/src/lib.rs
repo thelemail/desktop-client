@@ -1,4 +1,5 @@
 pub mod a11y;
+pub mod badge;
 pub mod button;
 pub mod choice;
 pub mod feedback;
@@ -8,6 +9,7 @@ pub mod icons;
 pub mod motion;
 pub mod overlay;
 pub mod rich;
+pub mod separator;
 pub mod shape;
 pub mod spinner;
 pub mod state;
