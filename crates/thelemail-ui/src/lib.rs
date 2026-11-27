@@ -2,6 +2,7 @@ pub mod a11y;
 pub mod badge;
 pub mod button;
 pub mod choice;
+pub mod empty_state;
 pub mod feedback;
 pub mod field;
 pub mod fonts;
