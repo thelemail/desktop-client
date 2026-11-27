@@ -11,6 +11,7 @@ pub mod overlay;
 pub mod rich;
 pub mod separator;
 pub mod shape;
+pub mod skeleton;
 pub mod spinner;
 pub mod state;
 pub mod text;

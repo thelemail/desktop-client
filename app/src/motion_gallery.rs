@@ -4,14 +4,13 @@ use std::time::{Duration, Instant};
 use gpui_kit::base::input::{InputEvent, InputState};
 use gpui_kit::base::{ReduceMotionPreference, set_reduce_motion_preference};
 use gpui_kit::{
-    AnyElement, App, AppContext, Context, Div, ElementId, Entity, Hsla, InteractiveElement,
-    IntoElement, ParentElement, Render, Rgba, SharedString, StatefulInteractiveElement, Styled,
-    Subscription, WeakEntity, Window, div, linear_color_stop, linear_gradient, px, relative,
+    AnyElement, App, AppContext, Context, Div, ElementId, Entity, InteractiveElement, IntoElement,
+    ParentElement, Render, SharedString, StatefulInteractiveElement, Styled, Subscription,
+    WeakEntity, Window, div, px,
 };
 use thelemail_ui::field::TextField;
-use thelemail_ui::motion::{
-    Look, Moving, NAMED, ROW_ARRIVE, SHIMMER_PERIOD, height_auto, shimmer, unfold,
-};
+use thelemail_ui::motion::{Look, Moving, NAMED, ROW_ARRIVE, SHIMMER_PERIOD, height_auto, unfold};
+use thelemail_ui::skeleton::Skeleton;
 use thelemail_ui::text::TextTokens;
 use thelemail_ui::theme::{ActiveTokens, Theme};
 use thelemail_ui::tokens::{ColorToken, RADIUS_MD, RADIUS_SM, ShadowToken, T_LABEL, T_SMALL};
@@ -212,7 +211,7 @@ impl MotionGallery {
             ))
             .child(section(
                 "Skeleton shimmer",
-                self.shimmer(theme, &side, window, cx),
+                self.shimmer(theme, &side),
                 theme,
             ))
             .child(section("Typing", self.typing(theme), theme))
@@ -450,50 +449,11 @@ impl MotionGallery {
             .into_any_element()
     }
 
-    fn shimmer(
-        &self,
-        theme: &Theme,
-        side: &SharedString,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let phase = shimmer(
-            ElementId::Name(format!("{side}-shimmer").into()),
-            window,
-            cx,
-        );
-        let moving = !cx.reduce_motion();
-        let base = theme.color(ColorToken::Skeleton);
-        let light = mix(base, theme.color(ColorToken::Surface), 0.45);
-        let mut clear = light;
-        clear.a = 0.0;
+    fn shimmer(&self, theme: &Theme, side: &SharedString) -> AnyElement {
         let bar = |width: f32, key: &str| {
-            let sweep = div()
-                .absolute()
-                .top_0()
-                .bottom_0()
-                .left(relative(phase * 2.0 - 1.0))
-                .w(relative(1.0))
-                .flex()
-                .child(div().flex_1().bg(linear_gradient(
-                    90.0,
-                    linear_color_stop(clear, 0.0),
-                    linear_color_stop(light, 1.0),
-                )))
-                .child(div().flex_1().bg(linear_gradient(
-                    90.0,
-                    linear_color_stop(light, 0.0),
-                    linear_color_stop(clear, 1.0),
-                )));
-            div()
-                .id(ElementId::Name(format!("{side}-bar-{key}").into()))
-                .relative()
-                .overflow_hidden()
+            Skeleton::new(ElementId::Name(format!("{side}-bar-{key}").into()))
                 .w(px(width))
-                .h(px(10.0))
-                .rounded(px(5.0))
-                .bg(base)
-                .when_moving(moving, sweep)
+                .theme(*theme)
         };
         div()
             .flex()
@@ -538,14 +498,6 @@ impl MotionGallery {
             .into_any_element()
     }
 }
-
-trait WhenMoving: ParentElement + Sized {
-    fn when_moving(self, moving: bool, child: impl IntoElement) -> Self {
-        if moving { self.child(child) } else { self }
-    }
-}
-
-impl<E: ParentElement> WhenMoving for E {}
 
 fn sample(name: &str, look: &Look, theme: &Theme) -> AnyElement {
     if !look.present {
@@ -603,16 +555,4 @@ fn sample(name: &str, look: &Look, theme: &Theme) -> AnyElement {
         }
         _ => card(theme).look(look).into_any_element(),
     }
-}
-
-fn mix(from: Hsla, to: Hsla, amount: f32) -> Hsla {
-    let (a, b) = (from.to_rgb(), to.to_rgb());
-    let lerp = |x: f32, y: f32| x + (y - x) * amount;
-    Rgba {
-        r: lerp(a.r, b.r),
-        g: lerp(a.g, b.g),
-        b: lerp(a.b, b.b),
-        a: lerp(a.a, b.a),
-    }
-    .into()
 }
