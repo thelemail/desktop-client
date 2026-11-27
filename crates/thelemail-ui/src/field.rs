@@ -1,5 +1,6 @@
 mod label;
 mod password;
+mod search;
 mod select;
 
 use gpui_kit::component::input::{Input, InputContentType, InputState, Textarea, TextareaState};
@@ -7,7 +8,7 @@ use gpui_kit::component::{Sizable as _, Size as KitSize};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
     AnyElement, App, Corners, Div, ElementId, Entity, Focusable as _, Hsla, InteractiveElement,
-    IntoElement, ParentElement, RenderOnce, SharedString, Styled, Window, div, px, relative,
+    IntoElement, ParentElement, RenderOnce, Role, SharedString, Styled, Window, div, px, relative,
 };
 
 use crate::motion::{BASE, EASE, Spec, ease_color};
@@ -19,6 +20,7 @@ use crate::tokens::{
 
 pub use label::FieldLabel;
 pub use password::PasswordField;
+pub use search::SearchField;
 pub use select::{Select, SelectChanged, SelectOption};
 
 const BORDER: f32 = 1.0;
@@ -77,6 +79,7 @@ pub struct FieldFlags {
     pub invalid: bool,
     pub disabled: bool,
     pub read_only: bool,
+    pub search: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -96,16 +99,21 @@ pub fn frame_look(flags: FieldFlags) -> FrameLook {
             ring: None,
         };
     }
-    let bg = if flags.read_only {
-        ColorToken::BgRaised
+    let bg = match (flags.read_only, flags.search && !flags.focused) {
+        (true, _) => ColorToken::BgRaised,
+        (false, true) => ColorToken::SurfaceMuted,
+        (false, false) => ColorToken::Surface,
+    };
+    let rest = if flags.search {
+        ColorToken::BorderSoft
     } else {
-        ColorToken::Surface
+        ColorToken::BorderControl
     };
     let (border, ring) = match (flags.invalid, flags.focused) {
         (true, true) => (ColorToken::Danger500, Some(ColorToken::Danger500)),
         (true, false) => (ColorToken::Danger500, None),
         (false, true) => (ColorToken::Primary, Some(ColorToken::FocusRing)),
-        (false, false) => (ColorToken::BorderControl, None),
+        (false, false) => (rest, None),
     };
     FrameLook {
         border,
@@ -183,6 +191,10 @@ pub struct TextField {
     suffix: Option<SharedString>,
     trailing: Option<AnyElement>,
     trailing_room: f32,
+    leading: Option<AnyElement>,
+    leading_room: f32,
+    role: Option<Role>,
+    search: bool,
     theme: Option<Theme>,
 }
 
@@ -201,6 +213,10 @@ impl TextField {
             suffix: None,
             trailing: None,
             trailing_room: 0.0,
+            leading: None,
+            leading_room: 0.0,
+            role: None,
+            search: false,
             theme: None,
         }
     }
@@ -251,6 +267,18 @@ impl TextField {
         self
     }
 
+    pub(crate) fn leading(mut self, element: impl IntoElement, room: f32) -> Self {
+        self.leading = Some(element.into_any_element());
+        self.leading_room = room;
+        self
+    }
+
+    pub(crate) fn search(mut self) -> Self {
+        self.search = true;
+        self.role = Some(Role::SearchInput);
+        self
+    }
+
     pub fn theme(mut self, theme: Theme) -> Self {
         self.theme = Some(theme);
         self
@@ -267,6 +295,7 @@ impl RenderOnce for TextField {
             invalid: self.invalid,
             disabled: self.disabled,
             read_only: self.read_only,
+            search: self.search,
         });
         let family = if self.mono { &FONT_MONO } else { &FONT_SANS };
         let radius = metrics.control.radius;
@@ -281,10 +310,11 @@ impl RenderOnce for TextField {
             .readonly(self.read_only)
             .when_some(self.label.clone(), |input, label| input.aria_label(label))
             .when_some(self.content_type, |input, kind| input.content_type(kind))
+            .when_some(self.role, |input, role| input.role(role))
             .flex_1()
             .min_w_0()
             .h_full()
-            .pl(px(metrics.pad_x))
+            .pl(px(metrics.pad_x + self.leading_room))
             .pr(px(metrics.pad_x + self.trailing_room))
             .py_0()
             .font_family(family.name)
@@ -299,6 +329,18 @@ impl RenderOnce for TextField {
         }
         .render(window, cx)
         .id(self.id)
+        .when_some(self.leading, |frame, leading| {
+            frame.child(
+                div()
+                    .absolute()
+                    .top_0()
+                    .bottom_0()
+                    .left(px(metrics.pad_x))
+                    .flex()
+                    .items_center()
+                    .child(leading),
+            )
+        })
         .child(input)
         .when_some(self.trailing, |frame, trailing| {
             frame.child(
@@ -406,6 +448,7 @@ impl RenderOnce for TextArea {
             invalid: self.invalid,
             disabled: self.disabled,
             read_only: self.read_only,
+            search: false,
         });
         let kit_size = match self.size {
             FieldSize::Sm => KitSize::Medium,
@@ -451,6 +494,7 @@ mod tests {
             invalid: true,
             disabled: true,
             read_only: true,
+            search: true,
         });
         assert_eq!(look.bg, ColorToken::BgSunken);
         assert_eq!(look.fg, ColorToken::FgFaint);
@@ -491,6 +535,23 @@ mod tests {
         });
         assert_eq!(look.bg, ColorToken::BgRaised);
         assert_eq!(look.border, ColorToken::BorderControl);
+    }
+
+    #[test]
+    fn search_is_grey_and_soft_until_focused() {
+        let rest = frame_look(FieldFlags {
+            search: true,
+            ..FieldFlags::default()
+        });
+        assert_eq!(rest.bg, ColorToken::SurfaceMuted);
+        assert_eq!(rest.border, ColorToken::BorderSoft);
+        let focused = frame_look(FieldFlags {
+            search: true,
+            focused: true,
+            ..FieldFlags::default()
+        });
+        assert_eq!(focused.bg, ColorToken::Surface);
+        assert_eq!(focused.border, ColorToken::Primary);
     }
 
     #[test]
