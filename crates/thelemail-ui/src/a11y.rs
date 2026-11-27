@@ -8,11 +8,17 @@ pub struct A11yState<E> {
     busy: bool,
     disabled: bool,
     invalid: bool,
+    live: Option<accesskit::Live>,
 }
 
 impl<E> A11yState<E> {
     pub fn invalid(mut self, invalid: bool) -> Self {
         self.invalid = invalid;
+        self
+    }
+
+    pub fn live(mut self, live: accesskit::Live) -> Self {
+        self.live = Some(live);
         self
     }
 }
@@ -24,6 +30,7 @@ pub trait A11yStateExt: Sized {
             busy,
             disabled,
             invalid: false,
+            live: None,
         }
     }
 }
@@ -99,6 +106,9 @@ impl<E: Element> Element for A11yState<E> {
         }
         if self.invalid {
             node.set_invalid(accesskit::Invalid::True);
+        }
+        if let Some(live) = self.live {
+            node.set_live(live);
         }
     }
 
