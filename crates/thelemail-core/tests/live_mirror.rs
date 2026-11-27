@@ -189,14 +189,14 @@ fn backfills_a_real_mailbox_and_searches_it_offline() {
         .expect("list messages");
     assert_eq!(resp.status, 200, "listing the mailbox must succeed");
 
-    let page: thelemail_desktop_lib::mirror::MessageListResponse =
+    let page: thelemail_core::mirror::MessageListResponse =
         serde_json::from_slice(&resp.body.expect("body")).expect("parse page");
     assert!(
         !page.items.is_empty(),
         "the test mailbox has no messages to mirror"
     );
 
-    thelemail_desktop_lib::mirror::apply_page(
+    thelemail_core::mirror::apply_page(
         &conn,
         &ks,
         &account_id,
@@ -248,13 +248,13 @@ fn backfills_a_real_mailbox_and_searches_it_offline() {
     );
 
     let token = access_token.clone();
-    let mirror = thelemail_desktop_lib::mirror::Mirror::default();
+    let mirror = thelemail_core::mirror::Mirror::default();
     mirror
         .adopt_connection(&account_id, conn)
         .expect("adopt connection");
 
     let fetched = rt
-        .block_on(thelemail_desktop_lib::mirror::prefetch_bodies(
+        .block_on(thelemail_core::mirror::prefetch_bodies(
             &net,
             &ks,
             &mirror,

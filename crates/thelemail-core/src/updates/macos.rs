@@ -3,9 +3,6 @@ use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use tauri::{AppHandle, Manager};
-use tauri_plugin_updater::Update;
-
 use super::{UpdateError, Updates, check_version};
 
 const BUNDLE_ID: &str = "com.thelemail.desktop";
@@ -41,7 +38,7 @@ pub fn stage(
     stage_with(bundle, archive, expected, current, team)
 }
 
-pub fn finish(app: &AppHandle, _update: Update, staged: Staged, bundle: &Path, version: &str) {
+pub fn finish(updates: &Updates, staged: Staged, bundle: &Path, version: &str) {
     match swap(&staged.app, bundle) {
         Ok(()) => {
             let _ = Command::new("/usr/bin/touch").arg(bundle).status();
@@ -49,8 +46,7 @@ pub fn finish(app: &AppHandle, _update: Update, staged: Staged, bundle: &Path, v
         Err(err) => {
             eprintln!("updates: swapping in {version} failed: {err}");
             let _ = std::fs::remove_dir_all(&staged.dir);
-            app.state::<Updates>()
-                .change(|p| p.last_failure = Some("install".to_owned()));
+            updates.install_failed(&UpdateError::new("install", err));
         }
     }
 }

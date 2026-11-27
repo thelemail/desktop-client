@@ -7,29 +7,67 @@ license.workspace = true
 
 [dependencies]
 base64.workspace = true
+futures-util = "0.3"
 hex.workspace = true
+rand.workspace = true
+reqwest.workspace = true
+rusqlite = { workspace = true, features = ["bundled-sqlcipher-vendored-openssl"] }
+semver = "1"
 serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
 sys-locale = "0.3.2"
 thelemail-api = { path = "../thelemail-api" }
+thelemail-mime = { path = "../thelemail-mime" }
 thelemail-keystore = { path = "../thelemail-keystore" }
 thelemail-store = { path = "../thelemail-store" }
 tokio = { workspace = true }
 url.workspace = true
+uuid = { workspace = true, features = ["v4"] }
 zeroize.workspace = true
 
 [target."cfg(target_os = \"macos\")".dependencies]
+block2 = "0.6.2"
+flate2 = "1.1"
+libc = "0.2"
+objc2 = "0.6.4"
+objc2-app-kit = { version = "0.3.2", default-features = false, features = ["std", "NSWorkspace"] }
+objc2-foundation = { version = "0.3.2", features = ["NSString", "NSDictionary", "NSError", "NSArray", "NSDate", "NSObject", "NSEnumerator", "NSURL"] }
+objc2-user-notifications = { version = "0.3.2", features = [
+    "UNUserNotificationCenter",
+    "UNNotificationContent",
+    "UNNotificationRequest",
+    "UNNotificationResponse",
+    "UNNotificationSettings",
+    "UNNotification",
+    "UNNotificationSound",
+    "UNNotificationTrigger",
+    "UNError",
+    "block2",
+] }
+plist = "1.10"
 security-framework.workspace = true
+tar = "0.4.46"
 
 [target."cfg(windows)".dependencies]
+dataview = "1.1"
+pelite = "0.10.0"
+windows = { version = "0.61", features = [
+    "Data_Xml_Dom",
+    "Foundation",
+    "UI_Notifications",
+] }
 windows-sys = { version = "0.61", features = [
     "Win32_Foundation",
     "Win32_Security_Credentials",
+    "Win32_UI_Shell",
+    "Win32_UI_WindowsAndMessaging",
 ] }
 
 [dev-dependencies]
+reqwest = { workspace = true, features = ["blocking", "json"] }
+dataview = "1.1"
+pelite = "0.10.0"
 tempfile = "3"
 thelemail-trust = { path = "../thelemail-trust", features = ["testkit"] }
-uuid = { workspace = true, features = ["v4"] }
-tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time"] }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time", "net", "io-util"] }

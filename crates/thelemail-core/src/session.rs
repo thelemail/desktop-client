@@ -111,6 +111,10 @@ pub fn forget(
     purged.and(cookie).and(db_key)
 }
 
+pub fn sign_out(core: &Core, account_id: &str) -> Result<(), String> {
+    forget(core, account_id, |id| core.mirror().purge(id))
+}
+
 #[cfg(test)]
 mod tests {
     use super::{legacy_refresh_cookie_name, refresh_cookie_name};
