@@ -44,7 +44,7 @@ pub fn finish(updates: &Updates, staged: Staged, bundle: &Path, version: &str) {
             let _ = Command::new("/usr/bin/touch").arg(bundle).status();
         }
         Err(err) => {
-            eprintln!("updates: swapping in {version} failed: {err}");
+            tracing::warn!("updates: swapping in {version} failed: {err}");
             let _ = std::fs::remove_dir_all(&staged.dir);
             updates.install_failed(&UpdateError::new("install", err));
         }

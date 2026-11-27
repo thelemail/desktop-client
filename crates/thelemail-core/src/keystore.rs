@@ -339,7 +339,7 @@ pub(crate) fn save_key_history(core: &Core, account_id: &str) {
         return;
     };
     if write_key_history_at(&path, keys).is_err() {
-        eprintln!("keystore: saving the key history for {account_id} failed");
+        tracing::warn!("keystore: saving the key history for {account_id} failed");
     }
 }
 
@@ -505,7 +505,7 @@ impl PersistentHalves {
                     .persist(account_id, server_half)
                     .is_some_and(|persisted| replace_session(store, path, account_id, &persisted));
                 if !moved {
-                    eprintln!(
+                    tracing::warn!(
                         "keystore: moving the saved vault for {account_id} to the new format failed"
                     );
                 }
@@ -602,7 +602,7 @@ pub(crate) fn rewrap_persisted(core: &Core, account_id: &str) {
             .halves()
             .rewrap(&path, account_id, || core.keystore().saved_keys(account_id))
     {
-        eprintln!("keystore: rewriting the saved vault for {account_id} failed");
+        tracing::warn!("keystore: rewriting the saved vault for {account_id} failed");
     }
 }
 
