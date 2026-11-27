@@ -33,6 +33,18 @@ pub(crate) fn follow(
     window: &mut Window,
     cx: &mut App,
 ) {
+    follow_to(id, open, container, initial, None, window, cx);
+}
+
+pub(crate) fn follow_to(
+    id: &ElementId,
+    open: bool,
+    container: &FocusHandle,
+    initial: Option<FocusHandle>,
+    return_to: Option<FocusHandle>,
+    window: &mut Window,
+    cx: &mut App,
+) {
     let state = window
         .use_keyed_state(
             ElementId::NamedChild(id.clone().into(), "focus-return".into()),
@@ -49,9 +61,11 @@ pub(crate) fn follow(
     }
     state.open.set(open);
     if open {
-        let previous = window
-            .focused(cx)
-            .filter(|focused| !container.contains(focused, window));
+        let previous = return_to.or_else(|| {
+            window
+                .focused(cx)
+                .filter(|focused| !container.contains(focused, window))
+        });
         *state.previous.borrow_mut() = previous;
         let target = initial.unwrap_or_else(|| container.clone());
         window.defer(cx, move |window, cx| target.focus(window, cx));

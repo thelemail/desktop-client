@@ -3,8 +3,8 @@ use std::rc::Rc;
 use gpui_kit::base::{Align, Placement};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
-    AnyElement, App, ElementId, InteractiveElement, IntoElement, ParentElement, RenderOnce, Role,
-    SharedString, StatefulInteractiveElement, Styled, Window, div, px,
+    AnyElement, App, ElementId, FocusHandle, InteractiveElement, IntoElement, ParentElement,
+    RenderOnce, Role, SharedString, StatefulInteractiveElement, Styled, Window, div, px,
 };
 
 use super::anchor::{self, Place};
@@ -20,7 +20,7 @@ const PAD: f32 = 12.0;
 const OFFSET: f32 = 6.0;
 const EDGE: f32 = 24.0;
 
-type Trigger = Box<dyn FnOnce(bool, Action) -> AnyElement>;
+type Trigger = Box<dyn FnOnce(bool, Action, FocusHandle) -> AnyElement>;
 type Content = Box<dyn FnOnce(Action) -> AnyElement>;
 
 #[derive(IntoElement)]
@@ -51,10 +51,10 @@ impl Popover {
 
     pub fn trigger<E: IntoElement>(
         mut self,
-        build: impl FnOnce(bool, Action) -> E + 'static,
+        build: impl FnOnce(bool, Action, FocusHandle) -> E + 'static,
     ) -> Self {
-        self.trigger = Some(Box::new(move |open, toggle| {
-            build(open, toggle).into_any_element()
+        self.trigger = Some(Box::new(move |open, toggle, focus| {
+            build(open, toggle, focus).into_any_element()
         }));
         self
     }
@@ -123,12 +123,21 @@ impl RenderOnce for Popover {
         };
         let trigger_bounds = anchor::slot(&self.id, "trigger", window, cx);
         let container = focus::handle(&self.id, "panel", window, cx);
-        focus::follow(&self.id, open, &container, None, window, cx);
+        let trigger_focus = focus::handle(&self.id, "trigger-focus", window, cx);
+        focus::follow_to(
+            &self.id,
+            open,
+            &container,
+            None,
+            Some(trigger_focus.clone()),
+            window,
+            cx,
+        );
         let look = MENU.sample(self.child_id("motion"), open, window, cx);
         let trigger = self
             .trigger
             .take()
-            .map(|build| build(open, toggle))
+            .map(|build| build(open, toggle, trigger_focus))
             .unwrap_or_else(|| div().into_any_element());
 
         let panel_id = self.child_id("panel");

@@ -487,8 +487,9 @@ impl OverlayGallery {
                     .width(236.0)
                     .theme(theme)
                     .entries(self.menu_entries(this))
-                    .trigger(move |open, toggle| {
+                    .trigger(move |open, toggle, focus| {
                         Button::new("gallery-more-trigger")
+                            .track_focus(&focus)
                             .icon(IconName::EllipsisVertical)
                             .label("More")
                             .expanded(open)
@@ -501,8 +502,9 @@ impl OverlayGallery {
                 Popover::new("gallery-snooze")
                     .label("Snooze until")
                     .theme(theme)
-                    .trigger(move |open, toggle| {
+                    .trigger(move |open, toggle, focus| {
                         Button::new("gallery-snooze-trigger")
+                            .track_focus(&focus)
                             .icon(IconName::Clock)
                             .label("Snooze")
                             .expanded(open)
@@ -772,8 +774,9 @@ impl OverlayGallery {
                             .width(236.0)
                             .theme(theme)
                             .entries(self.menu_entries(this))
-                            .trigger(move |open, toggle| {
+                            .trigger(move |open, toggle, focus| {
                                 Button::new("gallery-near-surface-trigger")
+                                    .track_focus(&focus)
                                     .label("Menu next to it")
                                     .expanded(open)
                                     .theme(theme)

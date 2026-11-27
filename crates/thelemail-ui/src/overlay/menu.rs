@@ -7,9 +7,9 @@ use std::time::Instant;
 use gpui_kit::base::{Align, LayoutDirection, Placement};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
-    AnyElement, App, Bounds, ElementId, Entity, FontWeight, InteractiveElement, IntoElement,
-    KeyDownEvent, MouseButton, ParentElement, Pixels, Point, RenderOnce, Role, SharedString,
-    StatefulInteractiveElement, Styled, Toggled, Window, div, px, relative,
+    AnyElement, App, Bounds, ElementId, Entity, FocusHandle, FontWeight, InteractiveElement,
+    IntoElement, KeyDownEvent, MouseButton, ParentElement, Pixels, Point, RenderOnce, Role,
+    SharedString, StatefulInteractiveElement, Styled, Toggled, Window, div, px, relative,
 };
 
 use self::nav::{Sideways, Typeahead, find, sideways};
@@ -607,7 +607,7 @@ fn level_panel(
     ctx: &Ctx,
     level: usize,
     place: Place,
-    container: Option<&gpui_kit::FocusHandle>,
+    container: Option<&FocusHandle>,
     look: &crate::motion::Look,
     window: &mut Window,
     cx: &mut App,
@@ -762,10 +762,16 @@ fn level_panel(
     )
 }
 
-fn render_menu(ctx: &Ctx, place: Place, window: &mut Window, cx: &mut App) -> Option<AnyElement> {
+fn render_menu(
+    ctx: &Ctx,
+    place: Place,
+    return_to: Option<FocusHandle>,
+    window: &mut Window,
+    cx: &mut App,
+) -> Option<AnyElement> {
     let open = ctx.state.read(cx).open;
     let container = focus::handle(&ctx.id, "menu", window, cx);
-    focus::follow(&ctx.id, open, &container, None, window, cx);
+    focus::follow_to(&ctx.id, open, &container, None, return_to, window, cx);
     let look = MENU.sample(level_id(&ctx.id, 0), open, window, cx);
     if !look.present {
         for level in 0..MAX_DEPTH {
@@ -784,7 +790,7 @@ fn render_menu(ctx: &Ctx, place: Place, window: &mut Window, cx: &mut App) -> Op
     ))
 }
 
-type Trigger = Box<dyn FnOnce(bool, Action) -> AnyElement>;
+type Trigger = Box<dyn FnOnce(bool, Action, FocusHandle) -> AnyElement>;
 
 #[derive(IntoElement)]
 pub struct DropdownMenu {
@@ -812,10 +818,10 @@ impl DropdownMenu {
 
     pub fn trigger<E: IntoElement>(
         mut self,
-        build: impl FnOnce(bool, Action) -> E + 'static,
+        build: impl FnOnce(bool, Action, FocusHandle) -> E + 'static,
     ) -> Self {
-        self.trigger = Some(Box::new(move |open, toggle| {
-            build(open, toggle).into_any_element()
+        self.trigger = Some(Box::new(move |open, toggle, focus| {
+            build(open, toggle, focus).into_any_element()
         }));
         self
     }
@@ -887,6 +893,7 @@ impl RenderOnce for DropdownMenu {
             theme,
             width: self.width,
         };
+        let trigger_focus = focus::handle(&self.id, "trigger-focus", window, cx);
         let menu = render_menu(
             &ctx,
             Place::Side {
@@ -895,13 +902,14 @@ impl RenderOnce for DropdownMenu {
                 align: self.align,
                 offset: px(OFFSET),
             },
+            Some(trigger_focus.clone()),
             window,
             cx,
         );
         let trigger = self
             .trigger
             .take()
-            .map(|build| build(open, toggle))
+            .map(|build| build(open, toggle, trigger_focus))
             .unwrap_or_else(|| div().into_any_element());
         div()
             .relative()
@@ -978,7 +986,7 @@ impl RenderOnce for ContextMenu {
             theme,
             width: self.width,
         };
-        let menu = render_menu(&ctx, place, window, cx);
+        let menu = render_menu(&ctx, place, None, window, cx);
         let by_mouse = state.clone();
         let by_key = state;
         div()
