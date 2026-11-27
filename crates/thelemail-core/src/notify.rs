@@ -1,9 +1,12 @@
 use std::sync::Mutex;
 
-use serde::Serialize;
-use tauri::AppHandle;
+use std::sync::Arc;
 
-#[derive(Clone)]
+use serde::Serialize;
+
+use crate::{Core, CoreEvent};
+
+#[derive(Clone, Debug)]
 pub struct NewMail {
     pub account_id: String,
     pub message_id: String,
@@ -30,7 +33,7 @@ impl NewMail {
     }
 }
 
-#[derive(Clone, Serialize)]
+#[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct NotifyStatus {
     pub supported: bool,
@@ -58,7 +61,7 @@ impl NotifyStatus {
     }
 }
 
-#[derive(Clone, Serialize)]
+#[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct NotificationTarget {
     pub account_id: String,
@@ -113,6 +116,7 @@ mod platform {
     use std::sync::{Mutex, OnceLock};
     use std::time::Duration;
 
+    use super::{Arc, Core, CoreEvent, NewMail, NotificationTarget, NotifyStatus, remember_opened};
     use objc2::rc::Retained;
     use objc2::runtime::ProtocolObject;
     use objc2::{AnyThread, DefinedClass, define_class, msg_send};
@@ -123,9 +127,6 @@ mod platform {
         UNNotificationResponse, UNNotificationSetting, UNNotificationSettings, UNNotificationSound,
         UNUserNotificationCenter, UNUserNotificationCenterDelegate,
     };
-    use tauri::{AppHandle, Emitter, Manager};
-
-    use super::{NewMail, NotificationTarget, NotifyStatus, remember_opened};
 
     static DELEGATE: OnceLock<Retained<TapDelegate>> = OnceLock::new();
     static REQUESTED: AtomicBool = AtomicBool::new(false);
@@ -134,7 +135,7 @@ mod platform {
     static STATUS: Mutex<Option<NotifyStatus>> = Mutex::new(None);
 
     pub struct DelegateState {
-        app: AppHandle,
+        core: Arc<Core>,
     }
 
     define_class!(
@@ -165,7 +166,7 @@ mod platform {
                 response: &UNNotificationResponse,
                 handler: &block2::DynBlock<dyn Fn()>,
             ) {
-                let app = &self.ivars().app;
+                let core = &self.ivars().core;
                 let info = response.notification().request().content().userInfo();
                 let read = |key: &str| -> Option<String> {
                     let value = info.valueForKey(&NSString::from_str(key))?;
@@ -173,11 +174,6 @@ mod platform {
                     Some(text.to_string())
                 };
 
-                if let Some(window) = app.get_webview_window("main") {
-                    let _ = window.show();
-                    let _ = window.unminimize();
-                    let _ = window.set_focus();
-                }
                 if let (Some(account_id), Some(message_id)) = (read("accountId"), read("messageId"))
                 {
                     let target = NotificationTarget {
@@ -185,7 +181,7 @@ mod platform {
                         message_id,
                     };
                     remember_opened(target.clone());
-                    let _ = app.emit("notification://opened", target);
+                    core.emit(CoreEvent::NotificationOpened(target));
                 }
                 handler.call(());
             }
@@ -262,7 +258,7 @@ mod platform {
             .and_then(|status| status.as_ref().and_then(|s| s.last_error.clone()))
     }
 
-    fn publish(app: &AppHandle, status: NotifyStatus) {
+    fn publish(core: &Arc<Core>, status: NotifyStatus) {
         eprintln!(
             "notifications: authorization={} alerts={} sound={} translocated={} error={}",
             status.authorization,
@@ -274,7 +270,7 @@ mod platform {
         if let Ok(mut slot) = STATUS.lock() {
             *slot = Some(status.clone());
         }
-        let _ = app.emit("notify://status", status);
+        core.emit(CoreEvent::NotifyStatus(status));
     }
 
     fn with_settings(f: impl Fn(&UNNotificationSettings) + 'static) {
@@ -284,28 +280,28 @@ mod platform {
         center().getNotificationSettingsWithCompletionHandler(&block);
     }
 
-    fn refresh_status(app: &AppHandle, last_error: Option<String>) {
-        let app = app.clone();
+    fn refresh_status(core: &Arc<Core>, last_error: Option<String>) {
+        let core = core.clone();
         let last_error = last_error.or_else(remembered_error);
-        with_settings(move |settings| publish(&app, snapshot(settings, last_error.clone())));
+        with_settings(move |settings| publish(&core, snapshot(settings, last_error.clone())));
     }
 
-    pub fn bind(app: &AppHandle) {
+    pub fn bind(core: &Arc<Core>) {
         if !bundled() {
-            publish(app, NotifyStatus::unbundled());
+            publish(core, NotifyStatus::unbundled());
             return;
         }
         let _ = DELEGATE.get_or_init(|| {
-            let this = TapDelegate::alloc().set_ivars(DelegateState { app: app.clone() });
+            let this = TapDelegate::alloc().set_ivars(DelegateState { core: core.clone() });
             let delegate: Retained<TapDelegate> = unsafe { msg_send![super(this), init] };
             center().setDelegate(Some(ProtocolObject::from_ref(&*delegate)));
             delegate
         });
-        refresh_status(app, None);
-        request_authorization(app, None);
+        refresh_status(core, None);
+        request_authorization(core, None);
     }
 
-    pub fn request_authorization(app: &AppHandle, then: Option<NewMail>) {
+    pub fn request_authorization(core: &Arc<Core>, then: Option<NewMail>) {
         if !bundled() {
             return;
         }
@@ -313,7 +309,7 @@ mod platform {
             return;
         }
         REQUESTED.store(true, Ordering::SeqCst);
-        let app = app.clone();
+        let core = core.clone();
         let options = UNAuthorizationOptions::Alert
             | UNAuthorizationOptions::Sound
             | UNAuthorizationOptions::Badge;
@@ -326,18 +322,18 @@ mod platform {
                         error.as_deref().unwrap_or("declined by the user")
                     );
                 }
-                refresh_status(&app, error);
+                refresh_status(&core, error);
                 if granted.as_bool()
                     && let Some(mail) = &then
                 {
-                    deliver(&app, mail);
+                    deliver(&core, mail);
                 }
             });
         center().requestAuthorizationWithOptions_completionHandler(options, &handler);
     }
 
-    fn deliver(app: &AppHandle, mail: &NewMail) {
-        let lang = crate::locale::current(app);
+    fn deliver(core: &Arc<Core>, mail: &NewMail) {
+        let lang = core.locale().current();
         unsafe {
             let content = UNMutableNotificationContent::new();
             content.setTitle(&NSString::from_str(&mail.title(lang)));
@@ -366,13 +362,13 @@ mod platform {
                 &content,
                 None,
             );
-            let app = app.clone();
+            let core = core.clone();
             let message_id = mail.message_id.clone();
             let handler =
                 block2::RcBlock::new(move |err: *mut NSError| match describe_error(err) {
                     Some(error) => {
                         eprintln!("notifications: the request was rejected: {error}");
-                        refresh_status(&app, Some(error));
+                        refresh_status(&core, Some(error));
                     }
                     None => eprintln!("notifications: posted {message_id}"),
                 });
@@ -380,7 +376,7 @@ mod platform {
         }
     }
 
-    pub fn post(app: &AppHandle, mail: &NewMail) {
+    pub fn post(core: &Arc<Core>, mail: &NewMail) {
         if !bundled() {
             if !WARNED_UNBUNDLED.swap(true, Ordering::SeqCst) {
                 eprintln!(
@@ -389,7 +385,7 @@ mod platform {
             }
             return;
         }
-        let app = app.clone();
+        let core = core.clone();
         let mail = mail.clone();
         with_settings(move |settings| {
             let status = settings.authorizationStatus();
@@ -399,16 +395,16 @@ mod platform {
                 authorization_name(status)
             );
             if allowed(status) {
-                deliver(&app, &mail);
+                deliver(&core, &mail);
             } else if status == UNAuthorizationStatus::NotDetermined {
-                request_authorization(&app, Some(mail.clone()));
+                request_authorization(&core, Some(mail.clone()));
             } else if !WARNED_DENIED.swap(true, Ordering::SeqCst) {
-                refresh_status(&app, None);
+                refresh_status(&core, None);
             }
         });
     }
 
-    pub async fn status(_app: &AppHandle) -> NotifyStatus {
+    pub async fn status() -> NotifyStatus {
         if !bundled() {
             return NotifyStatus::unbundled();
         }
@@ -446,7 +442,6 @@ mod platform {
     use std::sync::Mutex;
     use std::sync::atomic::{AtomicBool, Ordering};
 
-    use tauri::{AppHandle, Emitter, Manager};
     use windows::Data::Xml::Dom::XmlDocument;
     use windows::Foundation::TypedEventHandler;
     use windows::UI::Notifications::{
@@ -454,7 +449,7 @@ mod platform {
     };
     use windows::core::HSTRING;
 
-    use super::{NewMail, NotificationTarget, NotifyStatus, remember_opened};
+    use super::{Arc, Core, CoreEvent, NewMail, NotificationTarget, NotifyStatus, remember_opened};
 
     const APP_ID: &str = "com.thelemail.desktop";
     const KEPT: usize = 50;
@@ -508,14 +503,14 @@ mod platform {
         status
     }
 
-    fn publish(app: &AppHandle, status: NotifyStatus) {
+    fn publish(core: &Arc<Core>, status: NotifyStatus) {
         eprintln!(
             "notifications: authorization={} alerts={} error={}",
             status.authorization,
             status.alerts,
             status.last_error.as_deref().unwrap_or("none")
         );
-        let _ = app.emit("notify://status", status);
+        core.emit(CoreEvent::NotifyStatus(status));
     }
 
     pub fn claim_app_id() {
@@ -526,12 +521,12 @@ mod platform {
         }
     }
 
-    pub fn bind(app: &AppHandle) {
-        publish(app, snapshot(None));
+    pub fn bind(core: &Arc<Core>) {
+        publish(core, snapshot(None));
     }
 
-    fn deliver(app: &AppHandle, mail: &NewMail) -> windows::core::Result<()> {
-        let lang = crate::locale::current(app);
+    fn deliver(core: &Arc<Core>, mail: &NewMail) -> windows::core::Result<()> {
+        let lang = core.locale().current();
         let xml = XmlDocument::new()?;
         xml.LoadXml(&HSTRING::from(super::toast_xml(
             &mail.title(lang),
@@ -546,19 +541,14 @@ mod platform {
             mail.account_id.chars().take(64).collect::<String>(),
         ))?;
 
-        let opened = app.clone();
+        let opened = core.clone();
         let target = NotificationTarget {
             account_id: mail.account_id.clone(),
             message_id: mail.message_id.clone(),
         };
         toast.Activated(&TypedEventHandler::new(move |_, _| {
-            if let Some(window) = opened.get_webview_window("main") {
-                let _ = window.show();
-                let _ = window.unminimize();
-                let _ = window.set_focus();
-            }
             remember_opened(target.clone());
-            let _ = opened.emit("notification://opened", target.clone());
+            opened.emit(CoreEvent::NotificationOpened(target.clone()));
             Ok(())
         }))?;
 
@@ -572,7 +562,7 @@ mod platform {
         Ok(())
     }
 
-    pub fn post(app: &AppHandle, mail: &NewMail) {
+    pub fn post(core: &Arc<Core>, mail: &NewMail) {
         if installed().is_none() {
             if !WARNED_UNBUNDLED.swap(true, Ordering::SeqCst) {
                 eprintln!(
@@ -581,17 +571,17 @@ mod platform {
             }
             return;
         }
-        match deliver(app, mail) {
+        match deliver(core, mail) {
             Ok(()) => eprintln!("notifications: posted {}", mail.message_id),
             Err(err) => {
                 eprintln!("notifications: the toast was rejected: {}", err.message());
-                publish(app, snapshot(Some(err.message())));
+                publish(core, snapshot(Some(err.message())));
             }
         }
     }
 
-    pub async fn status(_app: &AppHandle) -> NotifyStatus {
-        tauri::async_runtime::spawn_blocking(|| snapshot(None))
+    pub async fn status() -> NotifyStatus {
+        tokio::task::spawn_blocking(|| snapshot(None))
             .await
             .unwrap_or_else(|_| NotifyStatus::unbundled())
     }
@@ -599,15 +589,13 @@ mod platform {
 
 #[cfg(not(any(target_os = "macos", windows)))]
 mod platform {
-    use tauri::AppHandle;
+    use super::{Arc, Core, NewMail, NotifyStatus};
 
-    use super::{NewMail, NotifyStatus};
+    pub fn bind(_core: &Arc<Core>) {}
 
-    pub fn bind(_app: &AppHandle) {}
+    pub fn post(_core: &Arc<Core>, _mail: &NewMail) {}
 
-    pub fn post(_app: &AppHandle, _mail: &NewMail) {}
-
-    pub async fn status(_app: &AppHandle) -> NotifyStatus {
+    pub async fn status() -> NotifyStatus {
         NotifyStatus {
             supported: false,
             authorization: "unsupported".to_owned(),
@@ -621,21 +609,19 @@ pub fn claim_app_id() {
     platform::claim_app_id();
 }
 
-pub fn prepare(app: &AppHandle) {
-    platform::bind(app);
+pub fn prepare(core: &Arc<Core>) {
+    platform::bind(core);
 }
 
-pub fn new_mail(app: &AppHandle, mail: &NewMail) {
-    platform::post(app, mail);
+pub fn new_mail(core: &Arc<Core>, mail: &NewMail) {
+    platform::post(core, mail);
 }
 
-#[tauri::command]
-pub async fn notify_status(app: AppHandle) -> NotifyStatus {
-    platform::status(&app).await
+pub async fn status() -> NotifyStatus {
+    platform::status().await
 }
 
-#[tauri::command]
-pub fn notify_take_opened() -> Option<NotificationTarget> {
+pub fn take_opened() -> Option<NotificationTarget> {
     LAST_OPENED.lock().ok().and_then(|mut slot| slot.take())
 }
 

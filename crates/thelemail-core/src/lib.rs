@@ -3,6 +3,7 @@ pub mod keychain;
 pub mod keystore;
 pub mod locale;
 pub mod net;
+pub mod notify;
 pub mod paths;
 pub mod productkeys;
 pub mod session;
@@ -21,6 +22,8 @@ use crate::locale::UiLocale;
 pub enum CoreEvent {
     Keystore(Broadcast),
     AccountKeysChanged { account_id: String },
+    NotificationOpened(notify::NotificationTarget),
+    NotifyStatus(notify::NotifyStatus),
 }
 
 pub struct Core {
@@ -65,6 +68,10 @@ impl Core {
 
     pub fn subscribe(&self) -> broadcast::Receiver<CoreEvent> {
         self.events.subscribe()
+    }
+
+    pub(crate) fn emit(&self, event: CoreEvent) {
+        let _ = self.events.send(event);
     }
 
     pub fn start(self: &Arc<Self>) {
