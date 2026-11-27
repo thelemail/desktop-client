@@ -235,6 +235,12 @@ impl Dialog {
         self
     }
 
+    pub fn children(mut self, children: impl IntoIterator<Item = impl IntoElement>) -> Self {
+        self.body
+            .extend(children.into_iter().map(IntoElement::into_any_element));
+        self
+    }
+
     pub fn footer(mut self, child: impl IntoElement) -> Self {
         self.footer.push(child.into_any_element());
         self
