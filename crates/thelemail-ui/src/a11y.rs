@@ -7,6 +7,14 @@ pub struct A11yState<E> {
     inner: E,
     busy: bool,
     disabled: bool,
+    invalid: bool,
+}
+
+impl<E> A11yState<E> {
+    pub fn invalid(mut self, invalid: bool) -> Self {
+        self.invalid = invalid;
+        self
+    }
 }
 
 pub trait A11yStateExt: Sized {
@@ -15,6 +23,7 @@ pub trait A11yStateExt: Sized {
             inner: self,
             busy,
             disabled,
+            invalid: false,
         }
     }
 }
@@ -87,6 +96,9 @@ impl<E: Element> Element for A11yState<E> {
         }
         if self.disabled || self.busy {
             node.set_disabled();
+        }
+        if self.invalid {
+            node.set_invalid(accesskit::Invalid::True);
         }
     }
 
