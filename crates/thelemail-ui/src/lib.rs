@@ -1,4 +1,5 @@
 pub mod a11y;
+pub mod auth;
 pub mod badge;
 pub mod brand;
 pub mod button;
