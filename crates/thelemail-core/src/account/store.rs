@@ -63,6 +63,14 @@ impl<T: Clone> Store<T> {
             .is_some_and(|c| c.value.data().is_some())
     }
 
+    pub(crate) fn is_started(&self, key: &str) -> bool {
+        self.cells
+            .lock()
+            .expect("resource cells")
+            .get(key)
+            .is_some_and(|c| !matches!(c.value, Resource::NotLoaded))
+    }
+
     pub fn forget(&self, key: &str) {
         let mut cells = self.cells.lock().expect("resource cells");
         if let Some(mut cell) = cells.remove(key) {

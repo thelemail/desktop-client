@@ -1,10 +1,16 @@
+mod dispatch;
+mod hint;
+
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use futures_util::StreamExt;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use tokio::sync::oneshot;
+
+pub use self::dispatch::{Effects, effects};
+pub use self::hint::{Action, Entity, Hint, HintKind};
 
 use crate::api::{ApiError, Call};
 use crate::{Core, CoreEvent};
@@ -13,25 +19,7 @@ const BASE_DELAY: Duration = Duration::from_secs(1);
 const MAX_DELAY: Duration = Duration::from_secs(30);
 const JITTER: f64 = 0.3;
 const MAX_FRAME_BYTES: usize = 256 * 1024;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub enum FrameKind {
-    Open,
-    Message,
-    Closed,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct RealtimeFrame {
-    pub account_id: String,
-    pub kind: FrameKind,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub data: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub id: Option<String>,
-}
+pub const STALE: Duration = Duration::from_secs(60);
 
 #[derive(Default)]
 pub struct Realtime {
@@ -118,18 +106,77 @@ fn stream_url(core: &Core, ticket: &str, since: Option<&str>) -> String {
     url.to_string()
 }
 
-fn emit(core: &Core, account_id: &str, kind: FrameKind, data: Option<String>, id: Option<String>) {
-    core.emit(CoreEvent::Realtime(RealtimeFrame {
+fn state(core: &Core, account_id: &str, open: bool) {
+    core.emit(CoreEvent::RealtimeState {
         account_id: account_id.to_owned(),
-        kind,
-        data,
-        id,
-    }));
+        open,
+    });
+}
+
+pub fn apply(core: &Arc<Core>, hint: Hint) {
+    let wanted = effects(&hint.kind);
+    let account_id = hint.account_id.clone();
+    core.emit(CoreEvent::Hint(hint));
+    if wanted.poke_mirror {
+        crate::mirror::poke(core, &account_id);
+    }
+    refresh(core, &account_id, wanted);
+}
+
+fn refresh(core: &Arc<Core>, account_id: &str, wanted: Effects) {
+    let account = core.account();
+    let profile = wanted.profile;
+    let settings = wanted.settings && account.has_settings(account_id);
+    let billing = wanted.billing && account.has_subscription(account_id);
+    spawn_loads(core, account_id, profile, settings, billing);
+}
+
+fn spawn_loads(core: &Arc<Core>, account_id: &str, profile: bool, settings: bool, billing: bool) {
+    if !(profile || settings || billing) {
+        return;
+    }
+    let core = core.clone();
+    let account_id = account_id.to_owned();
+    tokio::spawn(async move {
+        let profile = async {
+            if profile {
+                crate::account::load_profile(&core, &account_id).await;
+            }
+        };
+        let settings = async {
+            if settings {
+                crate::account::load_settings(&core, &account_id).await;
+            }
+        };
+        let billing = async {
+            if billing {
+                crate::account::load_billing(&core, &account_id).await;
+            }
+        };
+        tokio::join!(profile, settings, billing);
+    });
+}
+
+fn resync(core: &Arc<Core>, account_id: &str, down: Duration) {
+    crate::mirror::poke(core, account_id);
+    let account = core.account();
+    spawn_loads(
+        core,
+        account_id,
+        account.has_profile(account_id),
+        account.has_settings(account_id),
+        account.has_subscription(account_id),
+    );
+    core.emit(CoreEvent::RealtimeResync {
+        account_id: account_id.to_owned(),
+        full: down >= STALE,
+    });
 }
 
 async fn run(core: Arc<Core>, account_id: String, mut stopped: oneshot::Receiver<()>) {
     let mut attempt: u32 = 0;
     let mut since: Option<String> = None;
+    let mut closed_at: Option<Instant> = None;
     loop {
         let ticket = match mint(&core, &account_id).await {
             Ticket::Minted(ticket) => ticket,
@@ -142,6 +189,7 @@ async fn run(core: Arc<Core>, account_id: String, mut stopped: oneshot::Receiver
                 }
             }
             Ticket::Retry => {
+                closed_at.get_or_insert_with(Instant::now);
                 if wait(&mut stopped, &mut attempt).await {
                     return;
                 }
@@ -152,10 +200,13 @@ async fn run(core: Arc<Core>, account_id: String, mut stopped: oneshot::Receiver
         let url = stream_url(&core, &ticket, since.as_deref());
         match core.net().stream_events(&url).await {
             Ok(resp) if resp.status().is_success() => {
-                emit(&core, &account_id, FrameKind::Open, None, None);
+                state(&core, &account_id, true);
                 attempt = 0;
+                if let Some(at) = closed_at.take() {
+                    resync(&core, &account_id, at.elapsed());
+                }
                 let ended = read(&core, &account_id, resp, &mut since, &mut stopped).await;
-                emit(&core, &account_id, FrameKind::Closed, None, None);
+                state(&core, &account_id, false);
                 if ended == Ended::Stopped {
                     return;
                 }
@@ -163,6 +214,7 @@ async fn run(core: Arc<Core>, account_id: String, mut stopped: oneshot::Receiver
             Ok(resp) if resp.status().as_u16() == 404 => break,
             _ => {}
         }
+        closed_at.get_or_insert_with(Instant::now);
         if wait(&mut stopped, &mut attempt).await {
             return;
         }
@@ -211,8 +263,9 @@ async fn read(
                         if id.is_some() {
                             since.clone_from(&id);
                         }
-                        emit(core, account_id, FrameKind::Message, Some(data), id);
-                        crate::mirror::poke(core, account_id);
+                        if let Some(hint) = Hint::parse(account_id, &data) {
+                            apply(core, hint);
+                        }
                     }
                 }
                 if buffer.len() > MAX_FRAME_BYTES {
@@ -361,7 +414,7 @@ mod tests {
                 ),
                 (
                     "GET /v1/realtime/stream?ticket=t1 ",
-                    events("id: 7\ndata: {\"kind\":\"mail\"}\n\n"),
+                    events("id: 7\ndata: {\"kind\":\"message.created\",\"id\":\"m1\"}\n\n"),
                 ),
                 (
                     "POST /v1/realtime/ticket",
@@ -372,29 +425,76 @@ mod tests {
         ));
         open(&core, ACCOUNT).unwrap();
 
-        let mut kinds = Vec::new();
-        while kinds.len() < 5 {
-            if let CoreEvent::Realtime(frame) = next_frame(&mut seen).await {
-                if frame.kind == FrameKind::Message {
-                    assert_eq!(frame.id.as_deref(), Some("7"));
-                    assert_eq!(frame.data.as_deref(), Some("{\"kind\":\"mail\"}"));
+        let mut steps = Vec::new();
+        while steps.len() < 6 {
+            match next_frame(&mut seen).await {
+                CoreEvent::RealtimeState { open, .. } => {
+                    steps.push(if open { "open" } else { "closed" });
                 }
-                kinds.push(frame.kind);
+                CoreEvent::Hint(hint) => {
+                    assert_eq!(hint.account_id, ACCOUNT);
+                    assert!(hint.kind.is(Entity::Message, Action::Created));
+                    assert_eq!(hint.id.as_deref(), Some("m1"));
+                    steps.push("hint");
+                }
+                CoreEvent::RealtimeResync { full, .. } => {
+                    assert!(!full, "a short drop is not a full resync");
+                    steps.push("resync");
+                }
+                _ => {}
             }
         }
         assert_eq!(
-            kinds,
-            vec![
-                FrameKind::Open,
-                FrameKind::Message,
-                FrameKind::Closed,
-                FrameKind::Open,
-                FrameKind::Closed
-            ]
+            steps,
+            ["open", "hint", "closed", "open", "resync", "closed"]
         );
         core.realtime().close(ACCOUNT);
         let seen = server.await.unwrap();
         assert_eq!(seen.lines.len(), 4);
+    }
+
+    #[tokio::test]
+    async fn a_settings_hint_reloads_settings_that_were_loaded() {
+        let stub = crate::stub::Stub::start(|s, _| match s.path.as_str() {
+            "/v1/account/settings" => crate::stub::json(
+                "200 OK",
+                r#"{"sections":{"composing":{"replyDefault":"all"}}}"#,
+            ),
+            _ => crate::stub::json("200 OK", "{}"),
+        })
+        .await;
+        let core = Arc::new(Core::with_net(
+            thelemail_api::Net::new(stub.config()).unwrap(),
+        ));
+        core.auth()
+            .adopt(ACCOUNT, "t", Duration::from_secs(900), None);
+        let mut seen = core.subscribe();
+        let hint = |kind: &str| Hint::parse(ACCOUNT, &format!(r#"{{"kind":"{kind}"}}"#)).unwrap();
+        apply(&core, hint("settings.updated"));
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        assert_eq!(
+            stub.hits("/v1/account/settings"),
+            0,
+            "nothing asked for them yet"
+        );
+        crate::account::load_settings(&core, ACCOUNT).await;
+        apply(&core, hint("settings.updated"));
+        loop {
+            if let CoreEvent::SettingsChanged { .. } = next_frame(&mut seen).await
+                && stub.hits("/v1/account/settings") == 2
+            {
+                break;
+            }
+        }
+        let signature = hint("signature.updated");
+        apply(&core, signature.clone());
+        loop {
+            if let CoreEvent::Hint(h) = next_frame(&mut seen).await
+                && h == signature
+            {
+                break;
+            }
+        }
     }
 
     #[tokio::test]
@@ -437,13 +537,13 @@ mod tests {
             ],
         ));
         open(&core, ACCOUNT).unwrap();
-        let mut kinds = Vec::new();
-        while kinds.len() < 2 {
-            if let CoreEvent::Realtime(frame) = next_frame(&mut seen).await {
-                kinds.push(frame.kind);
+        let mut states = Vec::new();
+        while states.len() < 2 {
+            if let CoreEvent::RealtimeState { open, .. } = next_frame(&mut seen).await {
+                states.push(open);
             }
         }
-        assert_eq!(kinds, vec![FrameKind::Open, FrameKind::Closed]);
+        assert_eq!(states, [true, false]);
         core.realtime().close(ACCOUNT);
         server.await.unwrap();
     }

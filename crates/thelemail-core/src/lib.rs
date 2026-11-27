@@ -57,7 +57,15 @@ pub enum CoreEvent {
     BillingChanged {
         account_id: String,
     },
-    Realtime(realtime::RealtimeFrame),
+    RealtimeState {
+        account_id: String,
+        open: bool,
+    },
+    Hint(realtime::Hint),
+    RealtimeResync {
+        account_id: String,
+        full: bool,
+    },
     NotificationOpened(notify::NotificationTarget),
     NotifyStatus(notify::NotifyStatus),
     AvatarsChanged {

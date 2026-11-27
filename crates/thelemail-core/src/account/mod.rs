@@ -129,6 +129,18 @@ impl Account {
         self.pending.lock().expect("settings pending").clear();
     }
 
+    pub(crate) fn has_profile(&self, account_id: &str) -> bool {
+        self.profiles.is_started(account_id)
+    }
+
+    pub(crate) fn has_settings(&self, account_id: &str) -> bool {
+        self.settings.is_started(account_id)
+    }
+
+    pub(crate) fn has_subscription(&self, account_id: &str) -> bool {
+        self.subscriptions.is_started(account_id)
+    }
+
     fn is_pending(&self, account_id: &str, section: &'static str) -> bool {
         self.pending
             .lock()
