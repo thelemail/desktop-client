@@ -7,6 +7,7 @@ pub mod net;
 pub mod notify;
 pub mod paths;
 pub mod productkeys;
+pub mod realtime;
 pub mod session;
 pub mod shell;
 pub mod updates;
@@ -20,6 +21,7 @@ use tokio::sync::broadcast;
 use crate::keystore::PersistentHalves;
 use crate::locale::UiLocale;
 use crate::mirror::Mirror;
+use crate::realtime::Realtime;
 
 #[derive(Debug, Clone)]
 pub enum CoreEvent {
@@ -37,6 +39,7 @@ pub enum CoreEvent {
     TokenExpired {
         account_id: String,
     },
+    Realtime(realtime::RealtimeFrame),
     NotificationOpened(notify::NotificationTarget),
     NotifyStatus(notify::NotifyStatus),
 }
@@ -47,6 +50,7 @@ pub struct Core {
     halves: PersistentHalves,
     locale: UiLocale,
     mirror: Mirror,
+    realtime: Realtime,
     events: broadcast::Sender<CoreEvent>,
 }
 
@@ -63,6 +67,7 @@ impl Core {
             halves: PersistentHalves::default(),
             locale: UiLocale::default(),
             mirror: Mirror::default(),
+            realtime: Realtime::default(),
             events,
         }
     }
@@ -83,7 +88,12 @@ impl Core {
         &self.mirror
     }
 
+    pub fn realtime(&self) -> &Realtime {
+        &self.realtime
+    }
+
     pub fn shutdown(&self) {
+        self.realtime.close_all();
         self.mirror.shutdown();
     }
 

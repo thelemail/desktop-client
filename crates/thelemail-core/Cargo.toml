@@ -10,6 +10,7 @@ base64.workspace = true
 futures-util = "0.3"
 hex.workspace = true
 rand.workspace = true
+reqwest.workspace = true
 rusqlite = { workspace = true, features = ["bundled-sqlcipher-vendored-openssl"] }
 semver = "1"
 serde.workspace = true
@@ -68,4 +69,4 @@ dataview = "1.1"
 pelite = "0.10.0"
 tempfile = "3"
 thelemail-trust = { path = "../thelemail-trust", features = ["testkit"] }
-tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time"] }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time", "net", "io-util"] }
