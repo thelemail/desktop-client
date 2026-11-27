@@ -216,11 +216,11 @@ pub(crate) fn clear_of(
     candidates
         .into_iter()
         .find(|origin| {
-            fits(*origin)
-                && !hits(&Bounds {
-                    origin: *origin,
-                    size,
-                })
+            let placed = Bounds {
+                origin: *origin,
+                size,
+            };
+            fits(*origin) && !hits(&placed) && !placed.intersects(&trigger)
         })
         .map_or(Clearance::Blocked, Clearance::Move)
 }
@@ -273,6 +273,25 @@ mod tests {
         };
         assert!(!placed.intersects(&reader));
         assert!(placed.right() <= viewport.width && placed.bottom() <= viewport.height);
+    }
+
+    #[test]
+    fn a_popup_never_moves_over_its_own_trigger() {
+        let viewport = size(px(1000.0), px(1000.0));
+        let reader = rect(170.0, 700.0, 830.0, 220.0);
+        let trigger = rect(20.0, 200.0, 100.0, 36.0);
+        let popup = rect(20.0, 240.0, 236.0, 520.0);
+        match clear_of(popup, trigger, &[reader], viewport) {
+            Clearance::Move(origin) => {
+                let placed = Bounds {
+                    origin,
+                    size: popup.size,
+                };
+                assert!(!placed.intersects(&trigger));
+                assert!(!placed.intersects(&reader));
+            }
+            other => assert_eq!(other, Clearance::Blocked),
+        }
     }
 
     #[test]
