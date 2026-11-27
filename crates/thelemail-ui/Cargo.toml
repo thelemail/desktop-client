@@ -9,3 +9,6 @@ license.workspace = true
 gpui-kit.workspace = true
 thelemail-i18n = { path = "../thelemail-i18n" }
 tracing.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true

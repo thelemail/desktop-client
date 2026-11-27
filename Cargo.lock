@@ -7472,6 +7472,7 @@ name = "thelemail-ui"
 version = "0.24.0"
 dependencies = [
  "gpui-kit",
+ "serde_json",
  "thelemail-i18n",
  "tracing",
 ]
