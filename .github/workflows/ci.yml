@@ -4,6 +4,7 @@ on:
   pull_request:
   push:
     branches: [main]
+  workflow_dispatch:
   workflow_call:
     secrets:
       TRUST_READ_TOKEN:
@@ -57,6 +58,7 @@ jobs:
 
 
   windows:
+    if: github.event_name != 'pull_request'
     runs-on: windows-2025
     defaults:
       run:
