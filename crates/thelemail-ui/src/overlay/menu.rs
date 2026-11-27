@@ -653,6 +653,7 @@ fn level_panel(
                     .line_height(relative(1.0))
                     .text_color(theme.color(ColorToken::FgFaint))
                     .role(Role::Label)
+                    .aria_label(text.clone())
                     .child(SharedString::from(text.to_uppercase()))
                     .into_any_element(),
             ),

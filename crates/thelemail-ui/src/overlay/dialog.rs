@@ -433,6 +433,7 @@ impl RenderOnce for Dialog {
             .clone();
         let close: Option<Action> = self.on_close.clone().filter(|_| self.dismissible);
         let dark = theme.appearance == Appearance::Dark;
+        let described = self.description.clone();
         let header = self.header(&theme);
         let footer = std::mem::take(&mut self.footer);
         let body = std::mem::take(&mut self.body);
@@ -479,6 +480,7 @@ impl RenderOnce for Dialog {
                 Role::Dialog
             })
             .when_some(self.title.clone(), |el, title| el.aria_label(title))
+            .when_some(described, |el, text| el.aria_description(text))
             .on_action(move |_: &Dismiss, window, cx| {
                 if let Some(close) = escape.as_ref() {
                     close(window, cx);
