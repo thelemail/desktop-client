@@ -2,8 +2,8 @@ use std::rc::Rc;
 
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
-    App, ElementId, InteractiveElement, IntoElement, ParentElement, RenderOnce, Role,
-    SharedString, StatefulInteractiveElement, Styled, Toggled, Window, div, px, relative,
+    App, ElementId, InteractiveElement, IntoElement, ParentElement, RenderOnce, Role, SharedString,
+    StatefulInteractiveElement, Styled, Toggled, Window, div, px, relative,
 };
 
 use super::look::{self, DISABLED_OPACITY};
@@ -135,7 +135,13 @@ impl RenderOnce for Switch {
         let theme = self.theme.unwrap_or(*cx.tokens());
         let metrics = self.size.metrics();
         let paint = look::switch(self.checked);
-        let bg = ease_color(child(&self.id, "bg"), paint.bg.resolve(&theme), COLOR, window, cx);
+        let bg = ease_color(
+            child(&self.id, "bg"),
+            paint.bg.resolve(&theme),
+            COLOR,
+            window,
+            cx,
+        );
         let border = ease_color(
             child(&self.id, "border"),
             paint.border.resolve(&theme),
@@ -212,7 +218,9 @@ impl RenderOnce for Switch {
                     .child(track),
             })
             .when(!disabled, |el| el.cursor_pointer())
-            .when(disabled, |el| el.cursor_not_allowed().opacity(DISABLED_OPACITY))
+            .when(disabled, |el| {
+                el.cursor_not_allowed().opacity(DISABLED_OPACITY)
+            })
             .role(Role::Switch)
             .when_some(name, |el, name| el.aria_label(name))
             .aria_toggled(if checked {

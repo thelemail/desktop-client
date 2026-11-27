@@ -210,7 +210,9 @@ impl RenderOnce for Chip {
                         handler((), window, cx);
                     }
                 })
-                .tooltip(move |window, cx| Tooltip::build(tip.clone(), None, Some(theme), window, cx))
+                .tooltip(move |window, cx| {
+                    Tooltip::build(tip.clone(), None, Some(theme), window, cx)
+                })
                 .tooltip_show_delay(TOOLTIP_DELAY)
                 .child(glyph(
                     IconName::Xmark,

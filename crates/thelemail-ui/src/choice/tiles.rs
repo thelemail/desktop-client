@@ -191,7 +191,9 @@ impl RenderOnce for OptionTiles {
         let theme = self.theme.unwrap_or(*cx.tokens());
         let count = self.tiles.len();
         let width = window
-            .use_keyed_state(child(&self.id, "width"), cx, |_, _| Rc::new(Cell::new(0.0f32)))
+            .use_keyed_state(child(&self.id, "width"), cx, |_, _| {
+                Rc::new(Cell::new(0.0f32))
+            })
             .read(cx)
             .clone();
         let cols = self
@@ -230,8 +232,17 @@ impl RenderOnce for OptionTiles {
                 Phase::Rest
             };
             let paint = look::tile(checked, interactive, phase);
-            let ink = |name: &'static str, fill: crate::button::Fill, window: &mut Window, cx: &mut App| {
-                ease_color(child(&tile_id, name), fill.resolve(&theme), COLOR, window, cx)
+            let ink = |name: &'static str,
+                       fill: crate::button::Fill,
+                       window: &mut Window,
+                       cx: &mut App| {
+                ease_color(
+                    child(&tile_id, name),
+                    fill.resolve(&theme),
+                    COLOR,
+                    window,
+                    cx,
+                )
             };
             let bg = ink("bg", paint.bg, window, cx);
             let border = ink("border", paint.border, window, cx);
@@ -354,7 +365,9 @@ impl RenderOnce for OptionTiles {
                     })
                     .child(text)
                     .child(mark)
-                    .when(keyboard, |el| el.child(ring(1.0, RADIUS_SURFACE, ring_color)))
+                    .when(keyboard, |el| {
+                        el.child(ring(1.0, RADIUS_SURFACE, ring_color))
+                    })
                     .a11y_state(false, !interactive),
             );
         }

@@ -82,7 +82,13 @@ struct Chrome {
 }
 
 impl Chrome {
-    fn wrap(self, control: Div, handle: &FocusHandle, tab_stop: bool, window: &Window) -> Stateful<Div> {
+    fn wrap(
+        self,
+        control: Div,
+        handle: &FocusHandle,
+        tab_stop: bool,
+        window: &Window,
+    ) -> Stateful<Div> {
         let focused = handle.is_focused(window);
         let base = div()
             .id(self.id)
@@ -94,7 +100,12 @@ impl Chrome {
                 el.cursor_not_allowed().opacity(DISABLED_OPACITY)
             })
             .when(!self.disabled || focused, |el| {
-                el.track_focus(&handle.clone().tab_index(0).tab_stop(tab_stop && !self.disabled))
+                el.track_focus(
+                    &handle
+                        .clone()
+                        .tab_index(0)
+                        .tab_stop(tab_stop && !self.disabled),
+                )
             });
         match self.label {
             Some(label) => base
@@ -109,10 +120,7 @@ impl Chrome {
                         .text_color(self.theme.color(ColorToken::Fg))
                         .child(label),
                 ),
-            None => base
-                .m(px(-REACH))
-                .p(px(REACH))
-                .child(control),
+            None => base.m(px(-REACH)).p(px(REACH)).child(control),
         }
     }
 }
@@ -188,7 +196,13 @@ impl RenderOnce for Checkbox {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
         let theme = self.theme.unwrap_or(*cx.tokens());
         let paint = look::checkbox(self.mark, self.invalid);
-        let bg = ease_color(child(&self.id, "bg"), paint.bg.resolve(&theme), COLOR, window, cx);
+        let bg = ease_color(
+            child(&self.id, "bg"),
+            paint.bg.resolve(&theme),
+            COLOR,
+            window,
+            cx,
+        );
         let border = ease_color(
             child(&self.id, "border"),
             paint.border.resolve(&theme),
@@ -240,7 +254,9 @@ impl RenderOnce for Checkbox {
                     el.child(tick(scale, ink))
                 }
             })
-            .when(keyboard, |el| el.child(ring(BORDER, RADIUS_CHECK, ring_color)));
+            .when(keyboard, |el| {
+                el.child(ring(BORDER, RADIUS_CHECK, ring_color))
+            });
 
         let name = self.accessibility_label.clone();
         let mark = self.mark;
@@ -533,9 +549,16 @@ impl RenderOnce for RadioGroup {
                 on_change(value.clone(), window, cx);
             }
         });
-        let radios = self.items.into_iter().enumerate().map(|(ix, item)| {
-            let pick = pick.clone();
-            Radio::new(ElementId::NamedChild(self.id.clone().into(), item.value.clone()))
+        let radios = self
+            .items
+            .into_iter()
+            .enumerate()
+            .map(|(ix, item)| {
+                let pick = pick.clone();
+                Radio::new(ElementId::NamedChild(
+                    self.id.clone().into(),
+                    item.value.clone(),
+                ))
                 .checked(selected == Some(ix))
                 .label(item.label)
                 .disabled(!enabled[ix])
@@ -543,8 +566,8 @@ impl RenderOnce for RadioGroup {
                 .theme(theme)
                 .roving(handles[ix].clone(), stop == Some(ix), (ix, count))
                 .on_select(move |window, cx| pick(ix, window, cx))
-        })
-        .collect::<Vec<_>>();
+            })
+            .collect::<Vec<_>>();
         div()
             .id(self.id.clone())
             .flex()

@@ -57,9 +57,7 @@ pub(crate) fn is_enter(event: &ClickEvent) -> bool {
     matches!(event, ClickEvent::Keyboard(key) if key.button == KeyboardButton::Enter)
 }
 
-pub(crate) fn set_hover(
-    state: Entity<bool>,
-) -> impl Fn(&bool, &mut Window, &mut App) + 'static {
+pub(crate) fn set_hover(state: Entity<bool>) -> impl Fn(&bool, &mut Window, &mut App) + 'static {
     move |over, window, cx| {
         state.update(cx, |hovered, _| *hovered = *over);
         window.refresh();

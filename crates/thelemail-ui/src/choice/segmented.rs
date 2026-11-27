@@ -289,7 +289,13 @@ impl RenderOnce for Segmented {
                     })
                     .when_some(option.icon, |el, icon| el.child(glyph(icon, px(ICON), fg)))
                     .when(!hidden, |el| {
-                        el.child(div().min_w_0().overflow_hidden().text_ellipsis().child(label))
+                        el.child(
+                            div()
+                                .min_w_0()
+                                .overflow_hidden()
+                                .text_ellipsis()
+                                .child(label),
+                        )
                     })
                     .when(hidden, |el| {
                         let text = option.label.clone();
