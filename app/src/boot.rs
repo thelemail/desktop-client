@@ -68,6 +68,7 @@ pub fn run() {
     app.on_reopen(show_main);
     app.run(move |cx| {
         gpui_kit::init(cx);
+        thelemail_ui::overlay::init(cx);
         thelemail_ui::fonts::register(cx);
         let handle = runtime.handle().clone();
         cx.set_global(Services::new(core.clone(), runtime, log));
