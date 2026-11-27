@@ -304,7 +304,7 @@ impl RenderOnce for OptionTiles {
                         .text_size(px(TITLE * FONT_SANS.size_adjust))
                         .font_weight(FontWeight::SEMIBOLD)
                         .line_height(relative(1.3))
-                        .child(tile.title.clone())
+                        .child(div().min_w_0().child(tile.title.clone()))
                         .when_some(tile.badge, |el, text| el.child(badge(text, &theme))),
                 )
                 .when_some(tile.description.clone(), |el, text| {
