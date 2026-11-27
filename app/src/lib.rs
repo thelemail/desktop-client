@@ -29,3 +29,5 @@ mod button_gallery;
 mod choice_gallery;
 #[cfg(debug_assertions)]
 mod field_gallery;
+#[cfg(debug_assertions)]
+mod overlay_gallery;
