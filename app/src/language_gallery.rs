@@ -29,9 +29,6 @@ pub fn render(theme: &Theme) -> AnyElement {
             ),
             theme,
         ))
-        .child(section("Plurals", plurals(theme), theme))
-        .child(section("Selects", selects(theme), theme))
-        .child(section("Rich text", rich(theme), theme))
         .child(section("Buttons", buttons(theme), theme))
         .child(section("Sidebar", sidebar(theme), theme))
         .child(section(
@@ -39,6 +36,9 @@ pub fn render(theme: &Theme) -> AnyElement {
             chrome(theme),
             theme,
         ))
+        .child(section("Rich text", rich(theme), theme))
+        .child(section("Selects", selects(theme), theme))
+        .child(section("Plurals", plurals(theme), theme))
         .into_any_element()
 }
 
@@ -187,7 +187,7 @@ fn sidebar(theme: &Theme) -> AnyElement {
     let labels = [
         m::mail_folder_inbox(),
         m::mail_folder_starred(),
-        m::mail_drafts_side(),
+        m::mailbox_folder_drafts(),
         m::mail_folder_archive(),
         m::mail_folder_spam(),
         m::mail_folder_trash(),

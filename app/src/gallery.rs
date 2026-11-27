@@ -78,8 +78,10 @@ fn header(current: &Theme, tab: GalleryTab, language: Language) -> impl IntoElem
     ];
     div()
         .flex()
+        .flex_wrap()
         .items_center()
         .justify_between()
+        .gap(px(12.0))
         .px(px(24.0))
         .py(px(12.0))
         .border_b_1()
