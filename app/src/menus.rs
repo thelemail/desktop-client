@@ -41,9 +41,7 @@ actions!(
         Zoom,
         ShowMain,
         Help,
-        TokenGallery,
-        FocusNext,
-        FocusPrev
+        TokenGallery
     ]
 );
 
@@ -64,8 +62,6 @@ pub fn init(cx: &mut App) {
     cx.on_action(|_: &Zoom, cx| with_active_window(cx, |window| window.zoom_window()));
     cx.on_action(|_: &ShowMain, cx| show_main(cx));
     cx.on_action(|_: &Help, cx| cx.open_url(HELP_URL));
-    cx.on_action(|_: &FocusNext, cx| move_focus(cx, true));
-    cx.on_action(|_: &FocusPrev, cx| move_focus(cx, false));
     #[cfg(debug_assertions)]
     cx.on_action(|_: &TokenGallery, cx| {
         show_main(cx);
@@ -87,8 +83,6 @@ fn bindings() -> Vec<KeyBinding> {
         KeyBinding::new(secondary!("["), Back, None),
         KeyBinding::new(secondary!("]"), Forward, None),
         KeyBinding::new(secondary!("m"), Minimize, None),
-        KeyBinding::new("tab", FocusNext, None),
-        KeyBinding::new("shift-tab", FocusPrev, None),
         #[cfg(target_os = "macos")]
         KeyBinding::new("cmd-h", Hide, None),
         #[cfg(target_os = "macos")]
@@ -160,21 +154,6 @@ fn open_settings(section: SettingsSection, cx: &mut App) {
     show_main(cx);
     navigator(cx).update(cx, |nav, cx| {
         nav.open_account_page(AccountPage::Settings(section), cx)
-    });
-}
-
-fn move_focus(cx: &mut App, forward: bool) {
-    let Some(handle) = cx.active_window() else {
-        return;
-    };
-    cx.defer(move |cx| {
-        let _ = handle.update(cx, |_, window, cx| {
-            if forward {
-                window.focus_next(cx);
-            } else {
-                window.focus_prev(cx);
-            }
-        });
     });
 }
 

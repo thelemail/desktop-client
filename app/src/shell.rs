@@ -18,6 +18,8 @@ use crate::icon_gallery::IconGallery;
 use crate::motion_gallery::MotionGallery;
 use crate::nav::{Navigator, navigator};
 #[cfg(debug_assertions)]
+use crate::overlay_gallery::OverlayGallery;
+#[cfg(debug_assertions)]
 use crate::router::{DebugPage, GalleryTab, Route};
 use crate::screens;
 use crate::window::FrameSaver;
@@ -35,6 +37,8 @@ pub struct Shell {
     fields: Option<Entity<FieldGallery>>,
     #[cfg(debug_assertions)]
     choices: Option<Entity<ChoiceGallery>>,
+    #[cfg(debug_assertions)]
+    overlays: Option<Entity<OverlayGallery>>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -59,6 +63,8 @@ impl Shell {
             fields: None,
             #[cfg(debug_assertions)]
             choices: None,
+            #[cfg(debug_assertions)]
+            overlays: None,
             _subscriptions: subscriptions,
         }
     }
@@ -110,6 +116,14 @@ impl Render for Shell {
                 .get_or_insert_with(|| cx.new(|cx| ChoiceGallery::new(window, cx)))
                 .clone();
             return root.child(choices);
+        }
+        #[cfg(debug_assertions)]
+        if route == Route::Debug(DebugPage::Tokens(GalleryTab::Overlays)) {
+            let overlays = self
+                .overlays
+                .get_or_insert_with(|| cx.new(|cx| OverlayGallery::new(window, cx)))
+                .clone();
+            return root.child(overlays);
         }
         let _ = window;
         root.child(screens::render(&route, cx))

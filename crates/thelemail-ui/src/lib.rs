@@ -6,6 +6,7 @@ pub mod field;
 pub mod fonts;
 pub mod icons;
 pub mod motion;
+pub mod overlay;
 pub mod rich;
 pub mod shape;
 pub mod spinner;

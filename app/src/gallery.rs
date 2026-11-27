@@ -80,6 +80,7 @@ fn tab_label(tab: GalleryTab) -> &'static str {
         GalleryTab::Buttons => "Buttons",
         GalleryTab::Fields => "Fields",
         GalleryTab::Choices => "Choices",
+        GalleryTab::Overlays => "Overlays",
     }
 }
 
@@ -207,7 +208,8 @@ fn tokens(theme: &Theme, tab: GalleryTab) -> AnyElement {
         | GalleryTab::Icons
         | GalleryTab::Buttons
         | GalleryTab::Fields
-        | GalleryTab::Choices => body,
+        | GalleryTab::Choices
+        | GalleryTab::Overlays => body,
     }
     .into_any_element()
 }

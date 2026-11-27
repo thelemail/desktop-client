@@ -10,9 +10,10 @@ use gpui_kit::{
 use super::look::{self, DISABLED_OPACITY};
 use super::{Handler, child, focus, hovered, ring, set_hover};
 use crate::a11y::A11yStateExt as _;
-use crate::button::{Phase, TOOLTIP_DELAY, Tooltip};
+use crate::button::Phase;
 use crate::icons::{IconName, glyph};
 use crate::motion::{BASE, EASE, Spec, ease_color};
+use crate::overlay::{Tip, tooltip_attach};
 use crate::theme::{ActiveTokens, Theme};
 use crate::tokens::{ColorToken, FONT_SANS, RADIUS_PILL};
 
@@ -189,8 +190,9 @@ impl RenderOnce for Chip {
             let lit = *over.read(cx) && !self.disabled;
             let keyboard = handle.is_focused(window) && window.last_input_was_keyboard();
             let disabled = self.disabled;
-            let tip = label.clone();
-            div()
+            let tip = Tip::new(child(&id, "tip"), label.clone()).theme(theme);
+            let tip_focus = handle.clone();
+            let row = div()
                 .id(id)
                 .relative()
                 .flex()
@@ -204,23 +206,26 @@ impl RenderOnce for Chip {
                 .role(Role::Button)
                 .aria_label(label)
                 .when(!disabled, |el| el.track_focus(&handle.tab_index(0)))
-                .on_hover(set_hover(over))
                 .on_click(move |_, window, cx| {
                     if !disabled {
                         handler((), window, cx);
                     }
-                })
-                .tooltip(move |window, cx| {
-                    Tooltip::build(tip.clone(), None, Some(theme), window, cx)
-                })
-                .tooltip_show_delay(TOOLTIP_DELAY)
-                .child(glyph(
-                    IconName::Xmark,
-                    px(REMOVE_ICON),
-                    fg.opacity(if lit { 1.0 } else { REMOVE_REST }),
-                ))
-                .when(keyboard, |el| el.child(ring(0.0, REMOVE / 2.0, ring_color)))
-                .a11y_state(false, disabled)
+                });
+            tooltip_attach(
+                row,
+                Some(tip),
+                Some(&tip_focus),
+                set_hover(over),
+                window,
+                cx,
+            )
+            .child(glyph(
+                IconName::Xmark,
+                px(REMOVE_ICON),
+                fg.opacity(if lit { 1.0 } else { REMOVE_REST }),
+            ))
+            .when(keyboard, |el| el.child(ring(0.0, REMOVE / 2.0, ring_color)))
+            .a11y_state(false, disabled)
         });
 
         let has_leading = self.leading.is_some();
