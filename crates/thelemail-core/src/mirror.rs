@@ -2129,7 +2129,7 @@ async fn fetch_one_body(
     })
 }
 
-fn auth_headers(account_id: &str, access_token: &str) -> HashMap<String, String> {
+pub(crate) fn auth_headers(account_id: &str, access_token: &str) -> HashMap<String, String> {
     let mut headers = HashMap::new();
     headers.insert("Authorization".to_owned(), format!("Bearer {access_token}"));
     headers.insert("X-Account-Id".to_owned(), account_id.to_owned());
