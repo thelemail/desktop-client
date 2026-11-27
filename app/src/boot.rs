@@ -65,7 +65,9 @@ pub fn run() {
     }
 
     let start = initial_route();
-    let app = application().with_quit_mode(QuitMode::Explicit);
+    let app = application()
+        .with_assets(thelemail_ui::icons::Assets)
+        .with_quit_mode(QuitMode::Explicit);
     app.on_reopen(show_main);
     app.run(move |cx| {
         gpui_kit::init(cx);
