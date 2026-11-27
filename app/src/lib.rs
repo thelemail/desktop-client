@@ -1,3 +1,4 @@
+mod appearance;
 pub mod bridge;
 mod instance;
 mod logging;

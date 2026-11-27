@@ -9,7 +9,7 @@ use crate::nav::{self, navigator};
 use crate::router::{AuthPage, Route};
 use crate::services::{self, Services};
 use crate::window::{self, show_main};
-use crate::{logging, menus, tray};
+use crate::{appearance, logging, menus, tray};
 
 pub fn run() {
     let log = logging::init();
@@ -72,6 +72,7 @@ pub fn run() {
         thelemail_ui::fonts::register(cx);
         let handle = runtime.handle().clone();
         cx.set_global(Services::new(core.clone(), runtime, log));
+        appearance::init(cx);
         cx.on_app_quit(|cx| {
             Services::shutdown(cx);
             async {}

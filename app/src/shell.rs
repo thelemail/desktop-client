@@ -1,7 +1,9 @@
-use gpui_kit::component::{ActiveTheme, Theme};
 use gpui_kit::{
     Context, Entity, IntoElement, ParentElement, Render, Styled, Subscription, Window, div,
 };
+
+use thelemail_ui::theme::{ActiveTokens, Theme};
+use thelemail_ui::tokens::ColorToken;
 
 use crate::nav::{Navigator, navigator};
 use crate::screens;
@@ -15,14 +17,11 @@ pub struct Shell {
 
 impl Shell {
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
-        Theme::sync_system_appearance(Some(window), cx);
         let nav = navigator(cx);
         let subscriptions = vec![
             cx.observe(&nav, |_, _, cx| cx.notify()),
             cx.observe_window_bounds(window, |this, window, cx| this.frame.changed(window, cx)),
-            cx.observe_window_appearance(window, |_, window, cx| {
-                Theme::sync_system_appearance(Some(window), cx);
-            }),
+            Theme::follow_system(window, cx),
         ];
         Self {
             nav,
@@ -37,8 +36,8 @@ impl Render for Shell {
         let route = self.nav.read(cx).current().clone();
         div()
             .size_full()
-            .bg(cx.theme().background)
-            .text_color(cx.theme().muted_foreground)
+            .bg(cx.tokens().color(ColorToken::Bg))
+            .text_color(cx.tokens().color(ColorToken::FgMuted))
             .child(screens::placeholder(&route))
     }
 }
