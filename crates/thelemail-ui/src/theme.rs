@@ -4,8 +4,8 @@ use gpui_kit::{
 };
 
 use crate::tokens::{
-    ColorToken, DARK, DARK_SHADOWS, LIGHT, LIGHT_SHADOWS, Palette, ShadowLayer, ShadowToken,
-    Shadows,
+    ColorToken, DARK, DARK_SHADOWS, FONT_MONO, FONT_SANS, LIGHT, LIGHT_SHADOWS, Palette,
+    ShadowLayer, ShadowToken, Shadows,
 };
 
 const CSS_BLUR_TO_SIGMA: f32 = 0.5;
@@ -96,12 +96,32 @@ impl Theme {
             Appearance::Light => ThemeMode::Light,
             Appearance::Dark => ThemeMode::Dark,
         };
-        if !cx.has_global::<KitTheme>() || KitTheme::global(cx).mode != mode {
+        let mode_changed = !cx.has_global::<KitTheme>() || KitTheme::global(cx).mode != mode;
+        if mode_changed {
             KitTheme::change(mode, None, cx);
+        }
+        if mode_changed || changed {
+            theme.project_onto_kit(cx);
         }
         if changed {
             cx.refresh_windows();
         }
+    }
+
+    fn project_onto_kit(self, cx: &mut App) {
+        KitTheme::update(cx, |kit| {
+            kit.font_family = FONT_SANS.name.into();
+            kit.mono_font_family = FONT_MONO.name.into();
+            let colors = &mut kit.colors;
+            colors.background = self.color(ColorToken::Surface);
+            colors.foreground = self.color(ColorToken::FgStrong);
+            colors.muted_foreground = self.color(ColorToken::FgMuted);
+            colors.selection = self.color(ColorToken::Selection);
+            colors.caret = self.color(ColorToken::FgStrong);
+            colors.border = self.color(ColorToken::BorderSoft);
+            colors.input = self.color(ColorToken::BorderControl);
+            colors.ring = self.color(ColorToken::FocusRing);
+        });
     }
 
     pub fn palette(&self) -> &'static Palette {
