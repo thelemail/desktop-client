@@ -1,3 +1,4 @@
+mod normalize;
 mod policy;
 
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -11,7 +12,7 @@ use thelemail_api::{ApiRequest, ApiResponse};
 use thelemail_store::avatars::{CachedAvatar, cached_avatar, prune_avatars, store_avatar};
 use tokio::sync::Notify;
 
-pub use policy::ImageFormat;
+use policy::ImageFormat;
 pub use thelemail_store::avatars::AvatarKind;
 
 use crate::{Core, CoreEvent};
@@ -22,33 +23,47 @@ const MEMORY_MAX: usize = 400;
 const MEMORY_KEEP: usize = 300;
 const DISK_MAX: usize = 2000;
 
+pub use normalize::EDGE;
+
 #[derive(Debug, Clone)]
 pub struct AvatarImage {
-    pub format: ImageFormat,
-    pub bytes: Arc<[u8]>,
+    pub png: Arc<[u8]>,
     pub id: u64,
 }
 
 impl AvatarImage {
-    fn new(format: ImageFormat, bytes: Vec<u8>) -> Self {
+    fn new(png: Vec<u8>) -> Self {
         let mut hasher = DefaultHasher::new();
-        bytes.hash(&mut hasher);
+        png.hash(&mut hasher);
         Self {
-            format,
-            bytes: bytes.into(),
+            png: png.into(),
             id: hasher.finish(),
         }
     }
 
     fn from_cache(cached: &CachedAvatar) -> Option<Self> {
-        let format = ImageFormat::parse(&cached.format)?;
+        if ImageFormat::parse(&cached.format) != Some(ImageFormat::Png) {
+            return None;
+        }
         let bytes = cached.bytes.clone()?;
-        let valid = match format {
-            ImageFormat::Svg => policy::logo(&bytes),
-            _ => policy::photo(&bytes) == Some(format),
-        };
-        valid.then(|| Self::new(format, bytes))
+        (policy::photo(&bytes) == Some(ImageFormat::Png)).then(|| Self::new(bytes))
     }
+}
+
+fn normalized(source: &str, png: Option<Vec<u8>>) -> CachedAvatar {
+    match png {
+        Some(png) => CachedAvatar {
+            source: source.to_owned(),
+            format: ImageFormat::Png.as_str().to_owned(),
+            bytes: Some(png),
+            checked_at: now_unix(),
+        },
+        None => negative(source),
+    }
+}
+
+async fn off_thread(work: impl FnOnce() -> Option<Vec<u8>> + Send + 'static) -> Option<Vec<u8>> {
+    tokio::task::spawn_blocking(work).await.ok().flatten()
 }
 
 #[derive(Debug, Clone)]
@@ -621,15 +636,10 @@ impl Client<'_> {
             Ok(r) if r.status == 404 => Fetched::Found(negative(path)),
             Ok(r) if r.status == 200 => {
                 let bytes = r.body.unwrap_or_default();
-                Fetched::Found(match policy::photo(&bytes) {
-                    Some(format) => CachedAvatar {
-                        source: path.to_owned(),
-                        format: format.as_str().to_owned(),
-                        bytes: Some(bytes),
-                        checked_at: now_unix(),
-                    },
-                    None => negative(path),
-                })
+                Fetched::Found(normalized(
+                    path,
+                    off_thread(move || normalize::photo(&bytes)).await,
+                ))
             }
             _ => Fetched::Failed,
         }
@@ -646,17 +656,12 @@ impl Client<'_> {
                 let svg = r
                     .body
                     .and_then(|b| serde_json::from_slice::<LogoResponse>(&b).ok())
-                    .and_then(|l| base64::engine::general_purpose::STANDARD.decode(l.svg).ok())
-                    .filter(|bytes| policy::logo(bytes));
-                Fetched::Found(match svg {
-                    Some(bytes) => CachedAvatar {
-                        source: String::new(),
-                        format: ImageFormat::Svg.as_str().to_owned(),
-                        bytes: Some(bytes),
-                        checked_at: now_unix(),
-                    },
-                    None => negative(""),
-                })
+                    .and_then(|l| base64::engine::general_purpose::STANDARD.decode(l.svg).ok());
+                let png = match svg {
+                    Some(svg) => off_thread(move || normalize::logo(&svg)).await,
+                    None => None,
+                };
+                Fetched::Found(normalized("", png))
             }
             _ => Fetched::Failed,
         }
@@ -678,10 +683,7 @@ mod tests {
 
     fn photo_entry() -> Entry {
         Entry {
-            image: Some(AvatarImage::new(
-                ImageFormat::Png,
-                b"\x89PNG\r\n\x1a\n".to_vec(),
-            )),
+            image: Some(AvatarImage::new(b"\x89PNG\r\n\x1a\n".to_vec())),
             checked_at: now_unix(),
             used: 0,
         }
@@ -854,7 +856,7 @@ mod tests {
         let svg = CachedAvatar {
             source: String::new(),
             format: "svg".into(),
-            bytes: Some(br#"<svg><image href="/etc/x"/></svg>"#.to_vec()),
+            bytes: Some(br#"<svg viewBox="0 0 1 1"/>"#.to_vec()),
             checked_at: 1,
         };
         assert!(AvatarImage::from_cache(&svg).is_none());

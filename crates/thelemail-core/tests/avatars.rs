@@ -6,16 +6,24 @@ use std::time::Duration;
 
 use base64::Engine as _;
 use thelemail_api::ApiConfig;
-use thelemail_core::avatars::{ImageFormat, Lookup};
+use thelemail_core::avatars::{EDGE, Lookup};
 use thelemail_core::{Core, CoreEvent};
 use url::Url;
 
 const ACCOUNT: &str = "0c0c0c0c-0c0c-4c0c-8c0c-0c0c0c0c0c0c";
-const PNG: &[u8] = b"\x89PNG\r\n\x1a\nAVATAR";
 const LOGO: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 4 4"><rect width="4" height="4"/></svg>"#;
 const HOSTILE: &str = r#"<svg xmlns="http://www.w3.org/2000/svg"><image href="/etc/hosts"/></svg>"#;
 
 type Seen = Arc<Mutex<Vec<(String, String)>>>;
+
+fn photo() -> Vec<u8> {
+    let image = image::RgbaImage::from_pixel(300, 200, image::Rgba([0, 92, 59, 255]));
+    let mut out = Vec::new();
+    image
+        .write_to(&mut std::io::Cursor::new(&mut out), image::ImageFormat::Png)
+        .expect("png");
+    out
+}
 
 fn respond(path: &str, body: &str) -> (u16, &'static str, Vec<u8>) {
     let b64 = |s: &str| base64::engine::general_purpose::STANDARD.encode(s);
@@ -37,7 +45,7 @@ fn respond(path: &str, body: &str) -> (u16, &'static str, Vec<u8>) {
                     .into_bytes(),
             )
         }
-        "/v1/avatars/a/1" => (200, "application/octet-stream", PNG.to_vec()),
+        "/v1/avatars/a/1" => (200, "application/octet-stream", photo()),
         "/v1/bimi/logo" if body.contains("acme.test") => (
             200,
             "application/json",
@@ -121,9 +129,13 @@ async fn settle(core: &Core, ready: impl Fn(&Core) -> bool) {
     }
 }
 
-fn ready(lookup: Lookup) -> Option<Option<ImageFormat>> {
+fn ready(lookup: Lookup) -> Option<Option<(u32, u32)>> {
     match lookup {
-        Lookup::Ready(image) => Some(image.map(|i| i.format)),
+        Lookup::Ready(image) => Some(image.map(|i| {
+            let decoded = image::load_from_memory_with_format(&i.png, image::ImageFormat::Png)
+                .expect("a stored avatar is always a PNG");
+            (decoded.width(), decoded.height())
+        })),
         Lookup::Pending => None,
     }
 }
@@ -166,12 +178,12 @@ async fn photos_and_logos_are_fetched_checked_cached_and_served_offline() {
     let a = online.avatars();
     assert_eq!(
         ready(a.person(ACCOUNT, "ada@acme.test")),
-        Some(Some(ImageFormat::Png))
+        Some(Some((EDGE, EDGE)))
     );
     assert_eq!(ready(a.person(ACCOUNT, "nobody@acme.test")), Some(None));
     assert_eq!(
         ready(a.bimi(ACCOUNT, "acme.test")),
-        Some(Some(ImageFormat::Svg))
+        Some(Some((EDGE, EDGE)))
     );
     assert_eq!(ready(a.bimi(ACCOUNT, "evil.test")), Some(None));
 
@@ -224,11 +236,11 @@ async fn photos_and_logos_are_fetched_checked_cached_and_served_offline() {
     .await;
     assert_eq!(
         ready(o.person(ACCOUNT, "ada@acme.test")),
-        Some(Some(ImageFormat::Png))
+        Some(Some((EDGE, EDGE)))
     );
     assert_eq!(
         ready(o.bimi(ACCOUNT, "acme.test")),
-        Some(Some(ImageFormat::Svg))
+        Some(Some((EDGE, EDGE)))
     );
     assert_eq!(
         hits.load(Ordering::SeqCst),

@@ -10,8 +10,10 @@ base64.workspace = true
 futures-util = "0.3"
 hex.workspace = true
 icu_normalizer.workspace = true
+image.workspace = true
 rand.workspace = true
 reqwest.workspace = true
+resvg.workspace = true
 rusqlite = { workspace = true, features = ["bundled-sqlcipher-vendored-openssl"] }
 semver = "1"
 serde.workspace = true
