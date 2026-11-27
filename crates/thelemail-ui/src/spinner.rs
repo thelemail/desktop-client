@@ -48,9 +48,7 @@ pub(crate) fn turn(elapsed: Duration, period: Duration) -> f32 {
 impl RenderOnce for Spinner {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
         let now = cx.background_executor().now();
-        let started = *window
-            .use_keyed_state(self.id, cx, |_, _| now)
-            .read(cx);
+        let started = *window.use_keyed_state(self.id, cx, |_, _| now).read(cx);
         let period = if cx.reduce_motion() {
             self.period * REDUCED_SLOWDOWN
         } else {
@@ -65,7 +63,8 @@ impl RenderOnce for Spinner {
                 move |bounds, _, window, _| {
                     let radius = (bounds.size.width.min(bounds.size.height) - px(STROKE)) / 2.0;
                     let center = bounds.center();
-                    let at = |a: f32| point(center.x + radius * a.cos(), center.y + radius * a.sin());
+                    let at =
+                        |a: f32| point(center.x + radius * a.cos(), center.y + radius * a.sin());
                     let mut path = PathBuilder::stroke(px(STROKE));
                     path.move_to(at(angle));
                     path.arc_to(
