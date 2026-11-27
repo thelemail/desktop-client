@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/*"]
+members = ["crates/*", "app"]
 
 [workspace.package]
 version = "0.24.0"
@@ -10,6 +10,7 @@ license = "AGPL-3.0-only"
 
 [workspace.dependencies]
 anyhow = "1"
+async-channel = "2.5.0"
 base64 = "0.22"
 hex = "0.4"
 mail-parser = "0.11"
@@ -29,4 +30,6 @@ serde_json = "1"
 sha2 = "0.10"
 thiserror = "2"
 tracing = "0.1.44"
+tracing-appender = "0.2.5"
+tracing-subscriber = { version = "0.3.23", features = ["fmt", "env-filter", "tracing-log"] }
 zeroize = { version = "1.8", features = ["derive"] }

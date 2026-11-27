@@ -1,0 +1,35 @@
+[package]
+name = "thelemail"
+version.workspace = true
+edition.workspace = true
+rust-version = "1.92"
+license.workspace = true
+
+[lib]
+name = "thelemail_app"
+path = "src/lib.rs"
+
+[[bin]]
+name = "thelemail"
+path = "src/main.rs"
+
+[dependencies]
+anyhow.workspace = true
+async-channel.workspace = true
+gpui-kit = "=0.11.0"
+interprocess = { version = "2.4.10", features = ["tokio"] }
+png = "0.18.1"
+serde.workspace = true
+serde_json.workspace = true
+thelemail-api = { path = "../crates/thelemail-api" }
+thelemail-core = { path = "../crates/thelemail-core" }
+thelemail-keystore = { path = "../crates/thelemail-keystore" }
+thelemail-ui = { path = "../crates/thelemail-ui" }
+tokio = { workspace = true, features = ["io-util", "net"] }
+tracing.workspace = true
+tracing-appender.workspace = true
+tracing-subscriber.workspace = true
+tray-icon = "0.27.0"
+
+[target."cfg(windows)".dependencies]
+windows-sys = { version = "0.61", features = ["Win32_UI_WindowsAndMessaging"] }
