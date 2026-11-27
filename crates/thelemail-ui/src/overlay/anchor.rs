@@ -156,13 +156,13 @@ fn position(
     let tracked = div().relative().child(child).child(
         div().absolute().top_0().left_0().size_full().child(
             canvas(
-                move |bounds, window, _| {
-                    cover.set(bounds, window);
+                move |bounds, window, cx| {
+                    cover.set(bounds, window, cx);
                     if let Some(slot) = on_bounds.as_ref() {
                         slot.set(bounds);
                     }
                     if moved.pending.replace(false) {
-                        window.refresh();
+                        layer::redraw(window, cx);
                     }
                 },
                 |_, _, _, _| {},

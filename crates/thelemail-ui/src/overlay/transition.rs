@@ -111,7 +111,7 @@ impl RenderOnce for AccountTransition {
         }
         let cover = layer::cover(&self.id, window, cx);
         let Some(transition) = current else {
-            cover.clear(window);
+            cover.clear(window, cx);
             return div().into_any_element();
         };
         let status = delayed.read(cx).visible().then(|| {

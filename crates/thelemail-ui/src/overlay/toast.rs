@@ -278,7 +278,7 @@ impl Render for Toasts {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let stack_id = ElementId::Name("toast-stack".into());
         if self.manager.is_empty() {
-            layer::cover(&stack_id, window, cx).clear(window);
+            layer::cover(&stack_id, window, cx).clear(window, cx);
             return div().into_any_element();
         }
         let theme = *cx.tokens();

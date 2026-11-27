@@ -156,7 +156,7 @@ impl Tips {
 impl Render for Tips {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let Some(shown) = self.shown.as_ref() else {
-            layer::cover(&ElementId::Name("tooltip".into()), window, cx).clear(window);
+            layer::cover(&ElementId::Name("tooltip".into()), window, cx).clear(window, cx);
             return div().into_any_element();
         };
         let theme = shown.tip.theme.unwrap_or(*cx.tokens());

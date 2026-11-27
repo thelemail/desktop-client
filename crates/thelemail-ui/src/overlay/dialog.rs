@@ -348,6 +348,47 @@ impl Dialog {
     }
 }
 
+#[derive(IntoElement)]
+pub struct DialogField {
+    label: SharedString,
+    control: AnyElement,
+    theme: Option<Theme>,
+}
+
+impl DialogField {
+    pub fn new(label: impl Into<SharedString>, control: impl IntoElement) -> Self {
+        Self {
+            label: label.into(),
+            control: control.into_any_element(),
+            theme: None,
+        }
+    }
+
+    pub fn theme(mut self, theme: Theme) -> Self {
+        self.theme = Some(theme);
+        self
+    }
+}
+
+impl RenderOnce for DialogField {
+    fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
+        let theme = self.theme.unwrap_or(*cx.tokens());
+        div()
+            .flex()
+            .flex_col()
+            .gap(px(6.0))
+            .child(
+                div()
+                    .font_family(FONT_SANS.name)
+                    .text_size(px(12.5 * FONT_SANS.size_adjust))
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .text_color(theme.color(ColorToken::FgMuted))
+                    .child(self.label),
+            )
+            .child(self.control)
+    }
+}
+
 fn measured(height: Rc<Cell<Pixels>>) -> impl IntoElement {
     div().absolute().top_0().left_0().size_full().child(
         canvas(
@@ -380,7 +421,7 @@ impl RenderOnce for Dialog {
         };
         let cover = layer::cover(&self.id, window, cx);
         if !scrim.present && !panel.present {
-            cover.clear(window);
+            cover.clear(window, cx);
             return div().into_any_element();
         }
 

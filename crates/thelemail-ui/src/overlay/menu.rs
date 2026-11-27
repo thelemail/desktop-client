@@ -775,7 +775,7 @@ fn render_menu(
     let look = MENU.sample(level_id(&ctx.id, 0), open, window, cx);
     if !look.present {
         for level in 0..MAX_DEPTH {
-            layer::cover(&level_id(&ctx.id, level), window, cx).clear(window);
+            layer::cover(&level_id(&ctx.id, level), window, cx).clear(window, cx);
         }
         return None;
     }

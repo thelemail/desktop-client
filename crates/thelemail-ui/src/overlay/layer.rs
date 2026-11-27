@@ -94,22 +94,26 @@ impl Entry {
         Self { shared, key }
     }
 
-    pub(crate) fn set(&self, bounds: Bounds<Pixels>, window: &mut Window) {
+    pub(crate) fn set(&self, bounds: Bounds<Pixels>, window: &mut Window, cx: &mut App) {
         let mut registry = self.shared.0.borrow_mut();
         let before = registry.covered(self.key.0);
         let changed = registry.rects.insert(self.key.clone(), bounds) != Some(bounds);
         if changed && registry.covered(self.key.0) != before {
-            window.refresh();
+            redraw(window, cx);
         }
     }
 
-    pub(crate) fn clear(&self, window: &mut Window) {
+    pub(crate) fn clear(&self, window: &mut Window, cx: &mut App) {
         let mut registry = self.shared.0.borrow_mut();
         let before = registry.covered(self.key.0);
         if registry.rects.remove(&self.key).is_some() && registry.covered(self.key.0) != before {
-            window.refresh();
+            redraw(window, cx);
         }
     }
+}
+
+pub(crate) fn redraw(window: &mut Window, cx: &mut App) {
+    window.defer(cx, |window, _| window.refresh());
 }
 
 impl Drop for Entry {
@@ -146,7 +150,7 @@ pub(crate) fn cover(id: &ElementId, window: &mut Window, cx: &mut App) -> Rc<Ent
 pub(crate) fn tracker(entry: Rc<Entry>) -> impl IntoElement {
     div().absolute().top_0().left_0().size_full().child(
         canvas(
-            move |bounds, window, _| entry.set(bounds, window),
+            move |bounds, window, cx| entry.set(bounds, window, cx),
             |_, _, _, _| {},
         )
         .size_full(),

@@ -192,7 +192,7 @@ impl RenderOnce for Popover {
                 cx,
             ))
         } else {
-            layer::cover(&panel_id, window, cx).clear(window);
+            layer::cover(&panel_id, window, cx).clear(window, cx);
             None
         };
 
