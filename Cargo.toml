@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/*", "app"]
+members = ["crates/*", "app", "xtask"]
 
 [workspace.package]
 version = "0.24.0"
@@ -12,6 +12,7 @@ license = "AGPL-3.0-only"
 anyhow = "1"
 async-channel = "2.5.0"
 base64 = "0.22"
+gpui-kit = "=0.11.0"
 hex = "0.4"
 mail-parser = "0.11"
 rand = "0.8"

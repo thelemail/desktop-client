@@ -1,4 +1,7 @@
+mod appearance;
 pub mod bridge;
+#[cfg(debug_assertions)]
+mod gallery;
 mod instance;
 mod logging;
 mod menus;

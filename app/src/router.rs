@@ -218,10 +218,52 @@ pub enum AccountPage {
     Lifecycle(LifecyclePage),
 }
 
+#[cfg(debug_assertions)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GalleryTab {
+    Colours,
+    Shadows,
+    Shapes,
+    Type,
+}
+
+#[cfg(debug_assertions)]
+impl GalleryTab {
+    pub const ALL: [(&'static str, Self); 4] = [
+        ("colours", Self::Colours),
+        ("shadows", Self::Shadows),
+        ("shapes", Self::Shapes),
+        ("type", Self::Type),
+    ];
+
+    pub fn slug(self) -> &'static str {
+        Self::ALL
+            .iter()
+            .find(|(_, t)| *t == self)
+            .map(|(slug, _)| *slug)
+            .unwrap_or_default()
+    }
+
+    fn parse(slug: &str) -> Option<Self> {
+        Self::ALL.iter().find(|(s, _)| *s == slug).map(|(_, t)| *t)
+    }
+}
+
+#[cfg(debug_assertions)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DebugPage {
+    Tokens(GalleryTab),
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Route {
     Auth(AuthPage),
-    Account { slot: u8, page: AccountPage },
+    Account {
+        slot: u8,
+        page: AccountPage,
+    },
+    #[cfg(debug_assertions)]
+    Debug(DebugPage),
 }
 
 impl Route {
@@ -239,6 +281,8 @@ impl Route {
         match self {
             Self::Account { slot, .. } => Some(*slot),
             Self::Auth(_) => None,
+            #[cfg(debug_assertions)]
+            Self::Debug(_) => None,
         }
     }
 
@@ -263,6 +307,8 @@ impl Route {
                 }
                 AccountPage::Lifecycle(page) => format!("/u/{slot}/{}", page.path()),
             },
+            #[cfg(debug_assertions)]
+            Self::Debug(DebugPage::Tokens(tab)) => format!("/debug/tokens/{}", tab.slug()),
         }
     }
 
@@ -277,6 +323,12 @@ impl Route {
             ["forwarding", "confirm"] => Some(Self::Auth(AuthPage::ForwardingConfirm)),
             ["notification-email", "confirm"] => {
                 Some(Self::Auth(AuthPage::NotificationEmailConfirm))
+            }
+            #[cfg(debug_assertions)]
+            ["debug", "tokens"] => Some(Self::Debug(DebugPage::Tokens(GalleryTab::Colours))),
+            #[cfg(debug_assertions)]
+            ["debug", "tokens", tab] => {
+                Some(Self::Debug(DebugPage::Tokens(GalleryTab::parse(tab)?)))
             }
             ["u", slot, rest @ ..] => {
                 if !slot.bytes().all(|b| b.is_ascii_digit()) {
@@ -450,6 +502,11 @@ mod tests {
         for path in paths {
             let route = Route::parse(path).unwrap_or_else(|| panic!("{path} did not parse"));
             assert_eq!(route.path(), path);
+        }
+        #[cfg(debug_assertions)]
+        for (slug, _) in GalleryTab::ALL {
+            let path = format!("/debug/tokens/{slug}");
+            assert_eq!(Route::parse(&path).map(|r| r.path()), Some(path));
         }
     }
 

@@ -3,6 +3,8 @@ use gpui_kit::{App, KeyBinding, Menu, MenuItem, OsAction, SystemMenuType, Window
 
 use crate::nav::navigator;
 use crate::router::{AccountPage, SettingsSection};
+#[cfg(debug_assertions)]
+use crate::router::{DebugPage, GalleryTab, Route};
 use crate::window::show_main;
 
 #[cfg(target_os = "macos")]
@@ -36,7 +38,8 @@ actions!(
         Minimize,
         Zoom,
         ShowMain,
-        Help
+        Help,
+        TokenGallery
     ]
 );
 
@@ -57,6 +60,13 @@ pub fn init(cx: &mut App) {
     cx.on_action(|_: &Zoom, cx| with_active_window(cx, |window| window.zoom_window()));
     cx.on_action(|_: &ShowMain, cx| show_main(cx));
     cx.on_action(|_: &Help, cx| cx.open_url(HELP_URL));
+    #[cfg(debug_assertions)]
+    cx.on_action(|_: &TokenGallery, cx| {
+        show_main(cx);
+        navigator(cx).update(cx, |nav, cx| {
+            nav.push(Route::Debug(DebugPage::Tokens(GalleryTab::Colours)), cx)
+        });
+    });
     cx.set_menus(menus());
 }
 
@@ -108,12 +118,7 @@ fn menus() -> Vec<Menu> {
             MenuItem::os_action("Paste", Paste, OsAction::Paste),
             MenuItem::os_action("Select All", SelectAll, OsAction::SelectAll),
         ]),
-        Menu::new("View").items([
-            MenuItem::action("Back", Back),
-            MenuItem::action("Forward", Forward),
-            MenuItem::separator(),
-            MenuItem::action("Enter Full Screen", ToggleFullScreen),
-        ]),
+        Menu::new("View").items(view_items()),
         Menu::new("Window").items([
             MenuItem::action("Minimize", Minimize),
             MenuItem::action("Zoom", Zoom),
@@ -122,6 +127,20 @@ fn menus() -> Vec<Menu> {
         ]),
         Menu::new("Help").items([MenuItem::action("Thelemail Help", Help)]),
     ]
+}
+
+fn view_items() -> Vec<MenuItem> {
+    let mut items = vec![
+        MenuItem::action("Back", Back),
+        MenuItem::action("Forward", Forward),
+        MenuItem::separator(),
+        MenuItem::action("Enter Full Screen", ToggleFullScreen),
+    ];
+    if cfg!(debug_assertions) {
+        items.push(MenuItem::separator());
+        items.push(MenuItem::action("Token Gallery", TokenGallery));
+    }
+    items
 }
 
 fn open_settings(section: SettingsSection, cx: &mut App) {

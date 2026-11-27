@@ -6,3 +6,5 @@ rust-version.workspace = true
 license.workspace = true
 
 [dependencies]
+gpui-kit.workspace = true
+tracing.workspace = true
