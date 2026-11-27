@@ -1,5 +1,6 @@
 mod color;
 mod css;
+mod i18n;
 mod tokens;
 
 use std::io::Write;
@@ -18,7 +19,9 @@ fn main() -> ExitCode {
     {
         ["tokens"] => run_tokens(false),
         ["tokens", "--check"] => run_tokens(true),
-        _ => Err("usage: cargo xtask tokens [--check]".to_string()),
+        ["i18n"] => run_i18n(false),
+        ["i18n", "--check"] => run_i18n(true),
+        _ => Err("usage: cargo xtask <tokens|i18n> [--check]".to_string()),
     };
     match result {
         Ok(()) => ExitCode::SUCCESS,
@@ -107,4 +110,54 @@ fn run_tokens(check: bool) -> Result<(), String> {
         return Ok(());
     }
     std::fs::write(&target, generated).map_err(|e| format!("writing {TOKENS_RS}: {e}"))
+}
+
+fn desktop_catalog(root: &Path) -> Result<i18n::Catalog, String> {
+    let files = i18n::LOCALES
+        .iter()
+        .map(|l| {
+            let path = root.join(i18n::DESKTOP_DIR).join(format!("{l}.json"));
+            std::fs::read_to_string(&path).map_err(|e| format!("reading {}: {e}", path.display()))
+        })
+        .collect::<Result<_, _>>()?;
+    Ok(i18n::Catalog {
+        origin: i18n::DESKTOP_DIR.to_string(),
+        files,
+    })
+}
+
+fn run_i18n(check: bool) -> Result<(), String> {
+    let root = root();
+    let tag = pinned_tag(&root)?;
+    let web = i18n::Catalog {
+        origin: format!("web-client {tag} {}", i18n::WEB_DIR),
+        files: i18n::LOCALES
+            .iter()
+            .map(|l| git_show(&root, &tag, &format!("{}/{l}.json", i18n::WEB_DIR)))
+            .collect::<Result<_, _>>()?,
+    };
+    let desktop = desktop_catalog(&root)?;
+    let desktop_keys = i18n::keys(&desktop)?;
+    let generated = rustfmt(&i18n::generate(&tag, &[web, desktop])?)?;
+    let target = root.join(i18n::MESSAGES_RS);
+    if !check {
+        return std::fs::write(&target, generated)
+            .map_err(|e| format!("writing {}: {e}", i18n::MESSAGES_RS));
+    }
+    let current = std::fs::read_to_string(&target).unwrap_or_default();
+    if current != generated {
+        return Err(format!(
+            "{} is out of date with web-client {tag} and {}; run cargo xtask i18n",
+            i18n::MESSAGES_RS,
+            i18n::DESKTOP_DIR
+        ));
+    }
+    let unused = i18n::unused(&desktop_keys, &root)?;
+    if !unused.is_empty() {
+        return Err(format!(
+            "desktop messages not used anywhere: {}",
+            unused.join(", ")
+        ));
+    }
+    Ok(())
 }
