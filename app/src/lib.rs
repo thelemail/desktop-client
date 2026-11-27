@@ -2,6 +2,8 @@ mod appearance;
 pub mod bridge;
 #[cfg(debug_assertions)]
 mod gallery;
+#[cfg(debug_assertions)]
+mod icon_gallery;
 mod instance;
 mod logging;
 mod menus;

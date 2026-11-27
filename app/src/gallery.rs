@@ -55,6 +55,7 @@ fn tab_label(tab: GalleryTab) -> &'static str {
         GalleryTab::Shapes => "Shapes",
         GalleryTab::Type => "Type",
         GalleryTab::Motion => "Motion",
+        GalleryTab::Icons => "Icons",
     }
 }
 
@@ -176,7 +177,7 @@ fn tokens(theme: &Theme, tab: GalleryTab) -> AnyElement {
             .child(section("Text styles", text_styles(&theme), &theme))
             .child(section("Type scale", type_scale(&theme), &theme))
             .child(section("Weights", weights(&theme), &theme)),
-        GalleryTab::Motion => body,
+        GalleryTab::Motion | GalleryTab::Icons => body,
     }
     .into_any_element()
 }
