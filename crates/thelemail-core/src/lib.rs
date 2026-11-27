@@ -7,6 +7,7 @@ pub mod notify;
 pub mod paths;
 pub mod productkeys;
 pub mod realtime;
+pub mod sender;
 pub mod session;
 pub mod settings;
 pub mod shell;

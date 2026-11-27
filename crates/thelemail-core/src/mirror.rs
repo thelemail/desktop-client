@@ -115,6 +115,24 @@ struct MessagePreview {
     delivered_to: String,
     #[serde(default)]
     reply_to: Vec<PreviewParty>,
+    #[serde(default, deserialize_with = "lenient_flags")]
+    flags: PreviewFlags,
+}
+
+#[derive(Debug, Default)]
+struct PreviewFlags {
+    bimi_domain: Option<String>,
+}
+
+fn lenient_flags<'de, D: serde::Deserializer<'de>>(de: D) -> Result<PreviewFlags, D::Error> {
+    let value = serde_json::Value::deserialize(de)?;
+    let domain = value
+        .get("bimi_domain")
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_owned);
+    Ok(PreviewFlags {
+        bimi_domain: domain,
+    })
 }
 
 #[derive(Debug, Deserialize, Serialize, Default, Clone)]
@@ -504,9 +522,10 @@ fn upsert_message(
           body_size_bytes, attachment_count, thread_root_id, subject, sender_display, \
           sender_address, recipients_json, snippet, display_date, preview_state, synced_at, \
           delivered_to, encrypted, signature_status, signer_key_fingerprint, signer_delegation_id, \
-          folder_id, labels_json, returns_to_archive, attested_sender_address, reply_to_json) \
+          folder_id, labels_json, returns_to_archive, attested_sender_address, reply_to_json, \
+          bimi_domain) \
          VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23, \
-          ?24,?25,?26,?27,?28) \
+          ?24,?25,?26,?27,?28,?29) \
          ON CONFLICT(id) DO UPDATE SET \
           mailbox_state=excluded.mailbox_state, starred=excluded.starred, read=excluded.read, \
           attachment_count=excluded.attachment_count, thread_root_id=excluded.thread_root_id, \
@@ -519,6 +538,7 @@ fn upsert_message(
           preview_state=CASE WHEN excluded.preview_state <> 'ok' AND messages.preview_state = 'ok' THEN messages.preview_state ELSE excluded.preview_state END, \
           delivered_to=CASE WHEN excluded.preview_state <> 'ok' AND messages.preview_state = 'ok' THEN messages.delivered_to ELSE excluded.delivered_to END, \
           reply_to_json=CASE WHEN excluded.preview_state <> 'ok' AND messages.preview_state = 'ok' THEN messages.reply_to_json ELSE excluded.reply_to_json END, \
+          bimi_domain=CASE WHEN excluded.preview_state <> 'ok' AND messages.preview_state = 'ok' THEN messages.bimi_domain ELSE excluded.bimi_domain END, \
           deleted=0, synced_at=excluded.synced_at, encrypted=excluded.encrypted, \
           signature_status=excluded.signature_status, \
           signer_key_fingerprint=excluded.signer_key_fingerprint, \
@@ -556,6 +576,7 @@ fn upsert_message(
             item.returns_to_archive as i64,
             item.attested_sender.as_ref().map(|a| a.address.as_str()),
             reply_to,
+            preview_bimi_domain(item, preview),
         ],
     )?;
 
@@ -961,9 +982,17 @@ fn arrival_for(
 }
 
 fn forged_sender<'a>(item: &'a MessageListItem, preview: &MessagePreview) -> Option<&'a str> {
-    let attested = item.attested_sender.as_ref()?.address.as_str();
-    let same = attested.trim().to_lowercase() == preview.sender.address.trim().to_lowercase();
-    (!same).then_some(attested)
+    crate::sender::attested_mismatch(
+        item.attested_sender.as_ref().map(|a| a.address.as_str()),
+        &preview.sender.address,
+    )
+}
+
+fn preview_bimi_domain(item: &MessageListItem, preview: &MessagePreview) -> String {
+    if forged_sender(item, preview).is_some() {
+        return String::new();
+    }
+    crate::sender::bimi_domain(preview.flags.bimi_domain.as_deref()).unwrap_or_default()
 }
 
 fn reset_for_resync(conn: &Connection, watermark_cursor: &str) -> Result<(), String> {
@@ -1251,6 +1280,74 @@ mod tests {
             .expect("query")
             .expect("message");
         assert_eq!(got.delivered_to, "");
+    }
+
+    fn stored_bimi(conn: &Connection, id: &str) -> String {
+        conn.query_row(
+            "SELECT bimi_domain FROM messages WHERE id = ?1",
+            [id],
+            |r| r.get(0),
+        )
+        .expect("bimi domain")
+    }
+
+    fn item_from(id: &str, attested: Option<&str>) -> MessageListItem {
+        let mut raw = serde_json::json!({
+            "id": id,
+            "direction": "received",
+            "source": "inbound_external",
+            "mailboxState": "inbox",
+            "storedAt": "2026-11-27T10:00:00Z"
+        });
+        if let Some(address) = attested {
+            raw["attestedSender"] = serde_json::json!({ "address": address });
+        }
+        serde_json::from_value(raw).expect("item")
+    }
+
+    #[test]
+    fn the_bimi_stamp_is_kept_for_offline_logos() {
+        let conn = Connection::open_in_memory().expect("db");
+        thelemail_store::migrations::migrate(&conn).expect("migrate");
+        let preview: MessagePreview = serde_json::from_str(
+            r#"{"subject":"Receipt","sender":{"display":"Acme","address":"billing@acme.test"},
+                "flags":{"bimi_domain":" Acme.TEST ","auth":{"dmarc":"pass"}}}"#,
+        )
+        .expect("preview");
+        upsert_message(&conn, &item_from("m1", None), &preview, true).expect("upsert");
+        assert_eq!(stored_bimi(&conn, "m1"), "acme.test");
+        let row = thelemail_store::list::get_message(&conn, "m1", "now")
+            .expect("query")
+            .expect("message");
+        assert_eq!(row.bimi_domain, "acme.test");
+    }
+
+    #[test]
+    fn a_forged_sender_never_borrows_the_bimi_logo() {
+        let conn = Connection::open_in_memory().expect("db");
+        thelemail_store::migrations::migrate(&conn).expect("migrate");
+        let preview: MessagePreview = serde_json::from_str(
+            r#"{"sender":{"display":"Bank","address":"support@bank.test"},
+                "flags":{"bimi_domain":"bank.test"}}"#,
+        )
+        .expect("preview");
+        let forged = item_from("m1", Some("mallory@thelemail.com"));
+        upsert_message(&conn, &forged, &preview, true).expect("upsert");
+        assert_eq!(stored_bimi(&conn, "m1"), "");
+    }
+
+    #[test]
+    fn odd_flags_never_make_a_preview_undecryptable() {
+        for raw in [
+            r#"{"subject":"a","flags":null}"#,
+            r#"{"subject":"a","flags":{"bimi_domain":7}}"#,
+            r#"{"subject":"a","flags":"x"}"#,
+            r#"{"subject":"a"}"#,
+        ] {
+            let preview: MessagePreview = serde_json::from_str(raw).expect(raw);
+            assert_eq!(preview.subject, "a");
+            assert_eq!(preview.flags.bimi_domain, None);
+        }
     }
 
     fn preview_state(conn: &Connection, id: &str) -> String {
