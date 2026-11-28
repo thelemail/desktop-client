@@ -7575,9 +7575,12 @@ name = "thelemail-mime"
 version = "0.24.0"
 dependencies = [
  "base64 0.22.1",
+ "encoding_rs",
  "mail-parser",
+ "regex",
  "serde",
  "serde_json",
+ "web_atoms",
 ]
 
 [[package]]
