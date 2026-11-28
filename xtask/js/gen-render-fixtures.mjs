@@ -41,7 +41,7 @@ const { buildSrcDoc } = await import(render + 'renderBody.ts');
 const { parseMimeBody } = await import(render + 'parseMime.ts');
 
 const dir = new URL('../../fixtures/render/', import.meta.url);
-rmSync(dir, { recursive: true, force: true });
+rmSync(new URL('mime/', dir), { recursive: true, force: true });
 mkdirSync(new URL('mime/', dir), { recursive: true });
 
 const write = (name, value) =>
