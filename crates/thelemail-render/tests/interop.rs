@@ -48,3 +48,15 @@ fn plain_to_html_matches_web() {
         );
     }
 }
+
+#[test]
+fn css_scrub_matches_web() {
+    for case in load::<Vec<Pair<String, String>>>("css.json") {
+        assert_eq!(
+            thelemail_render::scrub_css(&case.input),
+            case.output,
+            "{:?}",
+            case.input
+        );
+    }
+}
