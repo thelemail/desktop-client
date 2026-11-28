@@ -245,6 +245,20 @@ impl Dom {
         out
     }
 
+    pub fn descendants_with_templates(&self, root: NodeId) -> Vec<NodeId> {
+        let mut out = Vec::new();
+        let mut roots = vec![root];
+        while let Some(root) = roots.pop() {
+            for node in self.descendants(root) {
+                if let Some(contents) = self.template_contents(node) {
+                    roots.push(contents);
+                }
+                out.push(node);
+            }
+        }
+        out
+    }
+
     pub fn text_content(&self, id: NodeId) -> String {
         let mut out = String::new();
         for node in self.descendants(id) {
@@ -643,7 +657,7 @@ pub(crate) fn parse(html: &str) -> Dom {
     dom
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "fuzzing"))]
 pub(crate) fn canonical_body(html: &str) -> String {
     let mut dom = parse(&format!("<remove></remove>{html}"));
     let Some(body) = dom.first_element(DOCUMENT, "body") else {

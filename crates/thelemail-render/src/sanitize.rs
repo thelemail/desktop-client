@@ -24,8 +24,6 @@ const SIGNATURE_FORBID_TAGS: [&str; 11] = [
 
 const FORBID_ATTRS: [&str; 4] = ["background", "formaction", "ping", "srcset"];
 
-const NATIVE_MEDIA_SRC_TAGS: [&str; 5] = ["audio", "input", "source", "track", "video"];
-
 const FORM_CLOBBER_PROPERTIES: [&str; 13] = [
     "attributes",
     "childNodes",
@@ -422,7 +420,9 @@ impl Walker<'_> {
     }
 
     fn native_hook(tag: &str, name: &str) -> bool {
-        name != "poster" && !(name == "src" && NATIVE_MEDIA_SRC_TAGS.contains(&tag))
+        name != "poster"
+            && (name != "src" || tag == "img")
+            && (name != "href" || tag == "a" || tag == "area")
     }
 
     fn sanitize_attributes(&mut self, node: NodeId) {
@@ -563,7 +563,7 @@ pub fn sanitize_signature_html(html: &str, keep_remote_images: bool) -> String {
     else {
         return clean;
     };
-    for img in dom.descendants(wrapper) {
+    for img in dom.descendants_with_templates(wrapper) {
         if !dom.is_html(img, "img") {
             continue;
         }
