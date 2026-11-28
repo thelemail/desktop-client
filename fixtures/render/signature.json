@@ -1,0 +1,146 @@
+[
+	{
+		"name": "plain",
+		"input": "<p>Ada Calloway<br>Calloway &amp; Co</p>",
+		"keepRemoteImages": true,
+		"output": "<p>Ada Calloway<br>Calloway &amp; Co</p>"
+	},
+	{
+		"name": "plain",
+		"input": "<p>Ada Calloway<br>Calloway &amp; Co</p>",
+		"keepRemoteImages": false,
+		"output": "<p>Ada Calloway<br>Calloway &amp; Co</p>"
+	},
+	{
+		"name": "links",
+		"input": "<a href=\"https://calloway.test\">site</a> <a href=\"mailto:ada@calloway.test\">mail</a> <a href=\"tel:+1\">tel</a> <a href=\"javascript:x\">bad</a> <a href=\" data:text/html,x\">bad2</a>",
+		"keepRemoteImages": true,
+		"output": "<a href=\"https://calloway.test\">site</a> <a href=\"mailto:ada@calloway.test\">mail</a> <a href=\"tel:+1\">tel</a> <a>bad</a> <a>bad2</a>"
+	},
+	{
+		"name": "links",
+		"input": "<a href=\"https://calloway.test\">site</a> <a href=\"mailto:ada@calloway.test\">mail</a> <a href=\"tel:+1\">tel</a> <a href=\"javascript:x\">bad</a> <a href=\" data:text/html,x\">bad2</a>",
+		"keepRemoteImages": false,
+		"output": "<a href=\"https://calloway.test\">site</a> <a href=\"mailto:ada@calloway.test\">mail</a> <a href=\"tel:+1\">tel</a> <a>bad</a> <a>bad2</a>"
+	},
+	{
+		"name": "marked-image",
+		"input": "<img data-thelemail-sig-image=\"1\" src=\"data:image/png;base64,AA\" alt=\"logo\">",
+		"keepRemoteImages": true,
+		"output": "<img data-thelemail-sig-image=\"1\" src=\"\" alt=\"logo\">"
+	},
+	{
+		"name": "marked-image",
+		"input": "<img data-thelemail-sig-image=\"1\" src=\"data:image/png;base64,AA\" alt=\"logo\">",
+		"keepRemoteImages": false,
+		"output": "<img data-thelemail-sig-image=\"1\" src=\"\" alt=\"logo\">"
+	},
+	{
+		"name": "remote-image",
+		"input": "<img src=\"https://calloway.test/logo.png\" alt=\"l\"><img src=\"http://calloway.test/l.png\">",
+		"keepRemoteImages": true,
+		"output": "<img src=\"https://calloway.test/logo.png\" alt=\"l\"><img src=\"http://calloway.test/l.png\">"
+	},
+	{
+		"name": "remote-image",
+		"input": "<img src=\"https://calloway.test/logo.png\" alt=\"l\"><img src=\"http://calloway.test/l.png\">",
+		"keepRemoteImages": false,
+		"output": ""
+	},
+	{
+		"name": "data-image",
+		"input": "<img src=\"data:image/png;base64,AA\">",
+		"keepRemoteImages": true,
+		"output": "<img src=\"data:image/png;base64,AA\">"
+	},
+	{
+		"name": "data-image",
+		"input": "<img src=\"data:image/png;base64,AA\">",
+		"keepRemoteImages": false,
+		"output": ""
+	},
+	{
+		"name": "cid-image",
+		"input": "<img src=\"cid:logo\">",
+		"keepRemoteImages": true,
+		"output": "<img src=\"cid:logo\">"
+	},
+	{
+		"name": "cid-image",
+		"input": "<img src=\"cid:logo\">",
+		"keepRemoteImages": false,
+		"output": "<img src=\"cid:logo\">"
+	},
+	{
+		"name": "relative-image",
+		"input": "<img src=\"logo.png\"><img>",
+		"keepRemoteImages": true,
+		"output": ""
+	},
+	{
+		"name": "relative-image",
+		"input": "<img src=\"logo.png\"><img>",
+		"keepRemoteImages": false,
+		"output": ""
+	},
+	{
+		"name": "style",
+		"input": "<style>p{color:red}</style><p style=\"background:url(https://x.example/a.png);color:#333\">x</p>",
+		"keepRemoteImages": true,
+		"output": "<p style=\"background:url(about:blank);color:#333\">x</p>"
+	},
+	{
+		"name": "style",
+		"input": "<style>p{color:red}</style><p style=\"background:url(https://x.example/a.png);color:#333\">x</p>",
+		"keepRemoteImages": false,
+		"output": "<p style=\"background:url(about:blank);color:#333\">x</p>"
+	},
+	{
+		"name": "forbidden",
+		"input": "<script>x</script><iframe></iframe><form><input></form><p onclick=\"x\">p</p>",
+		"keepRemoteImages": true,
+		"output": "<input><p>p</p>"
+	},
+	{
+		"name": "forbidden",
+		"input": "<script>x</script><iframe></iframe><form><input></form><p onclick=\"x\">p</p>",
+		"keepRemoteImages": false,
+		"output": "<input><p>p</p>"
+	},
+	{
+		"name": "table",
+		"input": "<table><tr><td style=\"padding:4px\">a</td><td>b</td></tr></table>",
+		"keepRemoteImages": true,
+		"output": "<table><tbody><tr><td style=\"padding:4px\">a</td><td>b</td></tr></tbody></table>"
+	},
+	{
+		"name": "table",
+		"input": "<table><tr><td style=\"padding:4px\">a</td><td>b</td></tr></table>",
+		"keepRemoteImages": false,
+		"output": "<table><tbody><tr><td style=\"padding:4px\">a</td><td>b</td></tr></tbody></table>"
+	},
+	{
+		"name": "data-attrs",
+		"input": "<p data-x=\"1\" data-thelemail-sig-image=\"2\">x</p>",
+		"keepRemoteImages": true,
+		"output": "<p data-x=\"1\" data-thelemail-sig-image=\"2\">x</p>"
+	},
+	{
+		"name": "data-attrs",
+		"input": "<p data-x=\"1\" data-thelemail-sig-image=\"2\">x</p>",
+		"keepRemoteImages": false,
+		"output": "<p data-x=\"1\" data-thelemail-sig-image=\"2\">x</p>"
+	},
+	{
+		"name": "empty",
+		"input": "",
+		"keepRemoteImages": true,
+		"output": ""
+	},
+	{
+		"name": "empty",
+		"input": "",
+		"keepRemoteImages": false,
+		"output": ""
+	}
+]

@@ -1,0 +1,17 @@
+Content-Type: multipart/mixed; boundary="m4"
+
+--m4
+Content-Type: text/plain
+
+body
+--m4
+Content-Type: text/plain; name="notes.txt"
+Content-Disposition: attachment; filename="notes.txt"
+
+notes
+--m4
+Content-Type: text/html
+Content-Disposition: attachment; filename="page.html"
+
+<p>page</p>
+--m4--

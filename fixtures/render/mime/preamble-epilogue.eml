@@ -1,0 +1,9 @@
+Content-Type: multipart/alternative; boundary="P"
+
+This is a preamble.
+--P
+Content-Type: text/plain
+
+body
+--P--
+epilogue text

@@ -1,0 +1,242 @@
+{
+	"plain": {
+		"html": null,
+		"text": "Hello there\n",
+		"inline": {}
+	},
+	"html-only": {
+		"html": "<p>Hi</p>\n",
+		"text": null,
+		"inline": {}
+	},
+	"no-content-type": {
+		"html": null,
+		"text": "Bare body\n",
+		"inline": {}
+	},
+	"alternative": {
+		"html": "<p>HTML version</p>\n",
+		"text": "Plain version\n",
+		"inline": {}
+	},
+	"related": {
+		"html": "<p><img src=\"cid:hero@calloway.test\"></p>\n",
+		"text": null,
+		"inline": {
+			"hero@calloway.test": {
+				"mimeType": "image/png",
+				"data": "iVBORw0KGgoAAAAN"
+			}
+		}
+	},
+	"mixed-attachment": {
+		"html": "<p>See attached</p>\n",
+		"text": "See attached\n",
+		"inline": {}
+	},
+	"mixed-text-then-html": {
+		"html": "<div>First &#x26; &#x3C;plain&#x3E;<br />second line</div>\n<p>Then <b>HTML</b> &amp; more</p><br><ul><li>item</li></ul>\n",
+		"text": "First & <plain>\nsecond line\n\n\nThen HTML & more\n\n * item \n",
+		"inline": {}
+	},
+	"related-without-cid": {
+		"html": "<p>x</p>\n",
+		"text": null,
+		"inline": {}
+	},
+	"cid-outside-related": {
+		"html": "<p>x</p>\n",
+		"text": null,
+		"inline": {}
+	},
+	"related-nontext-cid": {
+		"html": "<p>x</p>\n",
+		"text": null,
+		"inline": {
+			"blob": {
+				"mimeType": "application/octet-stream",
+				"data": "YmxvYg=="
+			}
+		}
+	},
+	"quoted-printable": {
+		"html": "<p>café soft break</p>\n",
+		"text": null,
+		"inline": {}
+	},
+	"latin1": {
+		"html": null,
+		"text": "café naïve\n",
+		"inline": {}
+	},
+	"windows-1252": {
+		"html": null,
+		"text": "“quoted” € price\n",
+		"inline": {}
+	},
+	"base64-utf8": {
+		"html": null,
+		"text": "Привет, мир 😀",
+		"inline": {}
+	},
+	"flowed": {
+		"html": null,
+		"text": "This is a long flowed line.\n>quoted >flowed\n-- \nsig\n",
+		"inline": {}
+	},
+	"flowed-delsp": {
+		"html": null,
+		"text": "Japanese\nstuffed\n",
+		"inline": {}
+	},
+	"attachment-text": {
+		"html": null,
+		"text": "body\n",
+		"inline": {}
+	},
+	"attachment-no-filename": {
+		"html": null,
+		"text": "body\n",
+		"inline": {}
+	},
+	"encoded-filename": {
+		"html": null,
+		"text": "body\n",
+		"inline": {}
+	},
+	"calendar": {
+		"html": null,
+		"text": "Invite\n",
+		"inline": {}
+	},
+	"two-html-parts": {
+		"html": "<p>one</p>\n\n<p>two</p>\n",
+		"text": null,
+		"inline": {}
+	},
+	"empty-body": {
+		"html": null,
+		"text": null,
+		"inline": {}
+	},
+	"whitespace-body": {
+		"html": "   \n",
+		"text": null,
+		"inline": {}
+	},
+	"multipart-digest-free": {
+		"html": null,
+		"text": "a\n\nb\n",
+		"inline": {}
+	},
+	"apple-structure": {
+		"html": "<html><body>See <img src=\"cid:p1\"></body></html>\n",
+		"text": "See photo\n",
+		"inline": {
+			"p1": {
+				"mimeType": "image/png",
+				"data": "iVBORw0KGgoAAAAN"
+			}
+		}
+	},
+	"forwarded-inline": {
+		"html": "<div>FYI below</div>\n<div class=\"postal-email-header\"><div class=\"postal-email-header-row\"><div class=\"postal-email-header-key\">From</div><div class=\"postal-email-header-value\"><a href=\"mailto:bo@calloway.test\" class=\"postal-email-address\">Bo Calloway</a></div></div>\n<div class=\"postal-email-header-row\"><div class=\"postal-email-header-key\">Subject</div><div class=\"postal-email-header-value postal-email-header-subject\">Café plans</div></div>\n<div class=\"postal-email-header-row\"><div class=\"postal-email-header-key\">Date</div><div class=\"postal-email-header-value postal-email-header-date\" data-date=\"2026-11-03T09:00:00.000Z\">11/3/2026, 09:00:00</div></div>\n<div class=\"postal-email-header-row\"><div class=\"postal-email-header-key\">To</div><div class=\"postal-email-header-value\"><a href=\"mailto:ada@calloway.test\" class=\"postal-email-address\">Ada</a> <span class=\"postal-email-address-separator\">, </span> <a href=\"mailto:cy@calloway.test\" class=\"postal-email-address\">&#x3C;cy@calloway.test&#x3E;</a></div></div>\n<div class=\"postal-email-header-row\"><div class=\"postal-email-header-key\">Cc</div><div class=\"postal-email-header-value\"><span class=\"postal-email-address-group\">Team:</span> <a href=\"mailto:dee@calloway.test\" class=\"postal-email-address\">&#x3C;dee@calloway.test&#x3E;</a> <span class=\"postal-email-address-separator\">, </span> <a href=\"mailto:eve@calloway.test\" class=\"postal-email-address\">&#x3C;eve@calloway.test&#x3E;</a> <span class=\"postal-email-address-group\">;</span></div></div></div>\n<p>Inner html</p>\n",
+		"text": "FYI below\n\n\n---------------------------------------------------\nFrom:    Bo Calloway <bo@calloway.test>\nSubject: Café plans\nDate:    11/3/2026, 09:00:00\nTo:      Ada <ada@calloway.test>, cy@calloway.test\nCc:      Team:dee@calloway.test, eve@calloway.test;\n---------------------------------------------------\n\nInner plain\n",
+		"inline": {}
+	},
+	"forwarded-attachment": {
+		"html": null,
+		"text": "Attached\n",
+		"inline": {}
+	},
+	"delivery-report": {
+		"html": null,
+		"text": "Delivery failed\n",
+		"inline": {}
+	},
+	"preamble-epilogue": {
+		"html": null,
+		"text": "body\n",
+		"inline": {}
+	},
+	"boundary-trailing-space": {
+		"html": null,
+		"text": "spaced\n",
+		"inline": {}
+	},
+	"boundary-lookalike": {
+		"html": null,
+		"text": "--Lx not a boundary\n\nsecond\n",
+		"inline": {}
+	},
+	"lone-cr-and-lf": {
+		"html": null,
+		"text": "line\rwith cr\nlf only\nend\n",
+		"inline": {}
+	},
+	"folded-content-type": {
+		"html": "<p>naïve</p>\n",
+		"text": null,
+		"inline": {}
+	},
+	"rfc2231-charset": {
+		"html": null,
+		"text": "plain\n",
+		"inline": {}
+	},
+	"unknown-charset": {
+		"html": null,
+		"text": "tést\n",
+		"inline": {}
+	},
+	"qp-edge": {
+		"html": null,
+		"text": "a=b =zz =4 end✓ trailing ",
+		"inline": {}
+	},
+	"base64-odd": {
+		"html": null,
+		"text": "Hello\b\u001d�ܛ\u0019\u0010@\u0000\u0000",
+		"inline": {}
+	},
+	"bom-utf8": {
+		"html": null,
+		"text": "bom text",
+		"inline": {}
+	},
+	"utf16": {
+		"html": null,
+		"text": "wide",
+		"inline": {}
+	},
+	"duplicate-headers": {
+		"html": "<p>x</p>\n",
+		"text": null,
+		"inline": {
+			"first": {
+				"mimeType": "image/gif",
+				"data": "R0lGODlh"
+			}
+		}
+	},
+	"disposition-attachment-html": {
+		"html": null,
+		"text": null,
+		"inline": {}
+	},
+	"html-and-plain-groups": {
+		"html": "<p>first <a href=\"https://calloway.test\">html</a></p><hr><ol><li>one</li></ol>&amp; &copy; &#169; &#xA9; &nbsp; &bogus;\n\n<div>second<br>html <!-- c --><script>x</script></div>\n\n<div>third plain</div>",
+		"text": "first plain\n\n\nsecond\nhtml \n\nthird plain\n",
+		"inline": {}
+	},
+	"header-only": {
+		"html": null,
+		"text": null,
+		"inline": {}
+	},
+	"nested-depth": {
+		"html": null,
+		"text": "deep\n",
+		"inline": {}
+	}
+}

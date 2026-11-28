@@ -1,0 +1,23 @@
+Content-Type: multipart/mixed; boundary="Y"
+
+--Y
+Content-Type: multipart/alternative; boundary="Z"
+
+--Z
+Content-Type: text/plain
+
+first plain
+--Z
+Content-Type: text/html
+
+<p>first <a href="https://calloway.test">html</a></p><hr><ol><li>one</li></ol>&amp; &copy; &#169; &#xA9; &nbsp; &bogus;
+--Z--
+--Y
+Content-Type: text/html
+
+<div>second<br>html <!-- c --><script>x</script></div>
+--Y
+Content-Type: text/plain
+
+third plain
+--Y--

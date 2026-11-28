@@ -1,0 +1,94 @@
+[
+	{
+		"input": "color:red",
+		"output": "color:red"
+	},
+	{
+		"input": "background:url(cid:hero@calloway.test)",
+		"output": "background:url(cid:hero@calloway.test)"
+	},
+	{
+		"input": "background:url(\"cid:hero@calloway.test\")",
+		"output": "background:url(cid:hero@calloway.test)"
+	},
+	{
+		"input": "background:url('data:image/png;base64,iVBOR')",
+		"output": "background:url(data:image/png;base64,iVBOR)"
+	},
+	{
+		"input": "background:URL( data:image/gif;base64,R0lG )",
+		"output": "background:url(data:image/gif;base64,R0lG)"
+	},
+	{
+		"input": "background:url(https://tracker.example/p.gif)",
+		"output": "background:url(about:blank)"
+	},
+	{
+		"input": "background:url(\"https://tracker.example/p.gif\") no-repeat",
+		"output": "background:url(about:blank) no-repeat"
+	},
+	{
+		"input": "background-image:url(//tracker.example/p.gif), url(cid:a)",
+		"output": "background-image:url(about:blank), url(cid:a)"
+	},
+	{
+		"input": "list-style:url(http://x.example/b.png) disc",
+		"output": "list-style:url(about:blank) disc"
+	},
+	{
+		"input": "cursor:url(x.cur), auto",
+		"output": "cursor:url(about:blank), auto"
+	},
+	{
+		"input": "@import url(https://evil.example/a.css);\n.a{color:red}",
+		"output": "\n.a{color:red}"
+	},
+	{
+		"input": "@import \"https://evil.example/a.css\";.b{color:blue}",
+		"output": ".b{color:blue}"
+	},
+	{
+		"input": "@IMPORT url(x.css) screen;",
+		"output": ""
+	},
+	{
+		"input": "@font-face{font-family:X;src:url(https://fonts.example/x.woff2)}.c{font-family:X}",
+		"output": ".c{font-family:X}"
+	},
+	{
+		"input": "@font-face {\n  font-family: Y;\n  src: url(data:font/woff2;base64,AA);\n}\np{margin:0}",
+		"output": "\np{margin:0}"
+	},
+	{
+		"input": ".a{color:red}@media (max-width:600px){.a{background:url(https://x.example/m.png)}}",
+		"output": ".a{color:red}@media (max-width:600px){.a{background:url(about:blank)}}"
+	},
+	{
+		"input": "td{background:#f4f4f4;padding:0 8px}",
+		"output": "td{background:#f4f4f4;padding:0 8px}"
+	},
+	{
+		"input": "filter:url(#shadow)",
+		"output": "filter:url(about:blank)"
+	},
+	{
+		"input": "background:url( https://x.example/a.png  )",
+		"output": "background:url(about:blank)"
+	},
+	{
+		"input": "body{margin:0}\n.hero{background:url(cid:hero) center/cover}",
+		"output": "body{margin:0}\n.hero{background:url(cid:hero) center/cover}"
+	},
+	{
+		"input": "",
+		"output": ""
+	},
+	{
+		"input": "   ",
+		"output": "   "
+	},
+	{
+		"input": "a{b:c}",
+		"output": "a{b:c}"
+	}
+]

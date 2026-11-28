@@ -1,0 +1,106 @@
+[
+	{
+		"input": "",
+		"output": "<p></p>"
+	},
+	{
+		"input": "hello",
+		"output": "<p>hello</p>"
+	},
+	{
+		"input": "a & b < c > d \" e ' f",
+		"output": "<p>a &amp; b &lt; c &gt; d &quot; e &#39; f</p>"
+	},
+	{
+		"input": "line one\nline two\n\nparagraph two",
+		"output": "<p>line one<br>line two</p><p>paragraph two</p>"
+	},
+	{
+		"input": "crlf one\r\ncrlf two\r\n\r\npara\r\n\r\n\r\nthird",
+		"output": "<p>crlf one<br>crlf two</p><p>para</p><p><br>third</p>"
+	},
+	{
+		"input": "see https://example.com/path?a=1&b=2 now",
+		"output": "<p>see <a href=\"https://example.com/path?a=1&amp;b=2\" target=\"_blank\" rel=\"noopener noreferrer\">https://example.com/path?a=1&amp;b=2</a> now</p>"
+	},
+	{
+		"input": "<https://example.com/x>",
+		"output": "<p>&lt;<a href=\"https://example.com/x&gt;\" target=\"_blank\" rel=\"noopener noreferrer\">https://example.com/x&gt;</a></p>"
+	},
+	{
+		"input": "(https://example.com/paren) and [https://example.com/bracket]",
+		"output": "<p>(<a href=\"https://example.com/paren\" target=\"_blank\" rel=\"noopener noreferrer\">https://example.com/paren</a>) and [<a href=\"https://example.com/bracket\" target=\"_blank\" rel=\"noopener noreferrer\">https://example.com/bracket</a>]</p>"
+	},
+	{
+		"input": "\"https://example.com/quoted\"",
+		"output": "<p>&quot;<a href=\"https://example.com/quoted&quot;\" target=\"_blank\" rel=\"noopener noreferrer\">https://example.com/quoted&quot;</a></p>"
+	},
+	{
+		"input": "mail ada@calloway.test or bo.b+tag@sub.calloway.test.",
+		"output": "<p>mail <a href=\"mailto:ada@calloway.test\" target=\"_blank\" rel=\"noopener noreferrer\">ada@calloway.test</a> or <a href=\"mailto:bo.b+tag@sub.calloway.test\" target=\"_blank\" rel=\"noopener noreferrer\">bo.b+tag@sub.calloway.test</a>.</p>"
+	},
+	{
+		"input": "not an email: a@b and @x.y and x@y.z1",
+		"output": "<p>not an email: a@b and @x.y and x@y.z1</p>"
+	},
+	{
+		"input": "https://example.com/a@b.com mixed",
+		"output": "<p><a href=\"https://example.com/a@b.com\" target=\"_blank\" rel=\"noopener noreferrer\">https://example.com/a@b.com</a> mixed</p>"
+	},
+	{
+		"input": "ftp://example.com and http://example.com",
+		"output": "<p>ftp://example.com and <a href=\"http://example.com\" target=\"_blank\" rel=\"noopener noreferrer\">http://example.com</a></p>"
+	},
+	{
+		"input": "xhttps://example.com and _https://example.com and 1https://example.com",
+		"output": "<p>xhttps://example.com and _https://example.com and 1https://example.com</p>"
+	},
+	{
+		"input": "url at end https://example.com",
+		"output": "<p>url at end <a href=\"https://example.com\" target=\"_blank\" rel=\"noopener noreferrer\">https://example.com</a></p>"
+	},
+	{
+		"input": "unicode: Привет https://пример.рф/путь мир ada@calloway.test",
+		"output": "<p>unicode: Привет <a href=\"https://пример.рф/путь\" target=\"_blank\" rel=\"noopener noreferrer\">https://пример.рф/путь</a> мир <a href=\"mailto:ada@calloway.test\" target=\"_blank\" rel=\"noopener noreferrer\">ada@calloway.test</a></p>"
+	},
+	{
+		"input": "tab\tseparated\thttps://example.com\tend",
+		"output": "<p>tab\tseparated\t<a href=\"https://example.com\" target=\"_blank\" rel=\"noopener noreferrer\">https://example.com</a>\tend</p>"
+	},
+	{
+		"input": "\n\nleading blank",
+		"output": "<p></p><p>leading blank</p>"
+	},
+	{
+		"input": "trailing blank\n\n",
+		"output": "<p>trailing blank</p><p></p>"
+	},
+	{
+		"input": "only\n\n\n\n",
+		"output": "<p>only</p><p></p>"
+	},
+	{
+		"input": "emoji 😀 https://example.com/😀",
+		"output": "<p>emoji 😀 <a href=\"https://example.com/😀\" target=\"_blank\" rel=\"noopener noreferrer\">https://example.com/😀</a></p>"
+	},
+	{
+		"input": "nbsp https://example.com/a b",
+		"output": "<p>nbsp <a href=\"https://example.com/a\" target=\"_blank\" rel=\"noopener noreferrer\">https://example.com/a</a> b</p>"
+	},
+	{
+		"input": "bom﻿https://example.com/a﻿b",
+		"output": "<p>bom﻿<a href=\"https://example.com/a\" target=\"_blank\" rel=\"noopener noreferrer\">https://example.com/a</a>﻿b</p>"
+	},
+	{
+		"input": "nelhttps://example.com/ab",
+		"output": "<p>nel<a href=\"https://example.com/ab\" target=\"_blank\" rel=\"noopener noreferrer\">https://example.com/ab</a></p>"
+	},
+	{
+		"input": "é@calloway.test ada@calloway.tést ada_b@calloway.test",
+		"output": "<p>é@calloway.test ada@calloway.tést <a href=\"mailto:ada_b@calloway.test\" target=\"_blank\" rel=\"noopener noreferrer\">ada_b@calloway.test</a></p>"
+	},
+	{
+		"input": "-- \nSignature line\nhttps://calloway.test",
+		"output": "<p>-- <br>Signature line<br><a href=\"https://calloway.test\" target=\"_blank\" rel=\"noopener noreferrer\">https://calloway.test</a></p>"
+	}
+]

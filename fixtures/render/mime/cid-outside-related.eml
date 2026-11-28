@@ -1,0 +1,13 @@
+Content-Type: multipart/mixed; boundary="m3"
+
+--m3
+Content-Type: text/html
+
+<p>x</p>
+--m3
+Content-Type: image/png
+Content-ID: <free@calloway.test>
+Content-Transfer-Encoding: base64
+
+iVBORw0KGgoAAAAN
+--m3--

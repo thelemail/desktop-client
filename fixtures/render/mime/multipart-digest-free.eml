@@ -1,0 +1,11 @@
+Content-Type: multipart/mixed; boundary="m9"
+
+--m9
+Content-Type: text/plain
+
+a
+--m9
+Content-Type: text/plain
+
+b
+--m9--

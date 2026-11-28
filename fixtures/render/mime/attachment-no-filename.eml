@@ -1,0 +1,12 @@
+Content-Type: multipart/mixed; boundary="m5"
+
+--m5
+Content-Type: text/plain
+
+body
+--m5
+Content-Type: application/octet-stream
+Content-Transfer-Encoding: base64
+
+bmFtZWxlc3M=
+--m5--

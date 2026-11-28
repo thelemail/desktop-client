@@ -1,0 +1,11 @@
+Content-Type: multipart/mixed; boundary="L"
+
+--L
+Content-Type: text/plain
+
+--Lx not a boundary
+--L
+Content-Type: text/plain
+
+second
+--L--

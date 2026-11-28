@@ -1,0 +1,14 @@
+Content-Type: multipart/mixed; boundary="G"
+
+--G
+Content-Type: text/plain
+
+Attached
+--G
+Content-Type: message/rfc822; name="fwd.eml"
+Content-Disposition: attachment; filename="fwd.eml"
+
+Subject: inner
+
+inner body
+--G--

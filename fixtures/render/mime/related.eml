@@ -1,0 +1,14 @@
+Content-Type: multipart/related; boundary="rel"
+
+--rel
+Content-Type: text/html; charset=utf-8
+
+<p><img src="cid:hero@calloway.test"></p>
+--rel
+Content-Type: image/png
+Content-Transfer-Encoding: base64
+Content-ID: <hero@calloway.test>
+Content-Disposition: inline; filename="hero.png"
+
+iVBORw0KGgoAAAAN
+--rel--

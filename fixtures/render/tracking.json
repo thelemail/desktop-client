@@ -1,0 +1,138 @@
+[
+	{
+		"input": "https://shop.example/item?id=7&utm_source=news&utm_medium=email",
+		"output": "https://shop.example/item?id=7"
+	},
+	{
+		"input": "https://shop.example/?UTM_Source=a&utm_source=b&keep=1#top",
+		"output": "https://shop.example/?keep=1#top"
+	},
+	{
+		"input": "https://shop.example/?fbclid=abc",
+		"output": "https://shop.example/"
+	},
+	{
+		"input": "https://shop.example/?fbclid=abc#frag",
+		"output": "https://shop.example/#frag"
+	},
+	{
+		"input": "http://Shop.EXAMPLE:80/path?q=a%20b&gclid=1",
+		"output": "http://shop.example/path?q=a+b"
+	},
+	{
+		"input": "https://shop.example:443/?q=a+b&mc_cid=1&x=%E2%9C%93",
+		"output": "https://shop.example/?q=a+b&x=%E2%9C%93"
+	},
+	{
+		"input": "https://shop.example/?a&b=&utm_medium=1",
+		"output": "https://shop.example/?a=&b="
+	},
+	{
+		"input": "https://shop.example/path?keep=1",
+		"output": "https://shop.example/path?keep=1"
+	},
+	{
+		"input": "https://shop.example/path?keep=1&Keep=2",
+		"output": "https://shop.example/path?keep=1&Keep=2"
+	},
+	{
+		"input": "mailto:ada@calloway.test?utm_source=x",
+		"output": "mailto:ada@calloway.test?utm_source=x"
+	},
+	{
+		"input": "HTTPS://shop.example/?utm_term=1",
+		"output": "https://shop.example/"
+	},
+	{
+		"input": "https://sh op.example/?utm_id=1",
+		"output": "https://sh op.example/?utm_id=1"
+	},
+	{
+		"input": "https://bücher.example/?ttclid=1&q=1",
+		"output": "https://xn--bcher-kva.example/?q=1"
+	},
+	{
+		"input": "https://xn--bcher-kva.example/?ttclid=1",
+		"output": "https://xn--bcher-kva.example/"
+	},
+	{
+		"input": "https://shop.example/?a=1&&utm_content=2&b=3",
+		"output": "https://shop.example/?a=1&b=3"
+	},
+	{
+		"input": "https://user:pw@shop.example/?msclkid=1&z=1",
+		"output": "https://user:pw@shop.example/?z=1"
+	},
+	{
+		"input": "https://shop.example/?q=%zz&utm_id=1",
+		"output": "https://shop.example/?q=%25zz"
+	},
+	{
+		"input": "https://shop.example/?emoji=😀&utm_id=1",
+		"output": "https://shop.example/?emoji=%F0%9F%98%80"
+	},
+	{
+		"input": "https://shop.example/a/../b/./c?utm_id=1&k=v",
+		"output": "https://shop.example/b/c?k=v"
+	},
+	{
+		"input": "https://shop.example/?x=a=b&utm_id=1",
+		"output": "https://shop.example/?x=a%3Db"
+	},
+	{
+		"input": "https://shop.example/?utm_id=1#a b",
+		"output": "https://shop.example/#a%20b"
+	},
+	{
+		"input": "https://shop.example/?q=~*-._!'()&utm_id=1",
+		"output": "https://shop.example/?q=%7E*-._%21%27%28%29"
+	},
+	{
+		"input": "https://shop.example/?q=%2B%26%3D&utm_id=1",
+		"output": "https://shop.example/?q=%2B%26%3D"
+	},
+	{
+		"input": "https://shop.example?utm_id=1",
+		"output": "https://shop.example/"
+	},
+	{
+		"input": "https://shop.example/p;x?utm_id=1",
+		"output": "https://shop.example/p;x"
+	},
+	{
+		"input": "https://[::1]:8443/?utm_id=1&a=b",
+		"output": "https://[::1]:8443/?a=b"
+	},
+	{
+		"input": "https://shop.example/?utm_source=0&utm_medium=1&utm_campaign=2&utm_term=3&utm_content=4&utm_id=5&utm_source_platform=6&utm_creative_format=7&utm_marketing_tactic=8&fbclid=9&gclid=10&gbraid=11&wbraid=12&dclid=13&msclkid=14&twclid=15&ttclid=16&igshid=17&wickedid=18&yclid=19&mc_cid=20&mc_eid=21&mkt_tok=22&_hsenc=23&_hsmi=24&hsctatracking=25&_branch_match_id=26&vero_id=27&vero_conv=28&ref_src=29&ref_url=30&oly_anon_id=31&oly_enc_id=32&sc_campaign=33&sc_channel=34&sc_content=35&sc_country=36&sc_geo=37&sc_medium=38&sc_outcome=39&sc_publisher=40&piwik_campaign=41&piwik_kwd=42&pk_campaign=43&pk_kwd=44&keep=yes",
+		"output": "https://shop.example/?keep=yes"
+	},
+	{
+		"input": "https://shop.example/?UTM_SOURCE=1&UTM_MEDIUM=1&UTM_CAMPAIGN=1&UTM_TERM=1&UTM_CONTENT=1&UTM_ID=1&UTM_SOURCE_PLATFORM=1&UTM_CREATIVE_FORMAT=1&UTM_MARKETING_TACTIC=1&FBCLID=1&GCLID=1&GBRAID=1&WBRAID=1&DCLID=1&MSCLKID=1&TWCLID=1&TTCLID=1&IGSHID=1&WICKEDID=1&YCLID=1&MC_CID=1&MC_EID=1&MKT_TOK=1&_HSENC=1&_HSMI=1&HSCTATRACKING=1&_BRANCH_MATCH_ID=1&VERO_ID=1&VERO_CONV=1&REF_SRC=1&REF_URL=1&OLY_ANON_ID=1&OLY_ENC_ID=1&SC_CAMPAIGN=1&SC_CHANNEL=1&SC_CONTENT=1&SC_COUNTRY=1&SC_GEO=1&SC_MEDIUM=1&SC_OUTCOME=1&SC_PUBLISHER=1&PIWIK_CAMPAIGN=1&PIWIK_KWD=1&PK_CAMPAIGN=1&PK_KWD=1",
+		"output": "https://shop.example/"
+	},
+	{
+		"input": "/relative?utm_source=x",
+		"output": "/relative?utm_source=x"
+	},
+	{
+		"input": "https:/shop.example/?utm_source=x",
+		"output": "https:/shop.example/?utm_source=x"
+	},
+	{
+		"input": "  https://shop.example/?utm_source=x",
+		"output": "  https://shop.example/?utm_source=x"
+	},
+	{
+		"input": "https://shop.example/?utm_source",
+		"output": "https://shop.example/"
+	},
+	{
+		"input": "https://shop.example/?%75tm_source=1&a=1",
+		"output": "https://shop.example/?a=1"
+	},
+	{
+		"input": "https://shop.example/?utm_source=1&a=%C3%A9&b=é",
+		"output": "https://shop.example/?a=%C3%A9&b=%C3%A9"
+	}
+]

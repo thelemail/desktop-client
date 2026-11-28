@@ -1,0 +1,11 @@
+Content-Type: multipart/alternative; boundary="alt"
+
+--alt
+Content-Type: text/plain; charset=utf-8
+
+Plain version
+--alt
+Content-Type: text/html; charset=utf-8
+
+<p>HTML version</p>
+--alt--
