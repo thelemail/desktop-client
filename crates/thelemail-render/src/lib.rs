@@ -6,6 +6,8 @@ mod designed;
 mod document;
 mod dom;
 #[cfg(test)]
+mod hostile_tests;
+#[cfg(test)]
 mod interop_tests;
 mod js;
 mod plain;
