@@ -92,7 +92,12 @@ fn a_real_avatar_is_resolved_scaled_and_cached() {
     core.mirror()
         .adopt_connection(&account_id, conn)
         .expect("adopt");
-    core.mirror().set_token(&account_id, &token);
+    core.auth().adopt(
+        &account_id,
+        &token,
+        std::time::Duration::from_secs(900),
+        None,
+    );
 
     let wanted = std::env::var("THELEMAIL_TEST_AVATAR_OF").expect("THELEMAIL_TEST_AVATAR_OF");
     let bimi = std::env::var("THELEMAIL_TEST_BIMI_DOMAIN").ok();

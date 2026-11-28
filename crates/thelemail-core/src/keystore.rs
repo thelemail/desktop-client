@@ -3,12 +3,12 @@ use std::sync::{Arc, Mutex};
 
 use base64::Engine as _;
 use serde::{Deserialize, Serialize};
-use thelemail_api::ApiRequest;
 use thelemail_keystore::attframe::{self, DecryptedAttachmentHeader};
 use thelemail_keystore::*;
 use zeroize::Zeroizing;
 
 use crate::Core;
+use crate::api::Call;
 
 fn b64() -> base64::engine::GeneralPurpose {
     base64::engine::general_purpose::STANDARD
@@ -21,8 +21,6 @@ pub struct AttachmentArgs {
     pub url: String,
     #[serde(default)]
     pub attachment_id: Option<String>,
-    #[serde(default)]
-    pub headers: HashMap<String, String>,
     #[serde(default)]
     pub key_fingerprint_hex: Option<String>,
 }
@@ -61,21 +59,13 @@ pub trait AttachmentCache {
 
 async fn fetch_and_decrypt(core: &Core, args: &AttachmentArgs) -> Result<Vec<u8>, &'static str> {
     let resp = core
-        .net()
-        .fetch_blob(ApiRequest {
-            url: args.url.clone(),
-            method: "GET".to_owned(),
-            headers: args.headers.clone(),
-            body: None,
-        })
+        .api()
+        .send(&args.account_id, Call::blob(args.url.clone()))
         .await
         .map_err(|_| "network")?;
-    if !(200..300).contains(&resp.status) {
-        return Err("network");
-    }
     core.keystore().decrypt_bytes(
         &args.account_id,
-        &resp.body.unwrap_or_default(),
+        &resp.body,
         args.key_fingerprint_hex.as_deref(),
     )
 }

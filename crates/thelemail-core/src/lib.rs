@@ -1,3 +1,5 @@
+pub mod account;
+pub mod api;
 pub mod avatars;
 pub mod ids;
 pub mod keychain;
@@ -12,6 +14,8 @@ pub mod sender;
 pub mod session;
 pub mod settings;
 pub mod shell;
+#[cfg(test)]
+pub(crate) mod stub;
 pub mod updates;
 
 use std::sync::Arc;
@@ -20,6 +24,8 @@ use thelemail_api::{ApiConfig, Net, TransportError};
 use thelemail_keystore::{Broadcast, Keystore};
 use tokio::sync::broadcast;
 
+use crate::account::Account;
+use crate::api::{Api, Auth};
 use crate::avatars::Avatars;
 use crate::keystore::PersistentHalves;
 use crate::mirror::Mirror;
@@ -39,10 +45,27 @@ pub enum CoreEvent {
         scope: Option<String>,
         error: String,
     },
-    TokenExpired {
+    SessionLost {
         account_id: String,
     },
-    Realtime(realtime::RealtimeFrame),
+    ProfileChanged {
+        account_id: String,
+    },
+    SettingsChanged {
+        account_id: String,
+    },
+    BillingChanged {
+        account_id: String,
+    },
+    RealtimeState {
+        account_id: String,
+        open: bool,
+    },
+    Hint(realtime::Hint),
+    RealtimeResync {
+        account_id: String,
+        full: bool,
+    },
     NotificationOpened(notify::NotificationTarget),
     NotifyStatus(notify::NotifyStatus),
     AvatarsChanged {
@@ -52,6 +75,8 @@ pub enum CoreEvent {
 
 pub struct Core {
     net: Net,
+    auth: Auth,
+    account: Account,
     keystore: Keystore,
     halves: PersistentHalves,
     mirror: Mirror,
@@ -66,10 +91,12 @@ impl Core {
         Ok(Arc::new(Self::with_net(Net::new(config)?)))
     }
 
-    fn with_net(net: Net) -> Self {
+    pub(crate) fn with_net(net: Net) -> Self {
         let (events, _) = broadcast::channel(256);
         Self {
             net,
+            auth: Auth::new(events.clone()),
+            account: Account::default(),
             keystore: Keystore::new(),
             halves: PersistentHalves::default(),
             mirror: Mirror::default(),
@@ -82,6 +109,18 @@ impl Core {
 
     pub fn net(&self) -> &Net {
         &self.net
+    }
+
+    pub fn auth(&self) -> &Auth {
+        &self.auth
+    }
+
+    pub fn account(&self) -> &Account {
+        &self.account
+    }
+
+    pub fn api(&self) -> Api<'_> {
+        Api::new(&self.net, &self.auth)
     }
 
     pub fn keystore(&self) -> &Keystore {
@@ -123,6 +162,17 @@ impl Core {
 
     pub fn start(self: &Arc<Self>) {
         avatars::start(self);
+        if let Some(mut lifecycle) = self.auth.take_lifecycle() {
+            let core = self.clone();
+            tokio::spawn(async move {
+                while let Some(account_id) = lifecycle.recv().await {
+                    tokio::join!(
+                        account::load_profile(&core, &account_id),
+                        account::load_billing(&core, &account_id),
+                    );
+                }
+            });
+        }
         let core = self.clone();
         let mut events = core.keystore.subscribe();
         tokio::spawn(async move {
@@ -155,10 +205,15 @@ impl Core {
                     account_id.clone(),
                 ));
             }
-            Broadcast::Locked { account_id, .. } | Broadcast::Cleared { account_id } => {
+            Broadcast::Locked { account_id, .. } => self.avatars.forget(account_id),
+            Broadcast::Cleared { account_id } => {
                 self.avatars.forget(account_id);
+                self.account.forget(account_id);
             }
-            Broadcast::ClearedAll => self.avatars.forget_all(),
+            Broadcast::ClearedAll => {
+                self.avatars.forget_all();
+                self.account.forget_all();
+            }
             Broadcast::VaultChanged { account_id, .. } => {
                 let core = self.clone();
                 let id = account_id.clone();

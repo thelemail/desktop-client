@@ -6,7 +6,7 @@ use gpui_kit::{
     SharedString, Styled, Subscription, WeakEntity, Window, div, px,
 };
 use serde_json::{Value, json};
-use thelemail_api::ApiRequest;
+use thelemail_core::api::Call;
 use thelemail_core::avatars::Lookup;
 use thelemail_core::{Core, CoreEvent};
 use thelemail_keystore::{OpaqueFinishAuthArgs, OpaqueFinishAuthResponse, OpaqueStartAuthArgs};
@@ -115,32 +115,11 @@ impl AvatarGallery {
     }
 }
 
-async fn post(core: &Core, path: &str, body: Value, token: Option<&str>) -> Result<Value, String> {
-    let mut url = core.net().config().api_base.clone();
-    url.set_path(path);
-    let mut headers = std::collections::HashMap::new();
-    headers.insert("Content-Type".to_owned(), "application/json".to_owned());
-    if let Some(token) = token {
-        headers.insert("Authorization".to_owned(), format!("Bearer {token}"));
-    }
-    let resp = thelemail_core::net::api_request(
-        core,
-        ApiRequest {
-            url: url.to_string(),
-            method: if body.is_null() { "GET" } else { "POST" }.to_owned(),
-            headers,
-            body: (!body.is_null()).then(|| body.to_string()),
-        },
-    )
-    .await
-    .map_err(|e| format!("{path}: {e}"))?;
-    if !(200..300).contains(&resp.status) {
-        return Err(format!("{path} answered {}", resp.status));
-    }
-    Ok(resp
-        .body
-        .and_then(|b| serde_json::from_slice(&b).ok())
-        .unwrap_or(Value::Null))
+async fn post(core: &Core, path: &str, body: Value) -> Result<Value, String> {
+    core.api()
+        .public(Call::post(path).json(&body))
+        .await
+        .map_err(|e| format!("{path}: {e}"))
 }
 
 async fn dev_sign_in(core: Arc<Core>, email: String, password: String) -> Result<Session, String> {
@@ -157,7 +136,6 @@ async fn dev_sign_in(core: Arc<Core>, email: String, password: String) -> Result
         &core,
         "/v1/auth/login/init",
         json!({ "email": email, "ke1": start.ke1 }),
-        None,
     )
     .await?;
     let account_id = init["accountId"]
@@ -185,7 +163,6 @@ async fn dev_sign_in(core: Arc<Core>, email: String, password: String) -> Result
             "ke3": ke3,
             "enrollPersistentSession": false
         }),
-        None,
     )
     .await?;
     let grant = complete.get("grant").cloned().unwrap_or(complete);
@@ -193,13 +170,23 @@ async fn dev_sign_in(core: Arc<Core>, email: String, password: String) -> Result
         .as_str()
         .ok_or("no access token")?
         .to_owned();
-    let me = post(&core, "/v1/me", Value::Null, Some(&token)).await?;
+    let expires = grant["expiresInSeconds"].as_u64().unwrap_or(0);
+    core.auth().adopt(
+        &account_id,
+        &token,
+        std::time::Duration::from_secs(expires),
+        grant["csrfToken"].as_str(),
+    );
+    let me: Value = core
+        .api()
+        .json(&account_id, Call::get("/v1/me"))
+        .await
+        .map_err(|e| format!("/v1/me: {e}"))?;
     let mirror = core.clone();
     let id = account_id.clone();
     tokio::task::spawn_blocking(move || mirror.mirror().open(&id))
         .await
         .map_err(|e| e.to_string())??;
-    core.mirror().set_token(&account_id, &token);
     Ok(Session {
         account_id,
         email: me["email"].as_str().unwrap_or(&email).to_owned(),

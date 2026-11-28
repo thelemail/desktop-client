@@ -247,7 +247,14 @@ fn backfills_a_real_mailbox_and_searches_it_offline() {
         "searching {term:?} found nothing, but it came from a mirrored subject"
     );
 
-    let token = access_token.clone();
+    let (events, _) = tokio::sync::broadcast::channel(4);
+    let auth = thelemail_core::api::Auth::new(events);
+    auth.adopt(
+        &account_id,
+        &access_token,
+        std::time::Duration::from_secs(900),
+        None,
+    );
     let mirror = thelemail_core::mirror::Mirror::default();
     mirror
         .adopt_connection(&account_id, conn)
@@ -255,11 +262,10 @@ fn backfills_a_real_mailbox_and_searches_it_offline() {
 
     let fetched = rt
         .block_on(thelemail_core::mirror::prefetch_bodies(
-            &net,
+            thelemail_core::api::Api::new(&net, &auth),
             &ks,
             &mirror,
             &account_id,
-            &token,
             |_, _| {},
         ))
         .expect("prefetch bodies");
