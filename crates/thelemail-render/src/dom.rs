@@ -657,7 +657,7 @@ pub(crate) fn parse(html: &str) -> Dom {
     dom
 }
 
-#[cfg(any(test, feature = "fuzzing"))]
+#[cfg(test)]
 pub(crate) fn canonical_body(html: &str) -> String {
     let mut dom = parse(&format!("<remove></remove>{html}"));
     let Some(body) = dom.first_element(DOCUMENT, "body") else {

@@ -512,7 +512,21 @@ fn sanitize_body(dom: &mut Dom, body: NodeId, profile: Profile<'_>) {
     limit_depth(dom, body);
 }
 
+const MAX_PASSES: usize = 4;
+
 pub fn sanitize_html(raw: &str, options: &SanitizeOptions<'_>) -> String {
+    let mut current = sanitize_pass(raw, options);
+    for _ in 0..MAX_PASSES {
+        let next = sanitize_pass(&current, options);
+        if next == current {
+            break;
+        }
+        current = next;
+    }
+    current
+}
+
+fn sanitize_pass(raw: &str, options: &SanitizeOptions<'_>) -> String {
     if raw.is_empty() {
         return String::new();
     }

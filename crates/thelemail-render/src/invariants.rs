@@ -1,4 +1,4 @@
-use crate::dom::{self, DOCUMENT, Data, Dom, NodeId, canonical_body};
+use crate::dom::{self, DOCUMENT, Data, Dom, NodeId};
 use crate::{
     InlinePart, InlineParts, SanitizeOptions, build_src_doc, sanitize_html,
     sanitize_signature_html, scrub_css,
@@ -148,7 +148,7 @@ pub fn check_body(input: &str) -> Result<(), String> {
         return Err(format!("{found:?}\n  output: {once}"));
     }
     let twice = sanitize_html(&once, &options);
-    if canonical_body(&once) != canonical_body(&twice) {
+    if once != twice {
         return Err(format!(
             "not a fixed point\n  once:  {once}\n  twice: {twice}"
         ));
