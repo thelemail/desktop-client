@@ -7600,6 +7600,7 @@ dependencies = [
  "regex",
  "serde",
  "serde_json",
+ "thelemail-mime",
  "url",
 ]
 
