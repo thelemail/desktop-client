@@ -14,6 +14,9 @@ regex.workspace = true
 thelemail-mime = { path = "../thelemail-mime" }
 url.workspace = true
 
+[features]
+fuzzing = []
+
 [dev-dependencies]
 serde.workspace = true
 serde_json.workspace = true

@@ -9,11 +9,18 @@ mod dom;
 mod hostile_tests;
 #[cfg(test)]
 mod interop_tests;
+#[cfg(any(test, feature = "fuzzing"))]
+mod invariants;
 mod js;
 mod plain;
 mod policy;
 mod sanitize;
 mod tracking;
+
+#[cfg(feature = "fuzzing")]
+pub mod fuzzing {
+    pub use crate::invariants::{check_body, check_css, check_signature};
+}
 
 pub use css::scrub_css;
 pub use designed::looks_designed;
