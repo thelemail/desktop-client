@@ -60,3 +60,23 @@ fn css_scrub_matches_web() {
         );
     }
 }
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SrcDoc {
+    body: String,
+    wrap_plain: bool,
+    output: String,
+}
+
+#[test]
+fn reader_document_matches_web() {
+    for case in load::<Vec<SrcDoc>>("srcdoc.json") {
+        assert_eq!(
+            thelemail_render::build_src_doc(&case.body, case.wrap_plain),
+            case.output,
+            "{:?}",
+            case.body
+        );
+    }
+}
