@@ -1,6 +1,6 @@
 use std::ops::Range;
 
-use cssparser::{ParseError, Parser, SourcePosition, Token};
+use cssparser::{ParseError, Parser, SourcePosition, Token, serialize_string};
 
 use crate::js;
 
@@ -48,12 +48,32 @@ fn is_url_function(name: &str) -> bool {
     name.eq_ignore_ascii_case("url") || name.eq_ignore_ascii_case("src")
 }
 
-fn url_replacement(raw_inner: &str) -> String {
-    if keepable(raw_inner) {
-        format!("url({})", js::trim(raw_inner))
-    } else {
-        BLANK.to_owned()
+#[derive(Default)]
+struct UrlArgument {
+    raw: String,
+    value: String,
+}
+
+fn needs_quoting(raw: &str) -> bool {
+    raw.chars()
+        .any(|c| c.is_whitespace() || c.is_control() || matches!(c, '"' | '\'' | '(' | ')' | '\\'))
+}
+
+fn url_replacement(argument: &UrlArgument) -> String {
+    if !keepable(&argument.value) {
+        return BLANK.to_owned();
     }
+    let raw = js::trim(&argument.raw);
+    let value = js::trim(&argument.value);
+    if !needs_quoting(raw) {
+        return format!("url({raw})");
+    }
+    if !needs_quoting(value) {
+        return format!("url({value})");
+    }
+    let mut quoted = String::new();
+    let _ = serialize_string(value, &mut quoted);
+    format!("url({quoted})")
 }
 
 fn unquoted_inner(raw: &str) -> &str {
@@ -101,10 +121,10 @@ fn consume_at_rule<'i>(parser: &mut Parser<'i>) {
     }
 }
 
-fn url_function_inner<'i>(parser: &mut Parser<'i>) -> String {
+fn url_function_argument<'i>(parser: &mut Parser<'i>) -> UrlArgument {
     parser
         .parse_nested_block(|block| {
-            let mut first: Option<String> = None;
+            let mut first: Option<UrlArgument> = None;
             loop {
                 let start = block.position();
                 let token = match block.next_including_whitespace_and_comments() {
@@ -113,22 +133,30 @@ fn url_function_inner<'i>(parser: &mut Parser<'i>) -> String {
                 };
                 match token {
                     Token::WhiteSpace(_) | Token::Comment(_) => {}
-                    Token::QuotedString(_) if first.is_none() => {
-                        first = Some(quoted_inner(block.slice_from(start)).to_owned());
+                    Token::QuotedString(value) if first.is_none() => {
+                        let raw = quoted_inner(block.slice_from(start)).to_owned();
+                        first = Some(UrlArgument {
+                            raw,
+                            value: value.to_string(),
+                        });
                     }
                     Token::Function(_)
                     | Token::ParenthesisBlock
                     | Token::SquareBracketBlock
                     | Token::CurlyBracketBlock => {
                         skip_block(block);
-                        first.get_or_insert_with(String::new);
+                        first.get_or_insert_with(UrlArgument::default);
                     }
                     _ => {
-                        first.get_or_insert_with(|| block.slice_from(start).to_owned());
+                        let raw = block.slice_from(start).to_owned();
+                        first.get_or_insert_with(|| UrlArgument {
+                            value: raw.clone(),
+                            raw,
+                        });
                     }
                 }
             }
-            Ok::<String, ParseError<()>>(first.unwrap_or_default())
+            Ok::<UrlArgument, ParseError<()>>(first.unwrap_or_default())
         })
         .unwrap_or_default()
 }
@@ -149,8 +177,12 @@ fn walk<'i>(parser: &mut Parser<'i>, context: Context, scan: &mut Scan) {
                     replacement: String::new(),
                 });
             }
-            Token::UnquotedUrl(_) => {
-                let replacement = url_replacement(unquoted_inner(parser.slice_from(start)));
+            Token::UnquotedUrl(value) => {
+                let raw = unquoted_inner(parser.slice_from(start)).to_owned();
+                let replacement = url_replacement(&UrlArgument {
+                    raw,
+                    value: value.to_string(),
+                });
                 scan.edits.push(Edit {
                     range: range(parser),
                     replacement,
@@ -163,10 +195,10 @@ fn walk<'i>(parser: &mut Parser<'i>, context: Context, scan: &mut Scan) {
                 });
             }
             Token::Function(name) if is_url_function(&name) => {
-                let inner = url_function_inner(parser);
+                let argument = url_function_argument(parser);
                 scan.edits.push(Edit {
                     range: range(parser),
-                    replacement: url_replacement(&inner),
+                    replacement: url_replacement(&argument),
                 });
             }
             Token::Function(name) if is_image_list(&name) => {
@@ -176,8 +208,8 @@ fn walk<'i>(parser: &mut Parser<'i>, context: Context, scan: &mut Scan) {
                 });
                 scan.too_deep |= entered.is_err();
             }
-            Token::QuotedString(_) if context == Context::ImageList => {
-                if !keepable(quoted_inner(parser.slice_from(start))) {
+            Token::QuotedString(value) if context == Context::ImageList => {
+                if !keepable(&value) {
                     scan.edits.push(Edit {
                         range: range(parser),
                         replacement: BLANK.to_owned(),
@@ -199,12 +231,14 @@ fn walk<'i>(parser: &mut Parser<'i>, context: Context, scan: &mut Scan) {
     }
 }
 
-pub fn scrub_css(css: &str) -> String {
+const MAX_PASSES: usize = 8;
+
+fn scrub_once(css: &str) -> Option<String> {
     let mut parser = Parser::new(css);
     let mut scan = Scan::default();
     walk(&mut parser, Context::Rules, &mut scan);
     if scan.too_deep {
-        return String::new();
+        return None;
     }
     let mut edits = scan.edits;
     edits.sort_by_key(|edit| edit.range.start);
@@ -219,7 +253,23 @@ pub fn scrub_css(css: &str) -> String {
         cursor = edit.range.end;
     }
     out.push_str(&css[cursor..]);
-    out
+    Some(out)
+}
+
+pub fn scrub_css(css: &str) -> String {
+    let Some(mut current) = scrub_once(css) else {
+        return String::new();
+    };
+    for _ in 0..MAX_PASSES {
+        let Some(next) = scrub_once(&current) else {
+            return String::new();
+        };
+        if next == current {
+            return current;
+        }
+        current = next;
+    }
+    String::new()
 }
 
 #[cfg(test)]
@@ -258,6 +308,31 @@ mod tests {
     }
 
     #[test]
+    fn kept_urls_that_need_quotes_stay_valid() {
+        let once = scrub_css("a{background:url(\"data:image/svg+xml,<svg xmlns='x'></svg>\")}");
+        assert_eq!(
+            once,
+            "a{background:url(\"data:image/svg+xml,<svg xmlns='x'></svg>\")}"
+        );
+        assert_eq!(scrub_css(&once), once);
+        let unterminated = scrub_css("a{background:url(\"cid:a b");
+        assert_eq!(unterminated, "a{background:url(\"cid:a b\")");
+        assert_eq!(scrub_css(&unterminated), unterminated);
+    }
+
+    #[test]
+    fn escaped_schemes_are_judged_decoded() {
+        assert_eq!(
+            scrub_css("a{background:url(\\63 id:x)}"),
+            "a{background:url(cid:x)}"
+        );
+        assert_eq!(
+            scrub_css("a{background:url(\\68ttps://x.test)}"),
+            "a{background:url(about:blank)}"
+        );
+    }
+
+    #[test]
     fn image_set_strings_are_blank() {
         assert_eq!(
             scrub_css(
@@ -275,6 +350,18 @@ mod tests {
             "}".repeat(100)
         );
         assert_eq!(scrub_css(&css), "");
+    }
+
+    #[test]
+    fn removals_cannot_splice_a_new_url() {
+        assert_eq!(
+            scrub_css("a{b:url@import x;(https://x.test)}"),
+            "a{b:url(about:blank)}"
+        );
+        assert_eq!(
+            scrub_css("a{b:u@font-face{}rl(https://x.test)}"),
+            "a{b:url(about:blank)}"
+        );
     }
 
     #[test]
