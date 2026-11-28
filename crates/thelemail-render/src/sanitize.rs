@@ -136,6 +136,17 @@ fn is_aria_attr(name: &str) -> bool {
     })
 }
 
+fn dangerous_link(value: &str) -> bool {
+    let as_url_parser_sees_it: String = js::trim(value)
+        .trim_start_matches(|c: char| c <= ' ')
+        .chars()
+        .filter(|c| !matches!(c, '\t' | '\n' | '\r'))
+        .collect();
+    ["javascript:", "vbscript:", "data:"]
+        .iter()
+        .any(|scheme| js::starts_with_ignore_case(&as_url_parser_sees_it, scheme))
+}
+
 fn strip_angle_brackets(cid: &str) -> &str {
     let cid = cid.strip_prefix('<').unwrap_or(cid);
     cid.strip_suffix('>').unwrap_or(cid)
@@ -377,10 +388,7 @@ impl Walker<'_> {
             return js::starts_with_ignore_case(trimmed, "data:image/");
         }
         if name == "href" && (tag == "a" || tag == "area") {
-            let trimmed = js::trim(value);
-            return !["javascript:", "vbscript:", "data:"]
-                .iter()
-                .any(|scheme| js::starts_with_ignore_case(trimmed, scheme));
+            return !dangerous_link(value);
         }
         if name == "style" {
             *value = scrub_css(value);
@@ -401,10 +409,7 @@ impl Walker<'_> {
             return true;
         }
         if name == "href" {
-            let trimmed = js::trim(value);
-            return !["javascript:", "data:", "vbscript:"]
-                .iter()
-                .any(|scheme| js::starts_with_ignore_case(trimmed, scheme));
+            return !dangerous_link(value);
         }
         if name == "src" && tag == "img" {
             if self.dom.attr(node, SIGNATURE_IMAGE_ATTR).is_some() {
@@ -613,6 +618,15 @@ mod tests {
         assert!(!allowed_uri("data:x", false));
         assert!(!allowed_uri("", true));
         assert!(allowed_uri("\u{212A}:x", true));
+    }
+
+    #[test]
+    fn links_are_judged_as_a_url_parser_reads_them() {
+        assert!(dangerous_link("\u{18}\u{1}data:text/html,x"));
+        assert!(dangerous_link(" java\tscript:alert(1)"));
+        assert!(dangerous_link("\u{FEFF}JavaScript:x"));
+        assert!(!dangerous_link("https://calloway.test/data:x"));
+        assert!(!dangerous_link("\u{202E}javascript:x"));
     }
 
     #[test]
