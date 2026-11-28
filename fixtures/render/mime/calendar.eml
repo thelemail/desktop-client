@@ -1,0 +1,20 @@
+Content-Type: multipart/mixed; boundary="m7"
+
+--m7
+Content-Type: text/plain
+
+Invite
+--m7
+Content-Type: text/calendar; method=REQUEST; charset=utf-8
+
+BEGIN:VCALENDAR
+VERSION:2.0
+METHOD:REQUEST
+BEGIN:VEVENT
+UID:1@calloway.test
+DTSTART:20261201T100000Z
+DTEND:20261201T110000Z
+SUMMARY:Lunch
+END:VEVENT
+END:VCALENDAR
+--m7--

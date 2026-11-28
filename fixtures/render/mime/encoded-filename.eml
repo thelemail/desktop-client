@@ -1,0 +1,13 @@
+Content-Type: multipart/mixed; boundary="m6"
+
+--m6
+Content-Type: text/plain
+
+body
+--m6
+Content-Type: application/pdf; name="=?UTF-8?B?0J7RgtGH0ZHRgi5wZGY=?="
+Content-Disposition: attachment
+Content-Transfer-Encoding: base64
+
+cGRm
+--m6--

@@ -1,0 +1,24 @@
+Content-Type: multipart/alternative; boundary="A"
+
+--A
+Content-Type: text/plain; charset=us-ascii
+Content-Transfer-Encoding: 7bit
+
+See photo
+--A
+Content-Type: multipart/related; type="text/html"; boundary="R"
+
+--R
+Content-Type: text/html; charset=us-ascii
+
+<html><body>See <img src="cid:p1"></body></html>
+--R
+Content-Type: image/png; name="p.png"
+Content-ID: <p1>
+Content-Disposition: inline; filename="p.png"
+Content-Transfer-Encoding: base64
+
+iVBORw0KGgoAAAAN
+--R--
+
+--A--

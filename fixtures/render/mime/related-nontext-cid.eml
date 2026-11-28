@@ -1,0 +1,13 @@
+Content-Type: multipart/related; boundary="r3"
+
+--r3
+Content-Type: text/html
+
+<p>x</p>
+--r3
+Content-Type: application/octet-stream
+Content-ID: <blob>
+Content-Transfer-Encoding: base64
+
+YmxvYg==
+--r3--

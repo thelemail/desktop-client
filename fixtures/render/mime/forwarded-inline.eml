@@ -1,0 +1,27 @@
+From: Ada <ada@calloway.test>
+Content-Type: multipart/mixed; boundary="F"
+
+--F
+Content-Type: text/plain
+
+FYI below
+--F
+Content-Type: message/rfc822
+
+From: "Bo Calloway" <bo@calloway.test>
+To: Ada <ada@calloway.test>, cy@calloway.test
+Cc: Team: dee@calloway.test, eve@calloway.test;
+Subject: =?UTF-8?Q?Caf=C3=A9_plans?=
+Date: Tue, 3 Nov 2026 10:00:00 +0100
+Content-Type: multipart/alternative; boundary="I"
+
+--I
+Content-Type: text/plain
+
+Inner plain
+--I
+Content-Type: text/html
+
+<p>Inner html</p>
+--I--
+--F--

@@ -1,0 +1,8 @@
+Content-Type: multipart/mixed; boundary="X"
+
+--X
+Content-Type: text/html
+Content-Disposition: attachment
+
+<p>hidden</p>
+--X--

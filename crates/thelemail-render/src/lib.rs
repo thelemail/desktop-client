@@ -1,0 +1,35 @@
+#![forbid(unsafe_code)]
+
+mod allowlist;
+mod css;
+mod designed;
+mod document;
+mod dom;
+#[cfg(test)]
+mod hostile_tests;
+#[cfg(test)]
+mod interop_tests;
+#[cfg(any(test, feature = "fuzzing"))]
+mod invariants;
+mod js;
+mod plain;
+mod policy;
+mod sanitize;
+mod tracking;
+
+#[cfg(feature = "fuzzing")]
+pub mod fuzzing {
+    pub use crate::invariants::{check_body, check_css, check_signature};
+}
+
+pub use css::scrub_css;
+pub use designed::looks_designed;
+pub use document::{
+    BodySource, CSP, RenderOptions, RenderedBody, Theme, base_style, build_src_doc, fit_zoom,
+    render_body, with_theme,
+};
+pub use plain::plain_to_html;
+pub use policy::{Resource, opens_externally, resolve_resource};
+pub use sanitize::{MAX_ELEMENT_DEPTH, SanitizeOptions, sanitize_html, sanitize_signature_html};
+pub use thelemail_mime::{InlinePart, InlineParts};
+pub use tracking::{TRACKING_PARAMS, strip_tracking_params};

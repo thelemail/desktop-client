@@ -1,0 +1,11 @@
+Content-Type: multipart/mixed; boundary="m8"
+
+--m8
+Content-Type: text/html
+
+<p>one</p>
+--m8
+Content-Type: text/html
+
+<p>two</p>
+--m8--

@@ -1,0 +1,22 @@
+Content-Type: multipart/mixed; boundary="n0"
+
+--n0
+Content-Type: multipart/mixed; boundary="n1"
+
+--n1
+Content-Type: multipart/mixed; boundary="n2"
+
+--n2
+Content-Type: multipart/mixed; boundary="n3"
+
+--n3
+Content-Type: multipart/mixed; boundary="n4"
+
+--n4
+Content-Type: multipart/mixed; boundary="n5"
+
+--n5
+Content-Type: text/plain
+
+deep
+--n5--

@@ -1,0 +1,15 @@
+Content-Type: multipart/related; boundary="H"
+
+--H
+Content-Type: text/html
+
+<p>x</p>
+--H
+Content-Type: text/plain
+Content-Type: image/gif
+Content-ID: <first>
+Content-ID: <second>
+Content-Transfer-Encoding: base64
+
+R0lGODlh
+--H--

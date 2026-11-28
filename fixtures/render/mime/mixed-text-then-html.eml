@@ -1,0 +1,12 @@
+Content-Type: multipart/mixed; boundary="m2"
+
+--m2
+Content-Type: text/plain; charset=utf-8
+
+First & <plain>
+second line
+--m2
+Content-Type: text/html; charset=utf-8
+
+<p>Then <b>HTML</b> &amp; more</p><br><ul><li>item</li></ul>
+--m2--

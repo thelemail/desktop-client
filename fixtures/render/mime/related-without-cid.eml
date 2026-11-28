@@ -1,0 +1,12 @@
+Content-Type: multipart/related; boundary="r2"
+
+--r2
+Content-Type: text/html
+
+<p>x</p>
+--r2
+Content-Type: image/png; name="a.png"
+Content-Transfer-Encoding: base64
+
+iVBORw0KGgoAAAAN
+--r2--

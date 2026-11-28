@@ -1,0 +1,106 @@
+[
+	{
+		"input": "<p>plain</p>",
+		"output": false
+	},
+	{
+		"input": "<table bgcolor=\"#f4f4f4\"><tr><td>x</td></tr></table>",
+		"output": true
+	},
+	{
+		"input": "<table bgcolor=\"#FFFFFF\"><tr><td>x</td></tr></table>",
+		"output": false
+	},
+	{
+		"input": "<table bgcolor=white><tr><td>x</td></tr></table>",
+		"output": false
+	},
+	{
+		"input": "<td bgcolor=\"transparent\">x</td>",
+		"output": false
+	},
+	{
+		"input": "<div style=\"background:#fff\">x</div>",
+		"output": false
+	},
+	{
+		"input": "<div style=\"background-color: rgb(255, 255, 255)\">x</div>",
+		"output": false
+	},
+	{
+		"input": "<div style=\"background-color: rgba(255,255,255,0.5)\">x</div>",
+		"output": false
+	},
+	{
+		"input": "<div style=\"background-color: rgba(10,10,10,0)\">x</div>",
+		"output": false
+	},
+	{
+		"input": "<div style=\"background-color: rgba(10,10,10,0.0)\">x</div>",
+		"output": false
+	},
+	{
+		"input": "<div style=\"background: none !important\">x</div>",
+		"output": false
+	},
+	{
+		"input": "<div style=\"background: #f00 !important\">x</div>",
+		"output": true
+	},
+	{
+		"input": "<div style=\"background-image: url(data:image/png;base64,AA)\">x</div>",
+		"output": true
+	},
+	{
+		"input": "<div style=\"BACKGROUND-COLOR: #123456\">x</div>",
+		"output": true
+	},
+	{
+		"input": "<style>.hero{background:#0E6240}</style><div class=\"hero\">x</div>",
+		"output": true
+	},
+	{
+		"input": "<style>body{background:inherit}</style>",
+		"output": false
+	},
+	{
+		"input": "<p data-x=\" background=1\">x</p>",
+		"output": true
+	},
+	{
+		"input": "<p title=\"a background=b\">x</p>",
+		"output": true
+	},
+	{
+		"input": "<div style=\"background:;\">x</div>",
+		"output": false
+	},
+	{
+		"input": "<div style=\"background: \">x</div>",
+		"output": false
+	},
+	{
+		"input": "<div style=\"background:white;background-color:#eee\">x</div>",
+		"output": true
+	},
+	{
+		"input": "<font bgcolor=\"\">x</font>",
+		"output": false
+	},
+	{
+		"input": "<p>The background: is plain text</p>",
+		"output": true
+	},
+	{
+		"input": "<p>bgcolor=red in text</p>",
+		"output": true
+	},
+	{
+		"input": "<div style=\"background-color: #fff\">x</div>",
+		"output": false
+	},
+	{
+		"input": "<div style=\"background-color:rgb(255 , 255 , 255 , 1.5)\">x</div>",
+		"output": false
+	}
+]
