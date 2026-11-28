@@ -52,7 +52,12 @@ fn without_native_drops(html: &str) -> String {
             .map(|n| n.local.to_string())
             .unwrap_or_default();
         if let Some(attrs) = dom.attrs_mut(node) {
-            attrs.retain(|attr| attr.name != "poster" && (attr.name != "src" || tag == "img"));
+            attrs.retain(|attr| {
+                attr.name != "poster"
+                    && attr.name != "xlink:href"
+                    && (attr.name != "src" || tag == "img")
+                    && (attr.name != "href" || tag == "a" || tag == "area")
+            });
         }
     }
     let first = dom.first_child(body).unwrap();

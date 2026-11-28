@@ -426,6 +426,7 @@ impl Walker<'_> {
 
     fn native_hook(tag: &str, name: &str) -> bool {
         name != "poster"
+            && name != "xlink:href"
             && (name != "src" || tag == "img")
             && (name != "href" || tag == "a" || tag == "area")
     }
